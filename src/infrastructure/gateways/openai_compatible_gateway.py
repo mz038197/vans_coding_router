@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, AsyncGenerator
+
+import httpx
+
+from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
+from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
+from src.infrastructure.config import ProviderSettings
+
+
+class OpenAICompatibleGateway:
+    def __init__(self, provider: ProviderSettings, timeout: float = 900.0):
+        self.provider = provider
+        self.timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    async def startup(self) -> None:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+
+    async def shutdown(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def health(self) -> dict[str, Any]:
+        try:
+            response = await self._request("GET", "/models")
+            return {"ok": response.status_code < 500, "status_code": response.status_code}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def models(self) -> dict[str, Any]:
+        response = await self._request("GET", "/models")
+        return self._json_or_error(response)
+
+    async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
+        response = await self._request("POST", "/chat/completions", json=_chat_payload(req, stream=False))
+        return self._json_or_error(response)
+
+    async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
+        payload = _chat_payload(req, stream=True)
+        payload.setdefault("stream_options", {"include_usage": True})
+        async for chunk in self._stream("POST", "/chat/completions", json=payload):
+            yield chunk
+
+    async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(body)
+        payload["stream"] = False
+        response = await self._request("POST", "/responses", json=payload)
+        return self._json_or_error(response)
+
+    async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        payload = dict(body)
+        payload["stream"] = True
+        payload.setdefault("stream_options", {"include_usage": True})
+        async for chunk in self._stream("POST", "/responses", json=payload):
+            yield chunk
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        await self.startup()
+        assert self._client is not None
+        try:
+            return await self._client.request(
+                method,
+                f"{self.provider.base_url}{path}",
+                headers=self._headers(),
+                **kwargs,
+            )
+        except httpx.RequestError as exc:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+
+    async def _stream(self, method: str, path: str, **kwargs: Any) -> AsyncGenerator[bytes, None]:
+        await self.startup()
+        assert self._client is not None
+        try:
+            async with self._client.stream(
+                method,
+                f"{self.provider.base_url}{path}",
+                headers=self._headers(),
+                **kwargs,
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise UpstreamServiceError(
+                        status_code=response.status_code,
+                        backend=self.provider.name,
+                        body=body.decode("utf-8", errors="replace"),
+                    )
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        except httpx.RequestError as exc:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+
+    def _json_or_error(self, response: httpx.Response) -> dict[str, Any]:
+        try:
+            body = response.json()
+        except json.JSONDecodeError:
+            body = response.text
+        if response.status_code >= 400:
+            raise UpstreamServiceError(status_code=response.status_code, backend=self.provider.name, body=body)
+        return body if isinstance(body, dict) else {"data": body}
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json", **self.provider.extra_headers}
+        key = self.provider.api_key or (os.getenv(self.provider.api_key_env) if self.provider.api_key_env else "")
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
+
+
+def _chat_payload(req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": req.model,
+        "messages": [_message_payload(message) for message in req.messages],
+        "stream": stream,
+    }
+    optional = {
+        "temperature": req.temperature,
+        "max_tokens": req.max_tokens,
+        "user": req.user,
+        "stop": req.stop,
+        "tools": req.tools,
+        "tool_choice": req.tool_choice,
+    }
+    payload.update({key: value for key, value in optional.items() if value is not None})
+    return payload
+
+
+def _message_payload(message: ChatMessage) -> dict[str, Any]:
+    payload: dict[str, Any] = {"role": message.role, "content": message.content}
+    for key in ("tool_calls", "tool_call_id", "name"):
+        value = getattr(message, key)
+        if value is not None:
+            payload[key] = value
+    if message.tool_name is not None:
+        payload["name"] = message.tool_name
+    return payload
