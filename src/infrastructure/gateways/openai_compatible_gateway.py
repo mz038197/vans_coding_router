@@ -9,6 +9,16 @@ import httpx
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
 from src.infrastructure.config import ProviderSettings
+from src.infrastructure.gateways.copilot_compat import (
+    OllamaThinkingCache,
+    derive_ollama_native_base,
+    is_ollama_provider,
+    normalize_chat_completions_response,
+    normalize_chat_completions_sse,
+    sanitize_responses_request,
+)
+
+_ollama_thinking_cache = OllamaThinkingCache()
 
 
 class OpenAICompatibleGateway:
@@ -39,22 +49,23 @@ class OpenAICompatibleGateway:
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
         response = await self._request("POST", "/chat/completions", json=_chat_payload(req, stream=False))
-        return self._json_or_error(response)
+        return normalize_chat_completions_response(self._json_or_error(response))
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
         payload = _chat_payload(req, stream=True)
         payload.setdefault("stream_options", {"include_usage": True})
-        async for chunk in self._stream("POST", "/chat/completions", json=payload):
+        upstream = self._stream("POST", "/chat/completions", json=payload)
+        async for chunk in normalize_chat_completions_sse(upstream):
             yield chunk
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        payload = dict(body)
+        payload = await self._prepare_responses_body(body)
         payload["stream"] = False
         response = await self._request("POST", "/responses", json=payload)
         return self._json_or_error(response)
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        payload = dict(body)
+        payload = await self._prepare_responses_body(body)
         payload["stream"] = True
         payload.setdefault("stream_options", {"include_usage": True})
         async for chunk in self._stream("POST", "/responses", json=payload):
@@ -110,6 +121,29 @@ class OpenAICompatibleGateway:
         if key:
             headers["Authorization"] = f"Bearer {key}"
         return headers
+
+    async def _prepare_responses_body(self, body: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(body)
+        if not is_ollama_provider(self.provider.name, self.provider.base_url):
+            return payload
+
+        model = payload.get("model")
+        if not isinstance(model, str) or not model.strip():
+            return payload
+
+        native_base = derive_ollama_native_base(self.provider.base_url)
+        if native_base is None:
+            return payload
+
+        await self.startup()
+        assert self._client is not None
+        supports_thinking = await _ollama_thinking_cache.supports_thinking(
+            self._client,
+            native_base,
+            model,
+            self._headers(),
+        )
+        return sanitize_responses_request(payload, supports_thinking)
 
 
 def _chat_payload(req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:

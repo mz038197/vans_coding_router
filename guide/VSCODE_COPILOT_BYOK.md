@@ -21,9 +21,51 @@ All requests must use **`provider@upstream_model`**:
 
 Copy IDs from `GET /v1/models`. Bare names (without `@`) return **400**.
 
-## VS Code `chatLanguageModels.json` example
+Do not invent suffixes such as `:397b-cloud` unless they appear in `/v1/models`.
 
-OpenRouter (Chat Completions):
+## VS Code `chatLanguageModels.json` examples
+
+### Ollama Cloud (Copilot Agent — Responses API)
+
+Recommended for VS Code Copilot Agent / Edit workflows:
+
+```json
+[
+  {
+    "name": "Vans Coding Router",
+    "vendor": "customendpoint",
+    "apiKey": "",
+    "apiType": "responses",
+    "models": [
+      {
+        "id": "ollama_cloud@qwen3-coder-next",
+        "name": "Qwen3 Coder Next",
+        "url": "https://ai.vanscoding.com/v1/responses",
+        "apiType": "responses",
+        "toolCalling": true,
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
+        "supportsReasoningEffort": ["none", "low", "medium", "high"],
+        "zeroDataRetentionEnabled": true,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      }
+    ]
+  }
+]
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `apiType` | Yes | `"responses"` for Copilot Agent |
+| `url` | Yes | Full path `/v1/responses`, not just `/v1` |
+| `thinking` | Yes | Enables reasoning UI |
+| `reasoningEffortFormat` | Yes | Set `"responses"` |
+| `zeroDataRetentionEnabled` | Strongly recommended | Omits `previous_response_id` (router rejects it) |
+
+Copilot may still send some sub-requests to `/v1/chat/completions` (Edit / Inline Fix). The router normalizes those streams so Copilot does not fail with `Response contained no choices`.
+
+### OpenRouter (Chat Completions)
 
 ```json
 [
