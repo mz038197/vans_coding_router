@@ -1,25 +1,36 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 import zipfile
 
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
+_CMD_PAYLOAD_MARKER = ":VANS_PAYLOAD"
+_CMD_PAYLOAD_SPLIT = "(?m)^:VANS_PAYLOAD\\r?\\n"
+
 
 def render_install_vscode_models_cmd() -> str:
     ps1 = render_install_vscode_models_script()
-    if ":PS1" in ps1:
-        raise ValueError("PowerShell script cannot contain the :PS1 marker")
+    if _CMD_PAYLOAD_MARKER in ps1:
+        raise ValueError("PowerShell script cannot contain the payload marker")
+    payload = base64.b64encode(ps1.encode("utf-8")).decode("ascii")
     return (
         "@echo off\n"
         "chcp 65001 >nul\n"
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command "
-        "\"iex ((Get-Content -LiteralPath '%~f0' -Raw) -split ':PS1',2)[1]\"\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+        "$raw = Get-Content -LiteralPath '%~f0' -Raw; "
+        f"$b64 = ($raw -split '{_CMD_PAYLOAD_SPLIT}', 2)[1].Trim(); "
+        "$path = Join-Path $env:TEMP 'vans-install-vscode-models.ps1'; "
+        "[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($b64)); "
+        "powershell -NoProfile -ExecutionPolicy Bypass -File $path; "
+        "exit $LASTEXITCODE"
+        "\"\n"
         "if errorlevel 1 pause\n"
         "exit /b\n"
-        ":PS1\n"
-        f"{ps1}"
+        f"{_CMD_PAYLOAD_MARKER}\n"
+        f"{payload}\n"
     )
 
 
