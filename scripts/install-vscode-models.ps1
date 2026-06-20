@@ -2,6 +2,9 @@
 <#
 .SYNOPSIS
   Merge Vans Coding Router models into VS Code chatLanguageModels.json without overwriting existing entries.
+.NOTES
+  If Windows blocks this script, double-click install-vscode-models.cmd from the zip instead,
+  or run: powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1
 #>
 param(
     [ValidateSet('Stable', 'Insiders', 'Both')]
@@ -20,9 +23,13 @@ $TemplateJson = @'
     "apiType": "responses",
     "models": [
       {
-        "id": "ollama_cloud@minimax-m3:cloud",
-        "name": "minimax-m3",
-        "url": "https://ai.vanscoding.com/v1",
+        "id": "ollama_cloud@qwen3-coder-next",
+        "name": "Qwen3 Coder Next",
+        "url": "https://ai.vanscoding.com/v1/responses",
+        "apiType": "responses",
+        "toolCalling": true,
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -30,31 +37,17 @@ $TemplateJson = @'
           "high"
         ],
         "zeroDataRetentionEnabled": true,
-        "toolCalling": true,
-        "vision": true,
-        "maxInputTokens": 128000,
-        "maxOutputTokens": 16000
-      },
-      {
-        "id": "ollama_cloud@qwen3.5:cloud",
-        "name": "qwen3.5:cloud",
-        "url": "https://ai.vanscoding.com/v1",
-        "supportsReasoningEffort": [
-          "none",
-          "low",
-          "medium",
-          "high"
-        ],
-        "zeroDataRetentionEnabled": true,
-        "toolCalling": true,
-        "vision": true,
         "maxInputTokens": 128000,
         "maxOutputTokens": 16000
       },
       {
         "id": "ollama_cloud@nemotron-3-super:cloud",
-        "name": "nemotron-3-super",
-        "url": "https://ai.vanscoding.com/v1",
+        "name": "Nemotron 3 Super",
+        "url": "https://ai.vanscoding.com/v1/responses",
+        "apiType": "responses",
+        "toolCalling": true,
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -62,8 +55,6 @@ $TemplateJson = @'
           "high"
         ],
         "zeroDataRetentionEnabled": true,
-        "toolCalling": true,
-        "vision": false,
         "maxInputTokens": 128000,
         "maxOutputTokens": 16000
       }

@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+
+def render_install_vscode_models_cmd() -> str:
+    return """@echo off
+chcp 65001 >nul
+set "SCRIPT=%~dp0install-vscode-models.ps1"
+if not exist "%SCRIPT%" (
+  echo [ERROR] install-vscode-models.ps1 not found in %~dp0
+  echo Extract the zip and run this file from the same folder.
+  pause
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
+if errorlevel 1 pause
+"""
+
+
+def build_install_vscode_models_zip() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("install-vscode-models.ps1", render_install_vscode_models_script())
+        archive.writestr("install-vscode-models.cmd", render_install_vscode_models_cmd())
+    return buffer.getvalue()
 
 
 def render_install_vscode_models_script() -> str:
@@ -14,6 +39,9 @@ def render_install_vscode_models_script() -> str:
 <#
 .SYNOPSIS
   Merge Vans Coding Router models into VS Code chatLanguageModels.json without overwriting existing entries.
+.NOTES
+  If Windows blocks this script, double-click install-vscode-models.cmd from the zip instead,
+  or run: powershell -ExecutionPolicy Bypass -File .\\install-vscode-models.ps1
 #>
 param(
     [ValidateSet('Stable', 'Insiders', 'Both')]

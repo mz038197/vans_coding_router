@@ -1,14 +1,17 @@
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Cookie, HTTPException, Response
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi import APIRouter, Cookie, HTTPException
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
-from src.infrastructure.vscode.install_vscode_models_script import render_install_vscode_models_script
+from src.infrastructure.vscode.install_vscode_models_script import (
+    build_install_vscode_models_zip,
+    render_install_vscode_models_script,
+)
 
 PORTAL_HTML_PATH = Path(__file__).resolve().parent.parent / "web" / "portal.html"
 
@@ -287,6 +290,16 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             script,
             media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="install-vscode-models.ps1"'},
+        )
+
+    @router.get("/portal/download/install-vscode-models.zip")
+    async def download_install_vscode_models_zip(session_user_id: str | None = Cookie(default=None)):
+        current_user_id(session_user_id)
+        payload = build_install_vscode_models_zip()
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="install-vscode-models.zip"'},
         )
 
     @router.get("/admin/users")

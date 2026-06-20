@@ -346,3 +346,16 @@ def test_install_vscode_models_download_returns_script(tmp_path):
     assert "install-vscode-models.ps1" in response.headers["content-disposition"]
     assert "VSRouter" in response.text
     assert "Merge-ChatLanguageModels" in response.text
+
+
+def test_install_vscode_models_zip_download(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    student = repo.upsert_google_user("student@example.com", "Student")
+    response = client.get(
+        "/portal/download/install-vscode-models.zip",
+        cookies={"session_user_id": str(student["id"])},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "install-vscode-models.zip" in response.headers["content-disposition"]
+    assert response.content[:2] == b"PK"
