@@ -28,4 +28,4 @@ services:
 
 databases:
   - name: vans-coding-router-db
-    plan: starter
+    plan: basic-256mb
