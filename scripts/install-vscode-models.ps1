@@ -3,8 +3,8 @@
 .SYNOPSIS
   Merge Vans Coding Router models into VS Code chatLanguageModels.json without overwriting existing entries.
 .NOTES
-  If Windows blocks this script, download install-vscode-models.cmd to the same folder,
-  or run: powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1
+  Download install-vscode-models.cmd from Portal and double-click it.
+  This .ps1 file is only for advanced/manual use with ExecutionPolicy Bypass.
 #>
 param(
     [ValidateSet('Stable', 'Insiders', 'Both')]

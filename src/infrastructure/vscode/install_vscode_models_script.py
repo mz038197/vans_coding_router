@@ -8,24 +8,24 @@ from src.infrastructure.vscode.merge_chat_language_models import load_vans_templ
 
 
 def render_install_vscode_models_cmd() -> str:
-    return """@echo off
-chcp 65001 >nul
-set "SCRIPT=%~dp0install-vscode-models.ps1"
-if not exist "%SCRIPT%" (
-  echo [ERROR] install-vscode-models.ps1 not found in %~dp0
-  echo Download install-vscode-models.ps1 to the same folder, then run this file again.
-  pause
-  exit /b 1
-)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
-if errorlevel 1 pause
-"""
+    ps1 = render_install_vscode_models_script()
+    if ":PS1" in ps1:
+        raise ValueError("PowerShell script cannot contain the :PS1 marker")
+    return (
+        "@echo off\n"
+        "chcp 65001 >nul\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command "
+        "\"iex ((Get-Content -LiteralPath '%~f0' -Raw) -split ':PS1',2)[1]\"\n"
+        "if errorlevel 1 pause\n"
+        "exit /b\n"
+        ":PS1\n"
+        f"{ps1}"
+    )
 
 
 def build_install_vscode_models_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("install-vscode-models.ps1", render_install_vscode_models_script())
         archive.writestr("install-vscode-models.cmd", render_install_vscode_models_cmd())
     return buffer.getvalue()
 
@@ -40,8 +40,8 @@ def render_install_vscode_models_script() -> str:
 .SYNOPSIS
   Merge Vans Coding Router models into VS Code chatLanguageModels.json without overwriting existing entries.
 .NOTES
-  If Windows blocks this script, download install-vscode-models.cmd to the same folder,
-  or run: powershell -ExecutionPolicy Bypass -File .\\install-vscode-models.ps1
+  Download install-vscode-models.cmd from Portal and double-click it.
+  This .ps1 file is only for advanced/manual use with ExecutionPolicy Bypass.
 #>
 param(
     [ValidateSet('Stable', 'Insiders', 'Both')]

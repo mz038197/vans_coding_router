@@ -91,10 +91,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
       </div>
       <h3>VS Code 一鍵設定</h3>
-      <p class="hint">下載 <strong>install-vscode-models.ps1</strong>，把 VSRouter 模型<strong>合併</strong>進本機 VS Code（不覆蓋既有設定）。Windows 若擋腳本，請一併下載 .cmd，兩個檔放在同一資料夾後<strong>雙擊 .cmd</strong>，或在 PowerShell 執行下方指令。</p>
-      <a class="btn-secondary" href="/portal/download/install-vscode-models.ps1" download="install-vscode-models.ps1">下載 install-vscode-models.ps1</a>
-      <a class="btn-secondary" href="/portal/download/install-vscode-models.cmd" download="install-vscode-models.cmd">下載 install-vscode-models.cmd（推薦執行）</a>
-      <p class="hint">PowerShell 手動執行：<code>powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1</code>。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。</p>
+      <p class="hint">下載後<strong>雙擊 `install-vscode-models.cmd`</strong>即可（單一檔案、略過 Windows 執行原則）。會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。</p>
+      <a class="btn-secondary" href="/portal/download/install-vscode-models.cmd" download="install-vscode-models.cmd">下載 install-vscode-models.cmd</a>
       <h3>有效 Key</h3>
       <div id="keys"></div>
     </section>
