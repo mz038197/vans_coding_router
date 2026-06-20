@@ -1,0 +1,78 @@
+# ==================
+# Python 相關
+# ==================
+__pycache__/
+*.py[oc]
+*.pyo
+*.pyc
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+
+# ==================
+# 虛擬環境
+# ==================
+.venv/
+venv/
+env/
+ENV/
+
+# ==================
+# IDE 和編輯器
+# ==================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+
+# ==================
+# 測試和覆蓋率
+# ==================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+
+# ==================
+# 依賴套件鎖定檔案
+# ==================
+# uv 會自動管理
+# requirements.lock
+
+# ==================
+# 日誌和臨時檔案
+# ==================
+*.log
+*.tmp
+*.temp
+*.pid
+
+# ==================
+# 環境變數檔案
+# ==================
+.env
+.env.local
+.env.*.local
+
+# ==================
+# API 金鑰和配置
+# ==================
+# 配置目錄位於使用者主目錄，不應該在此提交
+# ~/.vance_coding_router/router.yaml - 設定檔（可能包含機密資訊）
+# ~/.vance_coding_router/logs/*.log - 日誌檔案（已在 *.log 規則中涵蓋）
+
+# ==================
+# OS 相關
+# ==================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
