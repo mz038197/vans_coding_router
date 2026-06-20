@@ -73,7 +73,11 @@ def test_auth_config_reports_oauth_disabled(tmp_path):
     client, _, _ = _client(tmp_path)
     response = client.get("/auth/config")
     assert response.status_code == 200
-    assert response.json() == {"oauth_enabled": False, "redirect_uri": None}
+    assert response.json() == {
+        "oauth_enabled": False,
+        "redirect_uri": None,
+        "public_url": "http://testserver",
+    }
 
 
 def test_auth_config_reports_oauth_enabled(tmp_path):
@@ -83,6 +87,7 @@ def test_auth_config_reports_oauth_enabled(tmp_path):
     assert response.json() == {
         "oauth_enabled": True,
         "redirect_uri": "http://testserver/auth/google/callback",
+        "public_url": "http://testserver",
     }
 
 
@@ -289,3 +294,26 @@ def test_prompt_log_detail_endpoint(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"messages": [{"role": "user", "content": "detail me"}]}
+
+
+def test_list_and_create_class_sessions(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = {"session_user_id": str(teacher["id"])}
+    session_at = "2026-06-21T14:00:00+00:00"
+
+    create = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"session_at": session_at, "ttl_hours": 3},
+    )
+    assert create.status_code == 200
+    created = create.json()
+    assert created["session_at"] == session_at
+    assert created["expires_at"] == "2026-06-21T17:00:00+00:00"
+
+    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
+    assert listing.status_code == 200
+    assert len(listing.json()["items"]) == 1
+    assert listing.json()["items"][0]["invite_code"]

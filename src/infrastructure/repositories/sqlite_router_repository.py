@@ -140,6 +140,7 @@ class SqliteRouterRepository:
             self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
+            self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
             self._backfill_user_roles(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -412,19 +413,53 @@ class SqliteRouterRepository:
             )
         return self.get_class(class_id)
 
-    def create_class_session(self, class_id: int, created_by: int, ttl_hours: int | None = None) -> dict[str, Any]:
+    def create_class_session(
+        self,
+        class_id: int,
+        created_by: int,
+        ttl_hours: int | None = None,
+        session_at: str | None = None,
+    ) -> dict[str, Any]:
         klass = self.get_class(class_id)
         if not klass or klass["status"] != "active":
             raise ValueError("class is not active")
-        expires_at = _utc_now() + timedelta(hours=int(ttl_hours or klass["api_key_ttl_hours"]))
+        start = _parse_dt(session_at) if session_at else _utc_now()
+        if start is None:
+            start = _utc_now()
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=UTC)
+        ttl = int(ttl_hours if ttl_hours is not None else klass["api_key_ttl_hours"])
+        expires_at = start + timedelta(hours=ttl)
         invite_code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
         now = _dt(_utc_now())
         with self._connect() as conn:
             cur = conn.execute(
-                "INSERT INTO class_sessions(class_id, invite_code, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-                (class_id, invite_code, _dt(expires_at), created_by, now),
+                """
+                INSERT INTO class_sessions(
+                    class_id, invite_code, expires_at, session_at, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (class_id, invite_code, _dt(expires_at), _dt(start), created_by, now),
             )
             return dict(conn.execute("SELECT * FROM class_sessions WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+    def list_class_sessions(self, class_id: int) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.*,
+                       (
+                           SELECT COUNT(*)
+                           FROM session_redemptions r
+                           WHERE r.session_id = s.id
+                       ) AS redemption_count
+                FROM class_sessions s
+                WHERE s.class_id = ?
+                ORDER BY COALESCE(s.session_at, s.created_at) DESC
+                """,
+                (class_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def update_class_session(self, class_id: int, session_id: int, expires_at: str) -> dict[str, Any] | None:
         with self._connect() as conn:

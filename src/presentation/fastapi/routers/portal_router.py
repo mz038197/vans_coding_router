@@ -29,6 +29,7 @@ class RedeemRequest(BaseModel):
 
 
 class SessionRequest(BaseModel):
+    session_at: str | None = None
     ttl_hours: int | None = None
 
 
@@ -99,6 +100,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return {
             "oauth_enabled": oauth.is_configured(),
             "redirect_uri": oauth.redirect_uri if oauth.is_configured() else None,
+            "public_url": settings.public_url.rstrip("/"),
         }
 
     @router.get("/auth/google/login")
@@ -184,6 +186,14 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         user = portal_use_case.me(current_user_id(session_user_id))
         return {"items": user.get("classes", []) if user else []}
 
+    @router.get("/teacher/classes/{class_id}/sessions")
+    async def list_sessions(class_id: int, session_user_id: str | None = Cookie(default=None)):
+        return portal_call(
+            lambda: {
+                "items": portal_use_case.list_sessions(current_user_id(session_user_id), class_id),
+            }
+        )
+
     @router.post("/teacher/classes/{class_id}/sessions")
     async def create_session(
         class_id: int,
@@ -195,6 +205,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 class_id,
                 ttl_hours=data.ttl_hours if data else None,
+                session_at=data.session_at if data else None,
             )
         )
 

@@ -35,12 +35,27 @@ class PortalUseCase:
         self._assert_teacher(teacher_id)
         return self.repo.create_class(teacher_id, name, ends_at, api_key_ttl_hours)
 
-    def create_session(self, teacher_id: int, class_id: int, ttl_hours: int | None = None) -> dict[str, Any]:
+    def create_session(
+        self,
+        teacher_id: int,
+        class_id: int,
+        ttl_hours: int | None = None,
+        session_at: str | None = None,
+    ) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
         klass = self.repo.get_class(class_id)
         if not klass or klass["teacher_id"] != teacher_id:
             raise PermissionError("class not owned by teacher")
-        return self.repo.create_class_session(class_id, teacher_id, ttl_hours=ttl_hours)
+        return self.repo.create_class_session(
+            class_id,
+            teacher_id,
+            ttl_hours=ttl_hours,
+            session_at=session_at,
+        )
+
+    def list_sessions(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
+        self._assert_class_owner(teacher_id, class_id)
+        return self.repo.list_class_sessions(class_id)
 
     def update_session(self, teacher_id: int, class_id: int, session_id: int, expires_at: str) -> dict[str, Any] | None:
         self._assert_class_owner(teacher_id, class_id)

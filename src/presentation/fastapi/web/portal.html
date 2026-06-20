@@ -16,13 +16,14 @@
     .tabs button { background: #e9eef4; color: #17324d; }
     .hidden { display: none; }
     .error { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+    .hint { color: #5d6d7e; font-size: 0.92rem; margin: 8px 0; }
     .oauth-btn { display: inline-block; background: white; color: #17202a; border: 1px solid #d8dee6; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; }
     .oauth-btn:hover { background: #f6f7f9; }
     .dev-note { color: #5d6d7e; font-size: 0.92rem; margin-top: 8px; }
-    pre { white-space: pre-wrap; background: #101820; color: #d7f5e9; padding: 12px; border-radius: 6px; }
+    pre.key-display { white-space: pre-wrap; background: #101820; color: #d7f5e9; padding: 12px; border-radius: 6px; }
     .logs-message-preview { max-width: 420px; max-height: 4.5em; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
-    .logs-hint { color: #5d6d7e; font-size: 0.92rem; margin: 8px 0; }
     .btn-secondary { background: #e9eef4; color: #17324d; }
+    .btn-link { background: none; color: #1d6f9f; padding: 0; text-decoration: underline; }
     .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
     .modal.show { display: flex; }
     .modal-content { background: white; border-radius: 8px; width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; }
@@ -30,6 +31,12 @@
     .modal-body { padding: 16px; overflow: auto; }
     .modal-footer { padding: 12px 16px; border-top: 1px solid #e4e7eb; text-align: right; }
     .log-detail-pre { margin: 0; max-height: 60vh; overflow: auto; }
+    details.course-expander { border: 1px solid #e4e7eb; border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: #fafbfc; }
+    details.course-expander > summary { cursor: pointer; font-weight: 600; }
+    .session-form { margin: 12px 0; padding: 10px; background: white; border: 1px solid #e4e7eb; border-radius: 6px; }
+    .subtable { margin: 8px 0 0; background: #f6f7f9; }
+    .key-meta { margin: 8px 0; padding: 10px; background: #f6f7f9; border-radius: 6px; }
+    .admin-block { margin-top: 16px; }
   </style>
 </head>
 <body>
@@ -52,15 +59,19 @@
     <section id="profile" class="hidden">
       <h2 id="who"></h2>
       <button onclick="logout()">登出</button>
-      <pre>OPENAI_BASE_URL=https://ai.vanscoding.com/v1
+      <pre id="profileConfig" class="key-display">OPENAI_BASE_URL=...
 OPENAI_API_KEY=vcr_sk_xxx</pre>
     </section>
 
     <section id="student" class="hidden">
-      <h2>本節邀請碼</h2>
+      <h2>課堂邀請碼</h2>
+      <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
       <input id="invite" placeholder="輸入老師提供的邀請碼" />
       <button onclick="redeem()">領取 API Key</button>
-      <pre id="redeemResult"></pre>
+      <div id="redeemResultWrap" class="hidden">
+        <pre id="redeemResult" class="key-display"></pre>
+        <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
+      </div>
       <h3>有效 Key</h3>
       <div id="keys"></div>
     </section>
@@ -68,38 +79,38 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     <section id="teacher" class="hidden">
       <div class="tabs">
         <button onclick="showTab('keyTab')">我的 API Key</button>
-        <button onclick="showTab('classTab')">我的班級</button>
+        <button onclick="showTab('classTab')">我的課程</button>
         <button onclick="showTab('monitorTab')">Prompt 監控</button>
         <button id="adminBtn" class="hidden" onclick="showTab('adminTab')">系統管理</button>
       </div>
       <div id="keyTab">
-        <button onclick="teacherKey()">重設長期 API Key</button>
-        <pre id="teacherKey"></pre>
+        <div id="teacherKeyMeta" class="key-meta"></div>
+        <button onclick="resetTeacherKey()">重設長期 API Key</button>
+        <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
+        <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
       </div>
       <div id="classTab" class="hidden">
-        <h3>建立班級</h3>
-        <input id="className" placeholder="班級名稱" />
-        <input id="endsAt" placeholder="結束日期 ISO 格式，可空白" />
-        <input id="ttl" type="number" placeholder="Key TTL 小時" />
+        <h3>建立課程</h3>
+        <input id="className" placeholder="課程名稱" />
         <button onclick="createClass()">建立</button>
-        <div id="classes"></div>
+        <div id="courses"></div>
       </div>
       <div id="monitorTab" class="hidden">
-        <label for="monitorClassId">班級</label>
+        <label for="monitorClassId">課程</label>
         <select id="monitorClassId" onchange="onMonitorClassChange()">
-          <option value="">請選擇班級</option>
+          <option value="">請選擇課程</option>
         </select>
         <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
-        <input id="monitorStart" placeholder="開始時間 ISO" />
-        <input id="monitorEnd" placeholder="結束時間 ISO" />
+        <input id="monitorStart" type="datetime-local" />
+        <input id="monitorEnd" type="datetime-local" />
         <button onclick="loadLogs()">查詢</button>
-        <button onclick="loadUsage()">用量</button>
-        <div id="logsHint" class="logs-hint"></div>
+        <button class="btn-secondary" onclick="loadUsage()">用量</button>
+        <div id="logsHint" class="hint"></div>
         <div id="logs"></div>
       </div>
       <div id="adminTab" class="hidden">
         <button onclick="loadAdmin()">載入系統管理資料</button>
-        <button onclick="runArchive()">執行封存</button>
+        <button class="btn-secondary" onclick="runArchive()">執行封存</button>
         <h3>系統設定</h3>
         <input id="settingRetention" type="number" placeholder="Prompt log 保留天數" />
         <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
@@ -108,6 +119,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           <option value="false">關閉開放注册</option>
         </select>
         <button onclick="saveSettings()">儲存設定</button>
+        <div id="adminStatus" class="hint"></div>
         <div id="admin"></div>
       </div>
     </section>
@@ -126,6 +138,11 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
   <script>
     let currentRoles = ['student'];
     let teacherClasses = [];
+    let portalPublicUrl = 'https://ai.vanscoding.com';
+    let redemptionsCache = {};
+    let lastRedeemedKey = '';
+    let lastTeacherKey = '';
+
     function showLoginError(message) {
       const box = document.getElementById('loginError');
       if (!message) {
@@ -136,18 +153,71 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       box.textContent = message;
       box.classList.remove('hidden');
     }
+
     async function api(url, options = {}) {
       const r = await fetch(url, {headers: {'content-type': 'application/json'}, ...options});
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function formatLocalDateTime(iso) {
+      if (!iso) return '—';
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return iso;
+      return date.toLocaleString(undefined, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+    }
+
+    function datetimeLocalToUtcIso(value) {
+      if (!value) return null;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return date.toISOString();
+    }
+
+    function defaultDatetimeLocalValue() {
+      const date = new Date();
+      date.setMinutes(0, 0, 0);
+      date.setHours(date.getHours() + 1);
+      const pad = n => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:00`;
+    }
+
+    async function copyText(buttonEl, text) {
+      const value = text || '';
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const original = buttonEl.textContent;
+        buttonEl.textContent = '已複製';
+        setTimeout(() => { buttonEl.textContent = original; }, 1500);
+      } catch (err) {
+        window.prompt('請手動複製：', value);
+      }
+    }
+
+    function updateProfileConfig() {
+      document.getElementById('profileConfig').textContent =
+        `OPENAI_BASE_URL=${portalPublicUrl}/v1\nOPENAI_API_KEY=vcr_sk_xxx`;
+    }
+
     async function initLogin() {
       const params = new URLSearchParams(location.search);
       showLoginError(params.get('login_error'));
       const config = await api('/auth/config');
+      if (config.public_url) portalPublicUrl = config.public_url;
+      updateProfileConfig();
       document.getElementById('oauthLogin').classList.toggle('hidden', !config.oauth_enabled);
       document.getElementById('devLogin').classList.toggle('hidden', config.oauth_enabled);
     }
+
     async function login() {
       await api('/auth/google', {method:'POST', body: JSON.stringify({
         email: document.getElementById('email').value,
@@ -155,33 +225,49 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       })});
       await refresh();
     }
+
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
+
     function showTab(id) {
       ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id));
-      if (id === 'monitorTab') {
-        populateMonitorClasses(teacherClasses);
-      }
+      if (id === 'monitorTab') populateMonitorClasses(teacherClasses);
     }
+
+    function renderTeacherKeyMeta(keys) {
+      const longLived = (keys || []).filter(k => !k.session_id);
+      const box = document.getElementById('teacherKeyMeta');
+      if (!longLived.length) {
+        box.innerHTML = '<p class="hint">尚未建立長期 API Key，請按下方按鈕重設。</p>';
+        return;
+      }
+      const k = longLived[0];
+      box.innerHTML = `<strong>目前長期 Key</strong><br>前綴：${escapeHtml(k.key_prefix)} · 到期：${escapeHtml(k.expires_at || '不過期')}`;
+    }
+
     async function refresh() {
       const me = await api('/auth/me');
       currentRoles = me.roles || [me.role];
       document.getElementById('login').classList.add('hidden');
-      profile.classList.remove('hidden');
-      who.textContent = `${me.name} (${me.email}) - ${currentRoles.join(', ')}`;
-      keys.innerHTML = (me.keys || []).map(k => `<div>${k.key_prefix} - ${k.class_name || '長期'} - ${k.expires_at || '不過期'}</div>`).join('');
-      student.classList.toggle('hidden', !currentRoles.includes('student'));
-      teacher.classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
+      document.getElementById('profile').classList.remove('hidden');
+      document.getElementById('who').textContent = `${me.name} (${me.email}) - ${currentRoles.join(', ')}`;
+      document.getElementById('keys').innerHTML = (me.keys || []).map(k =>
+        `<div>${escapeHtml(k.key_prefix)} - ${escapeHtml(k.class_name || '長期')} - ${escapeHtml(k.expires_at || '不過期')}</div>`
+      ).join('') || '<p class="hint">尚無有效 Key</p>';
+      document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
+      document.getElementById('teacher').classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
       if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
-        adminBtn.classList.toggle('hidden', !currentRoles.includes('admin'));
+        document.getElementById('adminBtn').classList.toggle('hidden', !currentRoles.includes('admin'));
         teacherClasses = me.classes || [];
-        renderClasses(teacherClasses);
+        renderTeacherKeyMeta(me.keys || []);
+        renderCourseExpanders(teacherClasses);
         populateMonitorClasses(teacherClasses);
       }
     }
+
     function populateMonitorClasses(classes) {
       const select = document.getElementById('monitorClassId');
       const previous = select.value;
-      select.innerHTML = '<option value="">請選擇班級</option>' + (classes || []).map(c =>
+      select.innerHTML = '<option value="">請選擇課程</option>' + (classes || []).map(c =>
         `<option value="${c.id}">${c.id} - ${escapeHtml(c.name)}</option>`
       ).join('');
       if (previous && classes.some(c => String(c.id) === previous)) {
@@ -191,46 +277,43 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         loadLogs().catch(err => showLogsError(err.message));
       }
     }
+
     function onMonitorClassChange() {
-      if (monitorClassId.value) {
+      if (document.getElementById('monitorClassId').value) {
         loadLogs().catch(err => showLogsError(err.message));
       } else {
-        logs.innerHTML = '';
-        logsHint.textContent = '';
+        document.getElementById('logs').innerHTML = '';
+        document.getElementById('logsHint').textContent = '';
       }
     }
-    function escapeHtml(value) {
-      return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-    }
+
     function formatLogPreview(item) {
       const preview = (item.message_preview || '').trim();
       return preview || '—';
     }
+
     function formatLogDetailMessages(detail) {
       const messages = detail.messages || [];
       if (!messages.length) return '（無 messages）';
-      return messages
-        .map(msg => `[${msg.role || 'unknown'}]\n${msg.content || ''}`)
-        .join('\n\n');
+      return messages.map(msg => `[${msg.role || 'unknown'}]\n${msg.content || ''}`).join('\n\n');
     }
+
     function showLogsError(message) {
-      logs.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
-      logsHint.textContent = '';
+      document.getElementById('logs').innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+      document.getElementById('logsHint').textContent = '';
     }
+
     function renderPromptLogs(payload) {
       const items = payload.items || [];
+      const logs = document.getElementById('logs');
       if (!items.length) {
-        logs.innerHTML = '<p style="color:#5d6d7e;">尚無資料</p>';
+        logs.innerHTML = '<p class="hint">尚無資料</p>';
       } else {
         logs.innerHTML = `<table>
           <tr><th>時間</th><th>學生</th><th>模型</th><th>狀態</th><th>訊息預覽</th><th>操作</th></tr>
           ${items.map(item => `
             <tr>
-              <td>${escapeHtml(item.created_at || '-')}</td>
+              <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
               <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
               <td>${escapeHtml(item.model || '-')}</td>
               <td>${escapeHtml(item.status || '-')}</td>
@@ -240,72 +323,263 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           `).join('')}
         </table>`;
       }
-      logsHint.textContent = payload.has_filter
+      document.getElementById('logsHint').textContent = payload.has_filter
         ? `共 ${items.length} 筆（最多 ${payload.limit} 筆）`
         : '未篩選，顯示最新 10 筆';
     }
+
     async function showPromptDetail(logId) {
-      const classId = monitorClassId.value;
+      const classId = document.getElementById('monitorClassId').value;
       if (!classId) return;
       const detail = await api(`/teacher/classes/${classId}/prompt-logs/${logId}`);
       document.getElementById('promptDetailContent').textContent = formatLogDetailMessages(detail);
       document.getElementById('promptDetailModal').classList.add('show');
     }
+
     function closePromptDetailModal() {
       document.getElementById('promptDetailModal').classList.remove('show');
       document.getElementById('promptDetailContent').textContent = '';
     }
+
     async function redeem() {
-      const data = await api('/sessions/redeem', {method:'POST', body: JSON.stringify({invite_code: invite.value})});
-      redeemResult.textContent = `API Key: ${data.api_key}\n班級: ${data.session.class_name}\n到期: ${data.session.expires_at}`;
+      const data = await api('/sessions/redeem', {method:'POST', body: JSON.stringify({invite_code: document.getElementById('invite').value})});
+      lastRedeemedKey = data.api_key;
+      document.getElementById('redeemResult').textContent =
+        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n課程: ${data.session.class_name}\n到期: ${formatLocalDateTime(data.session.expires_at)}`;
+      document.getElementById('redeemResultWrap').classList.remove('hidden');
       await refresh();
     }
-    async function teacherKey() { teacherKey.textContent = (await api('/portal/teacher/api-key', {method:'POST'})).api_key; }
+
+    async function resetTeacherKey() {
+      const data = await api('/portal/teacher/api-key', {method:'POST'});
+      lastTeacherKey = data.api_key;
+      const display = document.getElementById('teacherKeyDisplay');
+      display.textContent =
+        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n\n⚠ 此 key 只會顯示這一次，請立即複製保存。`;
+      display.classList.remove('hidden');
+      document.getElementById('copyTeacherKeyBtn').classList.remove('hidden');
+      await refresh();
+    }
+
     async function createClass() {
-      await api('/teacher/classes', {method:'POST', body: JSON.stringify({name: className.value, ends_at: endsAt.value || null, api_key_ttl_hours: Number(ttl.value) || null})});
+      const name = document.getElementById('className').value.trim();
+      if (!name) throw new Error('請輸入課程名稱');
+      await api('/teacher/classes', {method:'POST', body: JSON.stringify({name})});
+      document.getElementById('className').value = '';
       await refresh();
     }
-    function renderClasses(items) {
-      classes.innerHTML = `<table><tr><th>ID</th><th>名稱</th><th>狀態</th><th>成員</th><th>操作</th></tr>${items.map(c => {
-        const adminAction = currentRoles.includes('admin') ? `<button onclick="disableClass(${c.id})">結束</button>` : '';
-        return `<tr><td>${c.id}</td><td>${c.name}</td><td>${c.status}</td><td>${c.member_count}</td><td><button onclick="openSession(${c.id})">開本節</button><button onclick="loadRedemptions(${c.id})">名單</button>${adminAction}</td></tr>`;
-      }).join('')}</table><div id="redemptions"></div>`;
+
+    function classStatusLabel(status) {
+      return status === 'active' ? '進行中' : status;
     }
-    async function openSession(id) {
-      const ttl_hours = Number(prompt('本節 TTL 小時', ttl.value || '2')) || null;
-      alert(JSON.stringify(await api(`/teacher/classes/${id}/sessions`, {method:'POST', body: JSON.stringify({ttl_hours})}), null, 2));
+
+    function renderCourseExpanders(items) {
+      const container = document.getElementById('courses');
+      if (!items.length) {
+        container.innerHTML = '<p class="hint">尚無課程，請先建立。</p>';
+        return;
+      }
+      container.innerHTML = items.map((c, idx) => `
+        <details class="course-expander" id="course-${c.id}" ${idx === 0 ? 'open' : ''} ontoggle="if(this.open) loadClassSessions(${c.id})">
+          <summary>${escapeHtml(c.name)} (${escapeHtml(classStatusLabel(c.status))} · ${c.member_count} 位成員)</summary>
+          <div class="session-form">
+            <label>課堂時間 <input type="datetime-local" id="sessionAt-${c.id}" value="${defaultDatetimeLocalValue()}" /></label>
+            <label>TTL 小時 <input type="number" id="sessionTtl-${c.id}" value="2" min="1" style="width:5em;" /></label>
+            <button onclick="createSession(${c.id})">新增課堂</button>
+            <span class="hint">key 將在課堂時間 + TTL 小時後到期</span>
+          </div>
+          <div id="sessions-${c.id}"><p class="hint">載入中…</p></div>
+          ${currentRoles.includes('admin') ? `<button class="btn-secondary" onclick="disableClass(${c.id})">結束課程</button>` : ''}
+        </details>
+      `).join('');
+      if (items.length) loadClassSessions(items[0].id).catch(err => showSessionError(items[0].id, err.message));
     }
-    async function loadRedemptions(id) { redemptions.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${id}/redemptions`), null, 2)}</pre>`; }
-    async function disableClass(id) { await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})}); await refresh(); }
+
+    function showSessionError(classId, message) {
+      const box = document.getElementById(`sessions-${classId}`);
+      if (box) box.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+    }
+
+    async function loadClassSessions(classId) {
+      const payload = await api(`/teacher/classes/${classId}/sessions`);
+      redemptionsCache[classId] = (await api(`/teacher/classes/${classId}/redemptions`)).items || [];
+      renderSessionTable(classId, payload.items || []);
+    }
+
+    function renderSessionTable(classId, sessions) {
+      const box = document.getElementById(`sessions-${classId}`);
+      if (!sessions.length) {
+        box.innerHTML = '<p class="hint">尚無課堂，請新增課堂。</p>';
+        return;
+      }
+      box.innerHTML = `<table>
+        <tr><th>課堂時間</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        ${sessions.map(s => `
+          <tr>
+            <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
+            <td><code>${escapeHtml(s.invite_code)}</code></td>
+            <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
+            <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
+            <td><button type="button" class="btn-secondary copy-invite-btn" style="padding:4px 10px;font-size:12px;" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button></td>
+          </tr>
+          <tr id="redemption-row-${s.id}" class="hidden">
+            <td colspan="5"><div id="redemption-body-${s.id}"></div></td>
+          </tr>
+        `).join('')}
+      </table>`;
+    }
+
+    function renderRedemptionSubtable(items) {
+      if (!items.length) return '<p class="hint">尚無人領取</p>';
+      return `<table class="subtable">
+        <tr><th>學生</th><th>Email</th><th>領取時間</th></tr>
+        ${items.map(item => `
+          <tr>
+            <td>${escapeHtml(item.name || '—')}</td>
+            <td>${escapeHtml(item.email || '—')}</td>
+            <td>${escapeHtml(formatLocalDateTime(item.redeemed_at))}</td>
+          </tr>
+        `).join('')}
+      </table>`;
+    }
+
+    function toggleRedemptions(classId, sessionId, buttonEl) {
+      const row = document.getElementById(`redemption-row-${sessionId}`);
+      const body = document.getElementById(`redemption-body-${sessionId}`);
+      if (!row || !body) return;
+      const count = (redemptionsCache[classId] || []).filter(
+        item => item.session_id === sessionId && item.redeemed_at
+      ).length;
+      const opening = row.classList.contains('hidden');
+      if (opening) {
+        const items = (redemptionsCache[classId] || []).filter(
+          item => item.session_id === sessionId && item.redeemed_at
+        );
+        body.innerHTML = renderRedemptionSubtable(items);
+        row.classList.remove('hidden');
+        buttonEl.textContent = `${count} 人 ▲`;
+      } else {
+        row.classList.add('hidden');
+        buttonEl.textContent = `${count} 人`;
+      }
+    }
+
+    async function createSession(classId) {
+      const sessionAt = datetimeLocalToUtcIso(document.getElementById(`sessionAt-${classId}`).value);
+      const ttlHours = Number(document.getElementById(`sessionTtl-${classId}`).value) || 2;
+      await api(`/teacher/classes/${classId}/sessions`, {
+        method: 'POST',
+        body: JSON.stringify({session_at: sessionAt, ttl_hours: ttlHours}),
+      });
+      await loadClassSessions(classId);
+    }
+
+    async function disableClass(id) {
+      await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})});
+      await refresh();
+    }
+
     async function loadLogs() {
-      const classId = monitorClassId.value;
+      const classId = document.getElementById('monitorClassId').value;
       if (!classId) {
-        showLogsError('請先選擇班級');
+        showLogsError('請先選擇課程');
         return;
       }
       const params = new URLSearchParams();
-      if (monitorKeyword.value) params.set('keyword', monitorKeyword.value);
-      if (monitorStart.value) params.set('start_at', monitorStart.value);
-      if (monitorEnd.value) params.set('end_at', monitorEnd.value);
+      const keyword = document.getElementById('monitorKeyword').value;
+      const start = document.getElementById('monitorStart').value;
+      const end = document.getElementById('monitorEnd').value;
+      if (keyword) params.set('keyword', keyword);
+      if (start) params.set('start_at', datetimeLocalToUtcIso(start));
+      if (end) params.set('end_at', datetimeLocalToUtcIso(end));
       try {
         renderPromptLogs(await api(`/teacher/classes/${classId}/prompt-logs?${params.toString()}`));
       } catch (err) {
         showLogsError(err.message);
       }
     }
-    async function loadUsage() {
-      logs.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${monitorClassId.value}/usage`), null, 2)}</pre>`;
+
+    function renderUsageTable(items) {
+      if (!items.length) return '<p class="hint">尚無用量資料</p>';
+      return `<table>
+        <tr><th>學生</th><th>Email</th><th>Prompt</th><th>Completion</th><th>Total</th></tr>
+        ${items.map(item => `
+          <tr>
+            <td>${escapeHtml(item.name || '-')}</td>
+            <td>${escapeHtml(item.email || '-')}</td>
+            <td>${item.prompt_tokens ?? 0}</td>
+            <td>${item.completion_tokens ?? 0}</td>
+            <td>${item.total_tokens ?? 0}</td>
+          </tr>
+        `).join('')}
+      </table>`;
     }
-    async function loadAdmin() { admin.innerHTML = `<pre>${JSON.stringify({users: await api('/admin/users'), classes: await api('/admin/classes'), settings: await api('/admin/settings')}, null, 2)}</pre>`; }
-    async function runArchive() { admin.innerHTML = `<pre>${JSON.stringify(await api('/admin/archive/run', {method:'POST'}), null, 2)}</pre>`; }
+
+    async function loadUsage() {
+      const classId = document.getElementById('monitorClassId').value;
+      if (!classId) {
+        showLogsError('請先選擇課程');
+        return;
+      }
+      const payload = await api(`/teacher/classes/${classId}/usage`);
+      document.getElementById('logs').innerHTML = renderUsageTable(payload.items || []);
+      document.getElementById('logsHint').textContent = 'Token 用量統計';
+    }
+
+    function renderAdminPanel(data) {
+      const users = data.users.items || [];
+      const classes = data.classes.items || [];
+      const settings = data.settings || {};
+      return `
+        <div class="admin-block">
+          <h4>使用者</h4>
+          <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>角色</th><th>狀態</th></tr>
+          ${users.map(u => `<tr><td>${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml((u.roles || [u.role]).join(', '))}</td><td>${escapeHtml(u.status)}</td></tr>`).join('')}
+          </table>
+        </div>
+        <div class="admin-block">
+          <h4>課程</h4>
+          <table><tr><th>ID</th><th>名稱</th><th>老師</th><th>狀態</th><th>成員</th></tr>
+          ${classes.map(c => `<tr><td>${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.teacher_name || c.teacher_email || '-')}</td><td>${escapeHtml(c.status)}</td><td>${c.member_count ?? 0}</td></tr>`).join('')}
+          </table>
+        </div>
+        <div class="admin-block">
+          <h4>系統設定</h4>
+          <table><tr><th>Prompt 保留天數</th><th>學生預設 TTL</th><th>開放注册</th></tr>
+          <tr><td>${settings.prompt_logs?.retention_days ?? '-'}</td><td>${settings.student_default_ttl_hours ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
+        </div>`;
+    }
+
+    async function loadAdmin() {
+      const data = {
+        users: await api('/admin/users'),
+        classes: await api('/admin/classes'),
+        settings: await api('/admin/settings'),
+      };
+      document.getElementById('admin').innerHTML = renderAdminPanel(data);
+      document.getElementById('adminStatus').textContent = '已載入系統管理資料';
+    }
+
+    async function runArchive() {
+      const result = await api('/admin/archive/run', {method:'POST'});
+      document.getElementById('adminStatus').textContent = `封存完成：${result.archived} 筆`;
+    }
+
     async function saveSettings() {
       const body = {
-        retention_days: Number(settingRetention.value) || null,
-        student_default_ttl_hours: Number(settingTtl.value) || null,
-        open_registration: settingRegistration.value === 'true'
+        retention_days: Number(document.getElementById('settingRetention').value) || null,
+        student_default_ttl_hours: Number(document.getElementById('settingTtl').value) || null,
+        open_registration: document.getElementById('settingRegistration').value === 'true',
       };
-      admin.innerHTML = `<pre>${JSON.stringify(await api('/admin/settings', {method:'PATCH', body: JSON.stringify(body)}), null, 2)}</pre>`;
+      const settings = await api('/admin/settings', {method:'PATCH', body: JSON.stringify(body)});
+      document.getElementById('adminStatus').textContent = '設定已儲存';
+      document.getElementById('admin').innerHTML = renderAdminPanel({
+        users: await api('/admin/users'),
+        classes: await api('/admin/classes'),
+        settings,
+      });
     }
+
     initLogin().catch(() => {});
     refresh().catch(() => {});
   </script>

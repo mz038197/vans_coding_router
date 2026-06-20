@@ -124,3 +124,55 @@ def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(
     assert archived_2025[0][0] == "old active"
     assert archived_2025[0][1]
     assert archived_2026[0][0] == "recent ended"
+
+
+def test_create_session_with_session_at_sets_expires_at(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session_at = datetime(2026, 6, 21, 14, 0, tzinfo=UTC).isoformat()
+    session = repo.create_class_session(
+        klass["id"],
+        teacher["id"],
+        ttl_hours=3,
+        session_at=session_at,
+    )
+    assert session["session_at"] == session_at
+    assert session["expires_at"] == datetime(2026, 6, 21, 17, 0, tzinfo=UTC).isoformat()
+
+
+def test_list_class_sessions_includes_redemption_count(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"])
+    repo.redeem_invite(session["invite_code"], student["id"])
+    items = repo.list_class_sessions(klass["id"])
+    assert len(items) == 1
+    assert items[0]["redemption_count"] == 1
+
+
+def test_redeem_same_invite_returns_same_key(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="test-secret"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"])
+    first = repo.redeem_invite(session["invite_code"], student["id"])
+    second = repo.redeem_invite(session["invite_code"], student["id"])
+    assert first["api_key"] == second["api_key"]
+    assert repo.verify_api_key_context(first["api_key"]) is not None
