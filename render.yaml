@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: vans-coding-router
+    runtime: python
+    plan: starter
+    buildCommand: uv sync --frozen
+    startCommand: uv run uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: VCR_CONFIG
+        value: /etc/secrets/router.yaml
+      - key: PUBLIC_URL
+        value: https://ai.vanscoding.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: OLLAMA_CLOUD_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vans-coding-router-db
+          property: connectionString
+
+databases:
+  - name: vans-coding-router-db
+    plan: starter
