@@ -10,6 +10,7 @@ from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.vscode.install_vscode_models_script import (
     build_install_vscode_models_zip,
+    render_install_vscode_models_cmd,
     render_install_vscode_models_script,
 )
 
@@ -290,6 +291,16 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             script,
             media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="install-vscode-models.ps1"'},
+        )
+
+    @router.get("/portal/download/install-vscode-models.cmd")
+    async def download_install_vscode_models_cmd(session_user_id: str | None = Cookie(default=None)):
+        current_user_id(session_user_id)
+        script = render_install_vscode_models_cmd()
+        return PlainTextResponse(
+            script,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="install-vscode-models.cmd"'},
         )
 
     @router.get("/portal/download/install-vscode-models.zip")

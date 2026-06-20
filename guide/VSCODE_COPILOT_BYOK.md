@@ -94,15 +94,17 @@ Set the API key via **Chat: Manage Language Models** → **Update API Key** (`vc
 
 ## Portal one-click install (Windows)
 
-Logged-in students can download `install-vscode-models.zip` from the Portal **課堂邀請碼** section.
+Logged-in students can download **`install-vscode-models.ps1`** from the Portal **課堂邀請碼** section.
 
-Extract the zip and **double-click `install-vscode-models.cmd`**. The `.cmd` launcher runs PowerShell with `-ExecutionPolicy Bypass`, which avoids the unsigned-script block on classroom PCs.
+If Windows blocks the unsigned `.ps1`, also download **`install-vscode-models.cmd`** to the same folder and double-click the `.cmd` file. It runs PowerShell with `-ExecutionPolicy Bypass`.
 
-If you only have the `.ps1` file, run:
+Or run manually:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1
 ```
+
+Optional: `install-vscode-models.zip` bundles both files for one download.
 
 The script merges the bundled **VSRouter** provider from [`config/chatLanguageModels.vans.json`](../config/chatLanguageModels.vans.json) into:
 

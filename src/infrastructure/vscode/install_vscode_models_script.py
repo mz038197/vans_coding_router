@@ -13,7 +13,7 @@ chcp 65001 >nul
 set "SCRIPT=%~dp0install-vscode-models.ps1"
 if not exist "%SCRIPT%" (
   echo [ERROR] install-vscode-models.ps1 not found in %~dp0
-  echo Extract the zip and run this file from the same folder.
+  echo Download install-vscode-models.ps1 to the same folder, then run this file again.
   pause
   exit /b 1
 )
@@ -40,7 +40,7 @@ def render_install_vscode_models_script() -> str:
 .SYNOPSIS
   Merge Vans Coding Router models into VS Code chatLanguageModels.json without overwriting existing entries.
 .NOTES
-  If Windows blocks this script, double-click install-vscode-models.cmd from the zip instead,
+  If Windows blocks this script, download install-vscode-models.cmd to the same folder,
   or run: powershell -ExecutionPolicy Bypass -File .\\install-vscode-models.ps1
 #>
 param(

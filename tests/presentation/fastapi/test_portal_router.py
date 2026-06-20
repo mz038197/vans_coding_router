@@ -359,3 +359,15 @@ def test_install_vscode_models_zip_download(tmp_path):
     assert response.headers["content-type"] == "application/zip"
     assert "install-vscode-models.zip" in response.headers["content-disposition"]
     assert response.content[:2] == b"PK"
+
+
+def test_install_vscode_models_cmd_download(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    student = repo.upsert_google_user("student@example.com", "Student")
+    response = client.get(
+        "/portal/download/install-vscode-models.cmd",
+        cookies={"session_user_id": str(student["id"])},
+    )
+    assert response.status_code == 200
+    assert "install-vscode-models.cmd" in response.headers["content-disposition"]
+    assert "ExecutionPolicy Bypass" in response.text
