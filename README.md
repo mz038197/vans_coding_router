@@ -13,13 +13,25 @@ $env:VCR_CONFIG="$HOME\.vans_coding_router\router.yaml"
 uv run uvicorn app:app --reload
 ```
 
-Open `http://127.0.0.1:8000/portal`.
+Open `http://127.0.0.1:8000/portal` (or `http://127.0.0.1:8000/` — root redirects to `/portal`).
 
 If Google OAuth is not configured, the portal allows dev login through `POST /auth/google`. Once `google_client_id` and `google_client_secret` are configured, dev login is disabled.
 
 ## Configuration
 
 Default config path: `~/.vans_coding_router/router.yaml`
+
+Settings load from YAML first, then environment variables override matching fields. On Render, use the Secret File for structured config and Environment for secrets — do not duplicate the same value in both places with different values.
+
+| Setting | Secret File (`router.yaml`) | Environment | Effective source |
+|---------|----------------------------|-------------|------------------|
+| Public URL | `public_url` | `PUBLIC_URL` | Environment |
+| Google OAuth | leave empty | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Environment |
+| Session secret | optional | `SESSION_SECRET` | Environment |
+| API keys | use `api_key_env` | `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY` | Environment |
+| Routing, admin emails, providers | primary source | — | YAML |
+
+After Google login, users land on `{PUBLIC_URL}/portal`. Session cookies are not shared across different hostnames.
 
 Environment overrides:
 
@@ -34,7 +46,7 @@ OLLAMA_CLOUD_API_KEY=xxx
 OPENROUTER_API_KEY=xxx
 ```
 
-Provider routing is configured in `providers` and `routing`:
+Provider routing uses **`provider@upstream_model`** model IDs. The part before `@` is the router provider name (`openrouter`, `ollama_cloud`, …); the part after `@` is forwarded unchanged to that provider.
 
 ```yaml
 providers:
@@ -43,12 +55,21 @@ providers:
     base_url: "https://ollama.com/v1"
     api_key_env: "OLLAMA_CLOUD_API_KEY"
 
-routing:
-  default_provider: ollama_cloud
-  rules:
-    - match: "anthropic/*"
-      provider: openrouter
+  openrouter:
+    type: openai_compatible
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
 ```
+
+Examples:
+
+| Model ID | Routes to | Upstream model |
+|----------|-----------|----------------|
+| `openrouter@anthropic/claude-sonnet-4` | openrouter | `anthropic/claude-sonnet-4` |
+| `openrouter@openai/gpt-oss-120b:free` | openrouter | `openai/gpt-oss-120b:free` |
+| `ollama_cloud@qwen3-coder-next` | ollama_cloud | `qwen3-coder-next` |
+
+Bare names such as `qwen3-coder-next` are rejected with **400**. Use `GET /v1/models` to copy prefixed IDs.
 
 ## Student BYOK
 
@@ -58,6 +79,8 @@ After redeeming an invite code, students configure their client with:
 OPENAI_BASE_URL=https://ai.vanscoding.com/v1
 OPENAI_API_KEY=vcr_sk_xxxxxxxx
 ```
+
+Use model IDs from `/v1/models` (for example `openrouter@anthropic/claude-sonnet-4`). See [guide/VSCODE_COPILOT_BYOK.md](guide/VSCODE_COPILOT_BYOK.md).
 
 Supported endpoints:
 
@@ -82,10 +105,11 @@ Use Render Web Service + Render PostgreSQL.
 
 1. Create a Web Service from this repo.
 2. Create a PostgreSQL instance.
-3. Set env vars listed above.
-4. Add custom domain `ai.vanscoding.com`.
-5. In Squarespace DNS, add CNAME host `ai` to the Render-provided hostname.
-6. In Google Cloud Console, add authorized redirect URI:
+3. Add Secret File `router.yaml` at `/etc/secrets/router.yaml` (providers, `admin_emails`; leave Google fields empty).
+4. Set env vars listed above (`PUBLIC_URL`, Google OAuth, API keys).
+5. Add custom domain `ai.vanscoding.com`.
+6. In Squarespace DNS, add CNAME host `ai` to the Render-provided hostname.
+7. In Google Cloud Console, add authorized redirect URI:
 
 ```text
 https://ai.vanscoding.com/auth/google/callback

@@ -3,7 +3,7 @@ from typing import Any, AsyncGenerator
 import pytest
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.infrastructure.config import RoutingRuleSettings, RoutingSettings
+from src.domain.errors import InvalidModelIdError
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
 
@@ -22,7 +22,9 @@ class FakeGateway:
         return {"ok": True}
 
     async def models(self) -> dict[str, Any]:
-        return {"object": "list", "data": [{"id": f"{self.name}-model", "object": "model"}]}
+        if self.name == "openrouter":
+            return {"object": "list", "data": [{"id": "anthropic/claude-sonnet", "object": "model"}]}
+        return {"object": "list", "data": [{"id": "qwen3-coder-next", "object": "model"}]}
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
         self.requests.append(req.model)
@@ -41,20 +43,26 @@ class FakeGateway:
         yield b"data: [DONE]\n\n"
 
 
-@pytest.mark.asyncio
-async def test_routing_gateway_uses_matching_rule():
-    openrouter = FakeGateway("openrouter")
-    ollama_cloud = FakeGateway("ollama_cloud")
-    gateway = RoutingGateway(
-        {"openrouter": openrouter, "ollama_cloud": ollama_cloud},
-        RoutingSettings(
-            default_provider="ollama_cloud",
-            rules=(RoutingRuleSettings(match="anthropic/*", provider="openrouter"),),
-        ),
+@pytest.fixture
+def gateway() -> RoutingGateway:
+    return RoutingGateway(
+        {
+            "openrouter": FakeGateway("openrouter"),
+            "ollama_cloud": FakeGateway("ollama_cloud"),
+        }
     )
 
+
+@pytest.mark.asyncio
+async def test_routing_gateway_routes_openrouter_at_model(gateway: RoutingGateway):
+    openrouter = gateway.gateways["openrouter"]
+    ollama_cloud = gateway.gateways["ollama_cloud"]
+
     response = await gateway.chat_completions_nonstream(
-        ChatCompletionRequest(model="anthropic/claude-sonnet", messages=[ChatMessage(role="user", content="hi")])
+        ChatCompletionRequest(
+            model="openrouter@anthropic/claude-sonnet",
+            messages=[ChatMessage(role="user", content="hi")],
+        )
     )
 
     assert response == {"provider": "openrouter"}
@@ -63,28 +71,35 @@ async def test_routing_gateway_uses_matching_rule():
 
 
 @pytest.mark.asyncio
-async def test_routing_gateway_falls_back_to_default_provider():
-    openrouter = FakeGateway("openrouter")
-    ollama_cloud = FakeGateway("ollama_cloud")
-    gateway = RoutingGateway(
-        {"openrouter": openrouter, "ollama_cloud": ollama_cloud},
-        RoutingSettings(default_provider="ollama_cloud"),
-    )
+async def test_routing_gateway_routes_openrouter_slug_with_colon_suffix(gateway: RoutingGateway):
+    openrouter = gateway.gateways["openrouter"]
 
-    response = await gateway.responses_create({"model": "llama3.3"})
+    await gateway.responses_create({"model": "openrouter@openai/gpt-oss-120b:free", "input": "hi"})
 
-    assert response == {"provider": "ollama_cloud"}
-    assert ollama_cloud.requests == ["llama3.3"]
+    assert openrouter.requests == ["openai/gpt-oss-120b:free"]
 
 
 @pytest.mark.asyncio
-async def test_routing_gateway_merges_models_with_provider_name():
-    gateway = RoutingGateway(
-        {"openrouter": FakeGateway("openrouter"), "ollama_cloud": FakeGateway("ollama_cloud")},
-        RoutingSettings(default_provider="ollama_cloud"),
-    )
+async def test_routing_gateway_routes_ollama_at_model(gateway: RoutingGateway):
+    ollama_cloud = gateway.gateways["ollama_cloud"]
 
+    response = await gateway.responses_create({"model": "ollama_cloud@qwen3-coder-next", "input": "hi"})
+
+    assert response == {"provider": "ollama_cloud"}
+    assert ollama_cloud.requests == ["qwen3-coder-next"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_rejects_bare_model(gateway: RoutingGateway):
+    with pytest.raises(InvalidModelIdError):
+        await gateway.responses_create({"model": "qwen3-coder-next", "input": "hi"})
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_models_return_prefixed_ids(gateway: RoutingGateway):
     models = await gateway.models()
 
     assert models["object"] == "list"
+    ids = {item["id"] for item in models["data"]}
+    assert ids == {"openrouter@anthropic/claude-sonnet", "ollama_cloud@qwen3-coder-next"}
     assert {item["provider"] for item in models["data"]} == {"openrouter", "ollama_cloud"}

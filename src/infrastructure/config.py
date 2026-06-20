@@ -40,15 +40,8 @@ class ProviderSettings:
 
 
 @dataclass(frozen=True)
-class RoutingRuleSettings:
-    match: str
-    provider: str
-
-
-@dataclass(frozen=True)
 class RoutingSettings:
     default_provider: str = ""
-    rules: tuple[RoutingRuleSettings, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,11 +89,6 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
         providers=providers,
         routing=RoutingSettings(
             default_provider=str(routing.get("default_provider", "")),
-            rules=tuple(
-                RoutingRuleSettings(match=str(rule.get("match", "")), provider=str(rule.get("provider", "")))
-                for rule in routing.get("rules", [])
-                if isinstance(rule, dict)
-            ),
         ),
     ))
 
@@ -179,7 +167,6 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
         },
         "routing": {
             "default_provider": settings.routing.default_provider,
-            "rules": [{"match": rule.match, "provider": rule.provider} for rule in settings.routing.rules],
         },
     }
 

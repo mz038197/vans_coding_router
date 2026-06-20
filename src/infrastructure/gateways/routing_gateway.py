@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from fnmatch import fnmatch
+from dataclasses import replace
 from typing import Any, AsyncGenerator
 
 from src.domain.entities.chat import ChatCompletionRequest
-from src.domain.errors import ServiceUnavailableError
 from src.domain.ports.llm_gateway import LLMGatewayPort
-from src.infrastructure.config import RoutingSettings
+from src.infrastructure.routing.model_id import format_model_id, parse_model_id
 
 
 class RoutingGateway:
-    def __init__(self, gateways: dict[str, LLMGatewayPort], routing: RoutingSettings):
+    def __init__(self, gateways: dict[str, LLMGatewayPort]):
         self.gateways = gateways
-        self.routing = routing
 
     async def startup(self) -> None:
         for gateway in self.gateways.values():
@@ -35,8 +33,15 @@ class RoutingGateway:
             try:
                 models = await gateway.models()
                 for item in models.get("data", []):
-                    if isinstance(item, dict):
-                        data.append({"provider": name, **item})
+                    if not isinstance(item, dict):
+                        continue
+                    upstream_id = str(item.get("id", ""))
+                    if not upstream_id:
+                        continue
+                    entry = dict(item)
+                    entry["id"] = format_model_id(name, upstream_id)
+                    entry["provider"] = name
+                    data.append(entry)
             except Exception as exc:
                 errors[name] = str(exc)
         result: dict[str, Any] = {"object": "list", "data": data}
@@ -45,32 +50,33 @@ class RoutingGateway:
         return result
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
-        return await self._gateway_for_model(req.model).chat_completions_nonstream(req)
+        gateway, upstream_req = self._resolve_chat_request(req)
+        return await gateway.chat_completions_nonstream(upstream_req)
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
-        async for chunk in self._gateway_for_model(req.model).chat_completions_stream(req):
+        gateway, upstream_req = self._resolve_chat_request(req)
+        async for chunk in gateway.chat_completions_stream(upstream_req):
             yield chunk
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        return await self._gateway_for_model(str(body.get("model", ""))).responses_create(body)
+        gateway, payload = self._resolve_responses_body(body)
+        return await gateway.responses_create(payload)
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        async for chunk in self._gateway_for_model(str(body.get("model", ""))).responses_create_stream(body):
+        gateway, payload = self._resolve_responses_body(body)
+        async for chunk in gateway.responses_create_stream(payload):
             yield chunk
 
-    def _gateway_for_model(self, model: str) -> LLMGatewayPort:
-        provider_name = self._provider_for_model(model)
-        gateway = self.gateways.get(provider_name)
-        if gateway is None:
-            raise ServiceUnavailableError(f"No provider configured for model '{model}'")
-        return gateway
+    def _known_providers(self) -> set[str]:
+        return set(self.gateways.keys())
 
-    def _provider_for_model(self, model: str) -> str:
-        for rule in self.routing.rules:
-            if rule.match and fnmatch(model, rule.match):
-                return rule.provider
-        if self.routing.default_provider:
-            return self.routing.default_provider
-        if self.gateways:
-            return next(iter(self.gateways))
-        raise ServiceUnavailableError("No LLM providers configured")
+    def _resolve_chat_request(self, req: ChatCompletionRequest) -> tuple[LLMGatewayPort, ChatCompletionRequest]:
+        provider_name, upstream_model = parse_model_id(req.model, self._known_providers())
+        gateway = self.gateways[provider_name]
+        return gateway, replace(req, model=upstream_model)
+
+    def _resolve_responses_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
+        provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
+        payload = dict(body)
+        payload["model"] = upstream_model
+        return self.gateways[provider_name], payload

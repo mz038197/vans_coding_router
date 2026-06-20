@@ -34,15 +34,3 @@ providers:
     extra_headers:
       HTTP-Referer: "https://ai.vanscoding.com"
       X-Title: "Vans Coding Router"
-
-routing:
-  default_provider: ollama_cloud
-  rules:
-    - match: "claude-*"
-      provider: openrouter
-    - match: "anthropic/*"
-      provider: openrouter
-    - match: "gpt-*"
-      provider: openrouter
-    - match: "llama*"
-      provider: ollama_cloud

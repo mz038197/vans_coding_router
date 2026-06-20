@@ -3,6 +3,7 @@ import asyncio
 import os
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from src.bootstrap import build_container
 from src.presentation.fastapi.error_handlers import register_error_handlers
@@ -53,3 +54,8 @@ app.add_middleware(ApiKeyMiddleware, auth_use_case=container.auth_use_case)
 app.include_router(create_api_router(container.api_use_case))
 if container.portal_use_case is not None and container.router_settings is not None:
     app.include_router(create_portal_router(container.portal_use_case, container.router_settings))
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/portal", status_code=302)

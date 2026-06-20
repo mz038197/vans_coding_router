@@ -5,6 +5,7 @@ from src.domain.errors import (
     AdminBusinessError,
     AppError,
     AuthenticationError,
+    InvalidModelIdError,
     ServiceUnavailableError,
     StatefulResponsesNotSupportedError,
     UpstreamServiceError,
@@ -58,6 +59,21 @@ def register_error_handlers(app: FastAPI) -> None:
                 exc.status_code,
                 exc.message,
                 error_type="server_error",
+            )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(InvalidModelIdError)
+    async def handle_invalid_model_id_error(request: Request, exc: InvalidModelIdError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+                param="model",
             )
         return JSONResponse(
             status_code=exc.status_code,

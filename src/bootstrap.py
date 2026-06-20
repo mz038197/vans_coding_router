@@ -21,10 +21,7 @@ def build_container(
         for name, provider in settings.providers.items()
         if provider.enabled and provider.type == "openai_compatible" and provider.base_url
     }
-    llm_gateway = RoutingGateway(
-        provider_gateways,
-        settings.routing,
-    )
+    llm_gateway = RoutingGateway(provider_gateways)
 
     auth_use_case = AuthUseCase(api_key_repo=api_key_repo)
     api_use_case = ApiUseCase(
