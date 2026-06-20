@@ -4,6 +4,8 @@ FastAPI router for Vans Coding classes. Students sign in with Google, redeem a c
 
 The router does not run or manage local Ollama. It forwards OpenAI-compatible requests to configured providers such as Ollama Cloud and OpenRouter.
 
+**Full deployment runbook (Render, OAuth, DNS, troubleshooting):** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md)
+
 ## Quick Start
 
 ```powershell
@@ -103,17 +105,7 @@ Supported endpoints:
 
 Use Render Web Service + Render PostgreSQL.
 
-1. Create a Web Service from this repo.
-2. Create a PostgreSQL instance.
-3. Add Secret File `router.yaml` at `/etc/secrets/router.yaml` (providers, `admin_emails`; leave Google fields empty).
-4. Set env vars listed above (`PUBLIC_URL`, Google OAuth, API keys).
-5. Add custom domain `ai.vanscoding.com`.
-6. In Squarespace DNS, add CNAME host `ai` to the Render-provided hostname.
-7. In Google Cloud Console, add authorized redirect URI:
-
-```text
-https://ai.vanscoding.com/auth/google/callback
-```
+**Step-by-step checklist:** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md) (Blueprint, Secret File, Environment, Google OAuth, DNS, verification, troubleshooting).
 
 Render commands:
 

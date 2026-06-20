@@ -1,5 +1,7 @@
 # OAuth and Render
 
+> **完整流程請看 [`DEPLOYMENT.md`](DEPLOYMENT.md)。** 本文件為 OAuth 與 Render 設定摘要。
+
 Production URL:
 
 ```text
