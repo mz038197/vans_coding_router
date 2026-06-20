@@ -1,3 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["tests", "."]
+testpaths = ["tests"]
+
 [project]
 name = "vans-coding-router"
 version = "0.2.1"

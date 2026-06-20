@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from tests.presentation.fastapi.test_api_contract import build_test_client
+from api_test_utils import build_test_client
 
 
 def test_responses_rejects_missing_api_key(fake_repo, fake_gateway, fake_logger):

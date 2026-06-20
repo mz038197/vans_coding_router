@@ -141,10 +141,11 @@ class SqliteRouterRepository:
             self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
             self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
+            self._ensure_column(conn, "class_sessions", "name", "TEXT")
             self._backfill_user_roles(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
@@ -365,7 +366,8 @@ class SqliteRouterRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT k.id, k.key_prefix, k.expires_at, k.enabled, s.id AS session_id, c.name AS class_name
+                SELECT k.id, k.key_prefix, k.expires_at, k.enabled, s.id AS session_id,
+                       c.name AS class_name, s.name AS session_name, s.session_at
                 FROM api_keys k
                 LEFT JOIN class_sessions s ON s.id = k.session_id
                 LEFT JOIN classes c ON c.id = s.class_id
@@ -417,9 +419,13 @@ class SqliteRouterRepository:
         self,
         class_id: int,
         created_by: int,
+        name: str,
         ttl_hours: int | None = None,
         session_at: str | None = None,
     ) -> dict[str, Any]:
+        cleaned_name = name.strip()
+        if not cleaned_name:
+            raise ValueError("課堂名稱不可為空")
         klass = self.get_class(class_id)
         if not klass or klass["status"] != "active":
             raise ValueError("class is not active")
@@ -436,10 +442,10 @@ class SqliteRouterRepository:
             cur = conn.execute(
                 """
                 INSERT INTO class_sessions(
-                    class_id, invite_code, expires_at, session_at, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    class_id, invite_code, expires_at, session_at, name, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (class_id, invite_code, _dt(expires_at), _dt(start), created_by, now),
+                (class_id, invite_code, _dt(expires_at), _dt(start), cleaned_name, created_by, now),
             )
             return dict(conn.execute("SELECT * FROM class_sessions WHERE id = ?", (cur.lastrowid,)).fetchone())
 
@@ -461,7 +467,15 @@ class SqliteRouterRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def update_class_session(self, class_id: int, session_id: int, expires_at: str) -> dict[str, Any] | None:
+    def update_class_session(
+        self,
+        class_id: int,
+        session_id: int,
+        expires_at: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any] | None:
+        if expires_at is None and name is None:
+            raise ValueError("nothing to update")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT id FROM class_sessions WHERE id = ? AND class_id = ?",
@@ -469,14 +483,23 @@ class SqliteRouterRepository:
             ).fetchone()
             if not row:
                 return None
-            conn.execute(
-                "UPDATE class_sessions SET expires_at = ? WHERE id = ?",
-                (expires_at, session_id),
-            )
-            conn.execute(
-                "UPDATE api_keys SET expires_at = ? WHERE session_id = ?",
-                (expires_at, session_id),
-            )
+            if name is not None:
+                cleaned_name = name.strip()
+                if not cleaned_name:
+                    raise ValueError("課堂名稱不可為空")
+                conn.execute(
+                    "UPDATE class_sessions SET name = ? WHERE id = ?",
+                    (cleaned_name, session_id),
+                )
+            if expires_at is not None:
+                conn.execute(
+                    "UPDATE class_sessions SET expires_at = ? WHERE id = ?",
+                    (expires_at, session_id),
+                )
+                conn.execute(
+                    "UPDATE api_keys SET expires_at = ? WHERE session_id = ?",
+                    (expires_at, session_id),
+                )
             updated = conn.execute("SELECT * FROM class_sessions WHERE id = ?", (session_id,)).fetchone()
             return dict(updated) if updated else None
 
@@ -619,6 +642,7 @@ class SqliteRouterRepository:
                 l.user_id,
                 l.class_id,
                 l.session_id,
+                l.raw_prompt,
                 l.model,
                 l.status,
                 l.prompt_tokens,

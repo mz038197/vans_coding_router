@@ -306,14 +306,24 @@ def test_list_and_create_class_sessions(tmp_path):
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"session_at": session_at, "ttl_hours": 3},
+        json={"name": "第一堂", "session_at": session_at, "ttl_hours": 3},
     )
     assert create.status_code == 200
     created = create.json()
     assert created["session_at"] == session_at
+    assert created["name"] == "第一堂"
     assert created["expires_at"] == "2026-06-21T17:00:00+00:00"
 
     listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
     assert listing.status_code == 200
     assert len(listing.json()["items"]) == 1
     assert listing.json()["items"][0]["invite_code"]
+    assert listing.json()["items"][0]["name"] == "第一堂"
+
+    patch = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{created['id']}",
+        cookies=cookies,
+        json={"name": "第二堂"},
+    )
+    assert patch.status_code == 200
+    assert patch.json()["name"] == "第二堂"

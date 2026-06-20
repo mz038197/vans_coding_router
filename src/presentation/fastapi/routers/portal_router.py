@@ -29,12 +29,14 @@ class RedeemRequest(BaseModel):
 
 
 class SessionRequest(BaseModel):
+    name: str
     session_at: str | None = None
     ttl_hours: int | None = None
 
 
 class SessionPatchRequest(BaseModel):
-    expires_at: str
+    expires_at: str | None = None
+    name: str | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -204,6 +206,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.create_session(
                 current_user_id(session_user_id),
                 class_id,
+                data.name if data else "",
                 ttl_hours=data.ttl_hours if data else None,
                 session_at=data.session_at if data else None,
             )
@@ -221,7 +224,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 class_id,
                 session_id,
-                data.expires_at,
+                expires_at=data.expires_at,
+                name=data.name,
             )
         )
 

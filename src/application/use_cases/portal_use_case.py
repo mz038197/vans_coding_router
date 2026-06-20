@@ -39,6 +39,7 @@ class PortalUseCase:
         self,
         teacher_id: int,
         class_id: int,
+        name: str,
         ttl_hours: int | None = None,
         session_at: str | None = None,
     ) -> dict[str, Any]:
@@ -49,6 +50,7 @@ class PortalUseCase:
         return self.repo.create_class_session(
             class_id,
             teacher_id,
+            name,
             ttl_hours=ttl_hours,
             session_at=session_at,
         )
@@ -57,9 +59,16 @@ class PortalUseCase:
         self._assert_class_owner(teacher_id, class_id)
         return self.repo.list_class_sessions(class_id)
 
-    def update_session(self, teacher_id: int, class_id: int, session_id: int, expires_at: str) -> dict[str, Any] | None:
+    def update_session(
+        self,
+        teacher_id: int,
+        class_id: int,
+        session_id: int,
+        expires_at: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any] | None:
         self._assert_class_owner(teacher_id, class_id)
-        return self.repo.update_class_session(class_id, session_id, expires_at)
+        return self.repo.update_class_session(class_id, session_id, expires_at=expires_at, name=name)
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
         return self.repo.redeem_invite(invite_code, user_id)
@@ -89,7 +98,8 @@ class PortalUseCase:
             end_at,
             limit=limit,
         )
-        return {"items": items, "limit": limit, "has_filter": has_filter}
+        public_items = [{key: value for key, value in item.items() if key != "raw_prompt"} for item in items]
+        return {"items": public_items, "limit": limit, "has_filter": has_filter}
 
     def prompt_log_detail(self, teacher_id: int, class_id: int, log_id: int) -> dict[str, Any] | None:
         self._assert_class_owner(teacher_id, class_id)

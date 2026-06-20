@@ -37,6 +37,24 @@
     .subtable { margin: 8px 0 0; background: #f6f7f9; }
     .key-meta { margin: 8px 0; padding: 10px; background: #f6f7f9; border-radius: 6px; }
     .admin-block { margin-top: 16px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+    .tag-active { background: #e6f4ea; color: #137333; }
+    .tag-ended { background: #f1f3f4; color: #5d6d7e; }
+    .tag-expired { background: #fef3e6; color: #b45309; }
+    .tag-rejected { background: #fef3f2; color: #b42318; }
+    .tag-success { background: #e6f4ea; color: #137333; }
+    .tag-role-admin { background: #ede7f6; color: #5e35b1; }
+    .tag-role-teacher { background: #e3f2fd; color: #1565c0; }
+    .tag-role-student { background: #e0f2f1; color: #00695c; }
+    .tag-personal { background: #eef2ff; color: #4338ca; }
+    .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .profile-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .btn-danger { background: #fff; color: #b42318; border: 1px solid #fecdca; }
+    .btn-danger:hover { background: #fef3f2; }
+    .course-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+    .course-detail-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-weight: 600; }
+    code.key-prefix { font-family: ui-monospace, monospace; font-size: 0.9em; }
+    .session-name-sub { display: block; color: #5d6d7e; font-size: 0.85rem; font-weight: 400; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -78,14 +96,15 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
 
     <section id="teacher" class="hidden">
       <div class="tabs">
-        <button onclick="showTab('keyTab')">我的 API Key</button>
+        <button onclick="showTab('keyTab')">個人 API Key</button>
         <button onclick="showTab('classTab')">我的課程</button>
         <button onclick="showTab('monitorTab')">Prompt 監控</button>
         <button id="adminBtn" class="hidden" onclick="showTab('adminTab')">系統管理</button>
       </div>
       <div id="keyTab">
         <div id="teacherKeyMeta" class="key-meta"></div>
-        <button onclick="resetTeacherKey()">重設長期 API Key</button>
+        <button onclick="resetTeacherKey()">重設個人 API Key</button>
+        <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製保存。</p>
         <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
         <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
       </div>
@@ -93,10 +112,26 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <h3>建立課程</h3>
         <input id="className" placeholder="課程名稱" />
         <button onclick="createClass()">建立</button>
-        <div id="courses"></div>
+        <div class="course-toolbar">
+          <input id="courseSearch" placeholder="搜尋課程名稱" oninput="onCourseFilterChange()" />
+          <select id="courseStatusFilter" onchange="onCourseFilterChange()">
+            <option value="active">進行中</option>
+            <option value="all">全部</option>
+            <option value="ended">已結束</option>
+          </select>
+          <select id="courseSelect" onchange="onCourseSelectChange()">
+            <option value="">請選擇課程</option>
+          </select>
+        </div>
+        <div id="courseDetail"><p class="hint">請選擇課程</p></div>
       </div>
       <div id="monitorTab" class="hidden">
         <label for="monitorClassId">課程</label>
+        <select id="monitorStatusFilter" onchange="onMonitorFilterChange()">
+          <option value="active">進行中</option>
+          <option value="all">全部</option>
+          <option value="ended">已結束</option>
+        </select>
         <select id="monitorClassId" onchange="onMonitorClassChange()">
           <option value="">請選擇課程</option>
         </select>
@@ -142,6 +177,123 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     let redemptionsCache = {};
     let lastRedeemedKey = '';
     let lastTeacherKey = '';
+    let selectedCourseId = '';
+
+    function renderStatusTag(kind, value) {
+      const map = {
+        course: { active: ['active', '進行中'], ended: ['ended', '已結束'] },
+        user: { active: ['active', '有效'], inactive: ['ended', '停用'] },
+        prompt: { ok: ['active', '成功'], rejected: ['rejected', '拒絕'] },
+        key: { valid: ['active', '有效'], active: ['active', '進行中'], expired: ['expired', '已過期'] },
+      };
+      const entry = map[kind]?.[value];
+      if (!entry) return escapeHtml(value || '—');
+      const [cls, label] = entry;
+      return `<span class="tag tag-${cls}">${label}</span>`;
+    }
+
+    function renderRoleTags(roles) {
+      const order = [
+        ['admin', '管理員', 'tag-role-admin'],
+        ['teacher', '老師', 'tag-role-teacher'],
+        ['student', '學生', 'tag-role-student'],
+      ];
+      const set = new Set(roles || []);
+      return order
+        .filter(([role]) => set.has(role))
+        .map(([, label, cls]) => `<span class="tag ${cls}">${label}</span>`)
+        .join('');
+    }
+
+    function isSessionExpired(expiresAt) {
+      if (!expiresAt) return false;
+      const date = new Date(expiresAt);
+      return !Number.isNaN(date.getTime()) && date <= new Date();
+    }
+
+    function sessionDisplayName(session) {
+      const name = (session?.name || session?.session_name || '').trim();
+      if (name) return name;
+      return '（未命名）';
+    }
+
+    function sessionStatusTag(session, courseStatus) {
+      if (courseStatus === 'ended') return renderStatusTag('course', 'ended');
+      if (isSessionExpired(session.expires_at)) return renderStatusTag('key', 'expired');
+      return renderStatusTag('key', 'active');
+    }
+
+    function keyStatusTag(key) {
+      if (!key.session_id) return renderStatusTag('key', 'valid');
+      if (isSessionExpired(key.expires_at)) return renderStatusTag('key', 'expired');
+      return renderStatusTag('key', 'active');
+    }
+
+    function sessionNameCell(session) {
+      const label = escapeHtml(sessionDisplayName(session));
+      const when = session.session_at || session.created_at;
+      const sub = when
+        ? `<span class="session-name-sub">${escapeHtml(formatLocalDateTime(when))}</span>`
+        : '';
+      return `${label}${sub}`;
+    }
+
+    function filterCourses(classes, status, query) {
+      const q = (query || '').trim().toLowerCase();
+      return (classes || []).filter(c => {
+        if (status === 'active' && c.status !== 'active') return false;
+        if (status === 'ended' && c.status !== 'ended') return false;
+        if (q && !(c.name || '').toLowerCase().includes(q)) return false;
+        return true;
+      });
+    }
+
+    function renderActiveKeysTable(keys) {
+      const items = keys || [];
+      if (!items.length) return '<p class="hint">尚無有效 Key</p>';
+      return `<table>
+        <tr><th>Key 前綴</th><th>課程</th><th>課堂</th><th>到期</th><th>狀態</th></tr>
+        ${items.map(k => {
+          const isPersonal = !k.session_id;
+          const course = isPersonal ? '—' : escapeHtml(k.class_name || '—');
+          let sessionCell = '—';
+          if (!isPersonal) {
+            const name = escapeHtml(sessionDisplayName(k));
+            const sub = k.session_at
+              ? `<span class="session-name-sub">${escapeHtml(formatLocalDateTime(k.session_at))}</span>`
+              : '';
+            sessionCell = `${name}${sub}`;
+          }
+          const expiry = isPersonal ? '不過期' : escapeHtml(formatLocalDateTime(k.expires_at));
+          const typeTag = isPersonal ? `<span class="tag tag-personal">個人</span> ` : '';
+          return `<tr>
+            <td><code class="key-prefix">${escapeHtml(k.key_prefix)}…</code></td>
+            <td>${course}</td>
+            <td>${sessionCell}</td>
+            <td>${expiry}</td>
+            <td>${typeTag}${keyStatusTag(k)}</td>
+          </tr>`;
+        }).join('')}
+      </table>`;
+    }
+
+    function renderTeacherKeyMeta(keys) {
+      const longLived = (keys || []).filter(k => !k.session_id);
+      const box = document.getElementById('teacherKeyMeta');
+      if (!longLived.length) {
+        box.innerHTML = '<p class="hint">尚未建立個人 API Key，請按下方按鈕重設。</p>';
+        return;
+      }
+      box.innerHTML = renderActiveKeysTable(longLived);
+    }
+
+    function renderProfileLine(me) {
+      const roles = me.roles || [me.role];
+      return `<span class="profile-line">
+        <span>${escapeHtml(me.name)} (${escapeHtml(me.email)})</span>
+        <span class="tag-row">${renderRoleTags(roles)}</span>
+      </span>`;
+    }
 
     function showLoginError(message) {
       const box = document.getElementById('loginError');
@@ -230,18 +382,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
 
     function showTab(id) {
       ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id));
-      if (id === 'monitorTab') populateMonitorClasses(teacherClasses);
-    }
-
-    function renderTeacherKeyMeta(keys) {
-      const longLived = (keys || []).filter(k => !k.session_id);
-      const box = document.getElementById('teacherKeyMeta');
-      if (!longLived.length) {
-        box.innerHTML = '<p class="hint">尚未建立長期 API Key，請按下方按鈕重設。</p>';
-        return;
-      }
-      const k = longLived[0];
-      box.innerHTML = `<strong>目前長期 Key</strong><br>前綴：${escapeHtml(k.key_prefix)} · 到期：${escapeHtml(k.expires_at || '不過期')}`;
+      if (id === 'monitorTab') syncMonitorCourseSelect();
+      if (id === 'classTab') syncCourseSelect();
     }
 
     async function refresh() {
@@ -249,32 +391,112 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       currentRoles = me.roles || [me.role];
       document.getElementById('login').classList.add('hidden');
       document.getElementById('profile').classList.remove('hidden');
-      document.getElementById('who').textContent = `${me.name} (${me.email}) - ${currentRoles.join(', ')}`;
-      document.getElementById('keys').innerHTML = (me.keys || []).map(k =>
-        `<div>${escapeHtml(k.key_prefix)} - ${escapeHtml(k.class_name || '長期')} - ${escapeHtml(k.expires_at || '不過期')}</div>`
-      ).join('') || '<p class="hint">尚無有效 Key</p>';
+      document.getElementById('who').innerHTML = renderProfileLine(me);
+      document.getElementById('keys').innerHTML = renderActiveKeysTable(me.keys || []);
       document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
       document.getElementById('teacher').classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
       if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
         document.getElementById('adminBtn').classList.toggle('hidden', !currentRoles.includes('admin'));
         teacherClasses = me.classes || [];
         renderTeacherKeyMeta(me.keys || []);
-        renderCourseExpanders(teacherClasses);
-        populateMonitorClasses(teacherClasses);
+        syncCourseSelect();
+        syncMonitorCourseSelect();
       }
     }
 
-    function populateMonitorClasses(classes) {
+    function syncCourseSelect() {
+      if (!teacherClasses.length) {
+        document.getElementById('courseSelect').innerHTML = '<option value="">請選擇課程</option>';
+        document.getElementById('courseDetail').innerHTML = '<p class="hint">尚無課程，請先建立。</p>';
+        selectedCourseId = '';
+        return;
+      }
+      const status = document.getElementById('courseStatusFilter').value || 'active';
+      const query = document.getElementById('courseSearch').value || '';
+      const filtered = filterCourses(teacherClasses, status, query);
+      const select = document.getElementById('courseSelect');
+      const previous = select.value;
+      select.innerHTML = '<option value="">請選擇課程</option>' + filtered.map(c =>
+        `<option value="${c.id}">${escapeHtml(c.name)} · ${c.member_count ?? 0} 位</option>`
+      ).join('');
+      if (previous && filtered.some(c => String(c.id) === previous)) {
+        select.value = previous;
+      } else if (filtered.length) {
+        const preferred = filtered.find(c => c.status === 'active') || filtered[0];
+        select.value = String(preferred.id);
+      } else {
+        select.value = '';
+      }
+      selectedCourseId = select.value;
+      renderCourseDetailPanel();
+    }
+
+    function onCourseFilterChange() {
+      syncCourseSelect();
+    }
+
+    function onCourseSelectChange() {
+      selectedCourseId = document.getElementById('courseSelect').value;
+      renderCourseDetailPanel();
+    }
+
+    function getSelectedCourse() {
+      if (!selectedCourseId) return null;
+      return teacherClasses.find(c => String(c.id) === String(selectedCourseId)) || null;
+    }
+
+    function renderCourseDetailPanel() {
+      const box = document.getElementById('courseDetail');
+      const course = getSelectedCourse();
+      if (!course) {
+        box.innerHTML = '<p class="hint">請選擇課程</p>';
+        return;
+      }
+      const ended = course.status === 'ended';
+      box.innerHTML = `
+        <div class="course-detail-header">
+          <span>${escapeHtml(course.name)}</span>
+          ${renderStatusTag('course', course.status)}
+          <span class="hint" style="margin:0;">${course.member_count ?? 0} 位成員</span>
+        </div>
+        ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
+          <div class="session-form">
+            <label>課堂名稱 <input type="text" id="sessionName" placeholder="例如：第一堂：環境建置" /></label>
+            <label>課堂時間 <input type="datetime-local" id="sessionAt" value="${defaultDatetimeLocalValue()}" /></label>
+            <label>TTL 小時 <input type="number" id="sessionTtl" value="2" min="1" style="width:5em;" /></label>
+            <button onclick="createSession(${course.id})">新增課堂</button>
+            <span class="hint">key 將在課堂時間 + TTL 小時後到期</span>
+          </div>`}
+        <div id="sessions-panel"><p class="hint">載入中…</p></div>
+        ${currentRoles.includes('admin') && !ended ? `<button class="btn-danger" onclick="disableClass(${course.id})">結束課程</button>` : ''}
+      `;
+      loadClassSessions(course.id).catch(err => showSessionError(course.id, err.message));
+    }
+
+    function syncMonitorCourseSelect() {
+      const statusEl = document.getElementById('monitorStatusFilter');
+      const status = statusEl ? statusEl.value : 'active';
+      const filtered = filterCourses(teacherClasses, status, '');
       const select = document.getElementById('monitorClassId');
       const previous = select.value;
-      select.innerHTML = '<option value="">請選擇課程</option>' + (classes || []).map(c =>
-        `<option value="${c.id}">${c.id} - ${escapeHtml(c.name)}</option>`
+      select.innerHTML = '<option value="">請選擇課程</option>' + filtered.map(c =>
+        `<option value="${c.id}">${escapeHtml(c.name)}</option>`
       ).join('');
-      if (previous && classes.some(c => String(c.id) === previous)) {
+      if (previous && filtered.some(c => String(c.id) === previous)) {
         select.value = previous;
-      } else if (classes.length === 1) {
-        select.value = String(classes[0].id);
+      } else if (filtered.length === 1) {
+        select.value = String(filtered[0].id);
         loadLogs().catch(err => showLogsError(err.message));
+      }
+    }
+
+    function onMonitorFilterChange() {
+      syncMonitorCourseSelect();
+      if (document.getElementById('monitorClassId').value) {
+        loadLogs().catch(err => showLogsError(err.message));
+      } else {
+        document.getElementById('logs').innerHTML = '';
+        document.getElementById('logsHint').textContent = '';
       }
     }
 
@@ -316,7 +538,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
               <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
               <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
               <td>${escapeHtml(item.model || '-')}</td>
-              <td>${escapeHtml(item.status || '-')}</td>
+              <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
               <td><button class="btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="showPromptDetail(${item.id})">查看完整</button></td>
             </tr>
@@ -345,7 +567,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       const data = await api('/sessions/redeem', {method:'POST', body: JSON.stringify({invite_code: document.getElementById('invite').value})});
       lastRedeemedKey = data.api_key;
       document.getElementById('redeemResult').textContent =
-        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n課程: ${data.session.class_name}\n到期: ${formatLocalDateTime(data.session.expires_at)}`;
+        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n課程: ${data.session.class_name}\n課堂: ${sessionDisplayName(data.session)}\n到期: ${formatLocalDateTime(data.session.expires_at)}`;
       document.getElementById('redeemResultWrap').classList.remove('hidden');
       await refresh();
     }
@@ -369,34 +591,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       await refresh();
     }
 
-    function classStatusLabel(status) {
-      return status === 'active' ? '進行中' : status;
-    }
-
-    function renderCourseExpanders(items) {
-      const container = document.getElementById('courses');
-      if (!items.length) {
-        container.innerHTML = '<p class="hint">尚無課程，請先建立。</p>';
-        return;
-      }
-      container.innerHTML = items.map((c, idx) => `
-        <details class="course-expander" id="course-${c.id}" ${idx === 0 ? 'open' : ''} ontoggle="if(this.open) loadClassSessions(${c.id})">
-          <summary>${escapeHtml(c.name)} (${escapeHtml(classStatusLabel(c.status))} · ${c.member_count} 位成員)</summary>
-          <div class="session-form">
-            <label>課堂時間 <input type="datetime-local" id="sessionAt-${c.id}" value="${defaultDatetimeLocalValue()}" /></label>
-            <label>TTL 小時 <input type="number" id="sessionTtl-${c.id}" value="2" min="1" style="width:5em;" /></label>
-            <button onclick="createSession(${c.id})">新增課堂</button>
-            <span class="hint">key 將在課堂時間 + TTL 小時後到期</span>
-          </div>
-          <div id="sessions-${c.id}"><p class="hint">載入中…</p></div>
-          ${currentRoles.includes('admin') ? `<button class="btn-secondary" onclick="disableClass(${c.id})">結束課程</button>` : ''}
-        </details>
-      `).join('');
-      if (items.length) loadClassSessions(items[0].id).catch(err => showSessionError(items[0].id, err.message));
-    }
-
     function showSessionError(classId, message) {
-      const box = document.getElementById(`sessions-${classId}`);
+      const box = document.getElementById('sessions-panel');
       if (box) box.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
     }
 
@@ -407,23 +603,31 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     }
 
     function renderSessionTable(classId, sessions) {
-      const box = document.getElementById(`sessions-${classId}`);
+      const course = teacherClasses.find(c => c.id === classId);
+      const courseStatus = course?.status || 'active';
+      const box = document.getElementById('sessions-panel');
+      if (!box) return;
       if (!sessions.length) {
         box.innerHTML = '<p class="hint">尚無課堂，請新增課堂。</p>';
         return;
       }
       box.innerHTML = `<table>
-        <tr><th>課堂時間</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
         ${sessions.map(s => `
           <tr>
+            <td>${sessionNameCell(s)}</td>
             <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
+            <td>${sessionStatusTag(s, courseStatus)}</td>
             <td><code>${escapeHtml(s.invite_code)}</code></td>
             <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
             <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
-            <td><button type="button" class="btn-secondary copy-invite-btn" style="padding:4px 10px;font-size:12px;" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button></td>
+            <td>
+              <button type="button" class="btn-secondary copy-invite-btn" style="padding:4px 10px;font-size:12px;" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>
+              <button type="button" class="btn-secondary" style="padding:4px 10px;font-size:12px;" data-name="${escapeHtml((s.name || '').trim())}" onclick="editSessionName(${classId}, ${s.id}, this)">編輯名稱</button>
+            </td>
           </tr>
           <tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="5"><div id="redemption-body-${s.id}"></div></td>
+            <td colspan="7"><div id="redemption-body-${s.id}"></div></td>
           </tr>
         `).join('')}
       </table>`;
@@ -465,16 +669,44 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     }
 
     async function createSession(classId) {
-      const sessionAt = datetimeLocalToUtcIso(document.getElementById(`sessionAt-${classId}`).value);
-      const ttlHours = Number(document.getElementById(`sessionTtl-${classId}`).value) || 2;
+      const nameInput = document.getElementById('sessionName');
+      const name = nameInput ? nameInput.value.trim() : '';
+      if (!name) throw new Error('請輸入課堂名稱');
+      const sessionAt = datetimeLocalToUtcIso(document.getElementById('sessionAt').value);
+      const ttlHours = Number(document.getElementById('sessionTtl').value) || 2;
       await api(`/teacher/classes/${classId}/sessions`, {
         method: 'POST',
-        body: JSON.stringify({session_at: sessionAt, ttl_hours: ttlHours}),
+        body: JSON.stringify({name, session_at: sessionAt, ttl_hours: ttlHours}),
       });
+      if (nameInput) nameInput.value = '';
       await loadClassSessions(classId);
     }
 
+    async function editSessionName(classId, sessionId, buttonEl) {
+      const current = (buttonEl?.dataset?.name || '').trim();
+      const label = window.prompt('請輸入課堂名稱', current);
+      if (label === null) return;
+      const name = label.trim();
+      if (!name) {
+        alert('請輸入課堂名稱');
+        return;
+      }
+      await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({name}),
+      });
+      await loadClassSessions(classId);
+      await refresh();
+    }
+
     async function disableClass(id) {
+      const course = teacherClasses.find(c => c.id === id);
+      const courseName = course?.name || `#${id}`;
+      const ok = window.confirm(
+        `確定要結束課程「${courseName}」嗎？\n\n` +
+        `結束後將無法新增課堂、學生無法領取邀請碼，既有 key 也會失效。此操作無法從 Portal 還原。`
+      );
+      if (!ok) return;
       await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})});
       await refresh();
     }
@@ -534,13 +766,13 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <div class="admin-block">
           <h4>使用者</h4>
           <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>角色</th><th>狀態</th></tr>
-          ${users.map(u => `<tr><td>${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml((u.roles || [u.role]).join(', '))}</td><td>${escapeHtml(u.status)}</td></tr>`).join('')}
+          ${users.map(u => `<tr><td>${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td>${renderRoleTags(u.roles || [u.role])}</td><td>${renderStatusTag('user', u.status === 'active' ? 'active' : 'inactive')}</td></tr>`).join('')}
           </table>
         </div>
         <div class="admin-block">
           <h4>課程</h4>
           <table><tr><th>ID</th><th>名稱</th><th>老師</th><th>狀態</th><th>成員</th></tr>
-          ${classes.map(c => `<tr><td>${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.teacher_name || c.teacher_email || '-')}</td><td>${escapeHtml(c.status)}</td><td>${c.member_count ?? 0}</td></tr>`).join('')}
+          ${classes.map(c => `<tr><td>${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.teacher_name || c.teacher_email || '-')}</td><td>${renderStatusTag('course', c.status)}</td><td>${c.member_count ?? 0}</td></tr>`).join('')}
           </table>
         </div>
         <div class="admin-block">

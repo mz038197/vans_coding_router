@@ -1,23 +1,7 @@
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from src.application.use_cases.api_use_case import ApiUseCase
-from src.application.use_cases.auth_use_case import AuthUseCase
 from src.domain.errors import UpstreamServiceError
-from src.presentation.fastapi.error_handlers import register_error_handlers
-from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
-from src.presentation.fastapi.routers.api_router import create_api_router
 
-
-def build_test_client(fake_repo, fake_gateway, fake_logger) -> TestClient:
-    auth_use_case = AuthUseCase(api_key_repo=fake_repo)
-    api_use_case = ApiUseCase(gateway=fake_gateway, api_key_repo=fake_repo, logger=fake_logger)
-
-    app = FastAPI()
-    register_error_handlers(app)
-    app.add_middleware(ApiKeyMiddleware, auth_use_case=auth_use_case)
-    app.include_router(create_api_router(api_use_case))
-    return TestClient(app)
+from api_test_utils import build_test_client
+from fakes import FakeApiKeyRepository
 
 
 def test_health_endpoint_contract(fake_repo, fake_gateway, fake_logger):
@@ -47,8 +31,6 @@ def test_models_endpoint_rejects_when_api_key_missing(fake_repo, fake_gateway, f
 
 
 def test_models_endpoint_allows_missing_api_key_when_key_system_disabled(fake_gateway, fake_logger):
-    from tests.conftest import FakeApiKeyRepository
-
     disabled_repo = FakeApiKeyRepository(config_data={}, force_enabled=False)
     client = build_test_client(disabled_repo, fake_gateway, fake_logger)
 
@@ -69,9 +51,7 @@ def test_chat_completion_rejects_when_api_key_missing(fake_repo, fake_gateway, f
     assert "error" in payload
     assert payload["error"]["message"] == "無效的 API 金鑰"
     assert "detail" not in payload
-    # 驗證無效的認證嘗試被記錄到審計追蹤
     assert len(fake_logger.entries) > 0
-    # 檢查最後一次記錄是無效的認證
     last_entry = fake_logger.entries[-1]
     assert last_entry["is_valid"] is False
 
