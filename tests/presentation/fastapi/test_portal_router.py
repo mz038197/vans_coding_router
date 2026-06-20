@@ -218,3 +218,74 @@ def test_admin_update_class_endpoint(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ended"
+
+
+def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
+    from src.domain.entities.auth import AuthContext
+
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    auth_context = AuthContext(
+        user_id=teacher["id"],
+        email=teacher["email"],
+        name=teacher["name"],
+        class_id=klass["id"],
+    )
+    repo.log_prompt(
+        auth=auth_context,
+        raw_prompt="user: <userRequest>hello portal</userRequest>",
+        final_prompt="user: <userRequest>hello portal</userRequest>",
+        model="openrouter@test",
+        status="ok",
+        client_ip="127.0.0.1",
+        message_preview="hello portal",
+        messages_json='[{"role":"user","content":"<userRequest>hello portal</userRequest>"}]',
+    )
+
+    response = client.get(
+        f"/teacher/classes/{klass['id']}/prompt-logs",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 10
+    assert payload["has_filter"] is False
+    assert payload["items"][0]["message_preview"] == "hello portal"
+    assert "raw_prompt" not in payload["items"][0]
+
+
+def test_prompt_log_detail_endpoint(tmp_path):
+    from src.domain.entities.auth import AuthContext
+
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    auth_context = AuthContext(
+        user_id=teacher["id"],
+        email=teacher["email"],
+        name=teacher["name"],
+        class_id=klass["id"],
+    )
+    repo.log_prompt(
+        auth=auth_context,
+        raw_prompt="ignored",
+        final_prompt="ignored",
+        model="openrouter@test",
+        status="ok",
+        client_ip="127.0.0.1",
+        message_preview="detail me",
+        messages_json='[{"role":"user","content":"detail me"}]',
+    )
+    log_id = repo.list_prompt_logs(teacher["id"], klass["id"], limit=1)[0]["id"]
+
+    response = client.get(
+        f"/teacher/classes/{klass['id']}/prompt-logs/{log_id}",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"messages": [{"role": "user", "content": "detail me"}]}

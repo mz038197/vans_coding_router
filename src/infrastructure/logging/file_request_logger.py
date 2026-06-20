@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -8,77 +7,17 @@ from typing import Any
 
 from pytz import timezone
 
+from src.infrastructure.logging.message_preview import (
+    build_message_preview,
+    content_to_str,
+    messages_for_log,
+)
+
 TZ_UTC8 = timezone("Asia/Taipei")
-PREVIEW_MAX_LEN = 500
-PREVIEW_TRUNCATED_SUFFIX = "...[preview truncated, see full log]"
-_USER_REQUEST_PATTERN = re.compile(r"<userRequest>(.*?)</userRequest>", re.DOTALL | re.IGNORECASE)
-_USER_QUERY_PATTERN = re.compile(r"<user_query>(.*?)</user_query>", re.DOTALL | re.IGNORECASE)
-
-
-def _content_to_str(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    return json.dumps(content, ensure_ascii=False)
-
-
-def _messages_for_log(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    logged: list[dict[str, Any]] = []
-    for msg in messages:
-        entry: dict[str, Any] = {
-            "role": msg.get("role", ""),
-            "content": _content_to_str(msg.get("content")),
-        }
-        for key in ("tool_calls", "tool_call_id", "tool_name"):
-            if key in msg:
-                entry[key] = msg[key]
-        logged.append(entry)
-    return logged
-
-
-def _extract_tagged_user_text(content: str) -> str | None:
-    for pattern in (_USER_REQUEST_PATTERN, _USER_QUERY_PATTERN):
-        match = pattern.search(content)
-        if not match:
-            continue
-        extracted = match.group(1).strip()
-        if extracted:
-            return extracted
-    return None
-
-
-def _truncate_preview(text: str) -> str:
-    if len(text) <= PREVIEW_MAX_LEN:
-        return text
-    keep = PREVIEW_MAX_LEN - len(PREVIEW_TRUNCATED_SUFFIX)
-    return text[:keep] + PREVIEW_TRUNCATED_SUFFIX
-
-
-def _build_message_preview(messages: list[dict[str, Any]]) -> str:
-    if not messages:
-        return ""
-
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = _content_to_str(msg.get("content"))
-        extracted = _extract_tagged_user_text(content)
-        if extracted:
-            return _truncate_preview(extracted)
-
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = _content_to_str(msg.get("content")).strip()
-        if content:
-            return _truncate_preview(content)
-
-    return _truncate_preview(_content_to_str(messages[-1].get("content")))
 
 
 def _count_total_chars(messages: list[dict[str, Any]]) -> int:
-    return sum(len(_content_to_str(msg.get("content"))) for msg in messages)
+    return sum(len(content_to_str(msg.get("content"))) for msg in messages)
 
 
 def _normalize_client_ip(client_ip: str | None) -> str:
@@ -133,8 +72,8 @@ class FileRequestLogger:
             request_id = str(uuid.uuid4())
             ip = _normalize_client_ip(client_ip)
 
-            logged_messages = _messages_for_log(messages)
-            message_preview = _build_message_preview(logged_messages)
+            logged_messages = messages_for_log(messages)
+            message_preview = build_message_preview(logged_messages)
             message_count = len(logged_messages)
             total_chars = _count_total_chars(logged_messages)
 

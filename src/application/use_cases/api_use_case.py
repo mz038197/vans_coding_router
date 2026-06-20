@@ -1,6 +1,8 @@
 import json
 from typing import Any, AsyncGenerator
 
+from src.infrastructure.logging.message_preview import build_message_preview, messages_for_log
+
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import StatefulResponsesNotSupportedError
@@ -155,6 +157,7 @@ class ApiUseCase:
     ) -> None:
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
+        logged_messages = messages_for_log(messages)
         raw_prompt = _messages_to_text(messages)
         self.api_key_repo.log_prompt(
             auth=auth_context,
@@ -166,6 +169,8 @@ class ApiUseCase:
             prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
             completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
             total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
+            message_preview=build_message_preview(logged_messages),
+            messages_json=json.dumps(logged_messages, ensure_ascii=False),
         )
 
     def log_invalid_auth(self, api_key: str, client_ip: str | None = None) -> None:

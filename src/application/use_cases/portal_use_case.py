@@ -61,9 +61,24 @@ class PortalUseCase:
         keyword: str | None,
         start_at: str | None = None,
         end_at: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         self._assert_class_owner(teacher_id, class_id)
-        return self.repo.list_prompt_logs(teacher_id, class_id, session_id, keyword, start_at, end_at)
+        has_filter = any([session_id, keyword, start_at, end_at])
+        limit = 100 if has_filter else 10
+        items = self.repo.list_prompt_logs(
+            teacher_id,
+            class_id,
+            session_id,
+            keyword,
+            start_at,
+            end_at,
+            limit=limit,
+        )
+        return {"items": items, "limit": limit, "has_filter": has_filter}
+
+    def prompt_log_detail(self, teacher_id: int, class_id: int, log_id: int) -> dict[str, Any] | None:
+        self._assert_class_owner(teacher_id, class_id)
+        return self.repo.get_prompt_log(teacher_id, class_id, log_id)
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner(teacher_id, class_id)

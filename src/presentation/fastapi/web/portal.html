@@ -20,6 +20,16 @@
     .oauth-btn:hover { background: #f6f7f9; }
     .dev-note { color: #5d6d7e; font-size: 0.92rem; margin-top: 8px; }
     pre { white-space: pre-wrap; background: #101820; color: #d7f5e9; padding: 12px; border-radius: 6px; }
+    .logs-message-preview { max-width: 420px; max-height: 4.5em; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+    .logs-hint { color: #5d6d7e; font-size: 0.92rem; margin: 8px 0; }
+    .btn-secondary { background: #e9eef4; color: #17324d; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    .modal.show { display: flex; }
+    .modal-content { background: white; border-radius: 8px; width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; }
+    .modal-header { padding: 14px 16px; border-bottom: 1px solid #e4e7eb; font-weight: 600; }
+    .modal-body { padding: 16px; overflow: auto; }
+    .modal-footer { padding: 12px 16px; border-top: 1px solid #e4e7eb; text-align: right; }
+    .log-detail-pre { margin: 0; max-height: 60vh; overflow: auto; }
   </style>
 </head>
 <body>
@@ -75,12 +85,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <div id="classes"></div>
       </div>
       <div id="monitorTab" class="hidden">
-        <input id="monitorClassId" placeholder="class_id" />
+        <label for="monitorClassId">班級</label>
+        <select id="monitorClassId" onchange="onMonitorClassChange()">
+          <option value="">請選擇班級</option>
+        </select>
         <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
         <input id="monitorStart" placeholder="開始時間 ISO" />
         <input id="monitorEnd" placeholder="結束時間 ISO" />
         <button onclick="loadLogs()">查詢</button>
         <button onclick="loadUsage()">用量</button>
+        <div id="logsHint" class="logs-hint"></div>
         <div id="logs"></div>
       </div>
       <div id="adminTab" class="hidden">
@@ -98,8 +112,20 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       </div>
     </section>
   </main>
+  <div class="modal" id="promptDetailModal">
+    <div class="modal-content">
+      <div class="modal-header">完整請求內容</div>
+      <div class="modal-body">
+        <pre class="log-detail-pre" id="promptDetailContent"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closePromptDetailModal()">關閉</button>
+      </div>
+    </div>
+  </div>
   <script>
     let currentRoles = ['student'];
+    let teacherClasses = [];
     function showLoginError(message) {
       const box = document.getElementById('loginError');
       if (!message) {
@@ -130,7 +156,12 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       await refresh();
     }
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
-    function showTab(id) { ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id)); }
+    function showTab(id) {
+      ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id));
+      if (id === 'monitorTab') {
+        populateMonitorClasses(teacherClasses);
+      }
+    }
     async function refresh() {
       const me = await api('/auth/me');
       currentRoles = me.roles || [me.role];
@@ -142,8 +173,87 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       teacher.classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
       if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
         adminBtn.classList.toggle('hidden', !currentRoles.includes('admin'));
-        renderClasses(me.classes || []);
+        teacherClasses = me.classes || [];
+        renderClasses(teacherClasses);
+        populateMonitorClasses(teacherClasses);
       }
+    }
+    function populateMonitorClasses(classes) {
+      const select = document.getElementById('monitorClassId');
+      const previous = select.value;
+      select.innerHTML = '<option value="">請選擇班級</option>' + (classes || []).map(c =>
+        `<option value="${c.id}">${c.id} - ${escapeHtml(c.name)}</option>`
+      ).join('');
+      if (previous && classes.some(c => String(c.id) === previous)) {
+        select.value = previous;
+      } else if (classes.length === 1) {
+        select.value = String(classes[0].id);
+        loadLogs().catch(err => showLogsError(err.message));
+      }
+    }
+    function onMonitorClassChange() {
+      if (monitorClassId.value) {
+        loadLogs().catch(err => showLogsError(err.message));
+      } else {
+        logs.innerHTML = '';
+        logsHint.textContent = '';
+      }
+    }
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+    function formatLogPreview(item) {
+      const preview = (item.message_preview || '').trim();
+      return preview || '—';
+    }
+    function formatLogDetailMessages(detail) {
+      const messages = detail.messages || [];
+      if (!messages.length) return '（無 messages）';
+      return messages
+        .map(msg => `[${msg.role || 'unknown'}]\n${msg.content || ''}`)
+        .join('\n\n');
+    }
+    function showLogsError(message) {
+      logs.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+      logsHint.textContent = '';
+    }
+    function renderPromptLogs(payload) {
+      const items = payload.items || [];
+      if (!items.length) {
+        logs.innerHTML = '<p style="color:#5d6d7e;">尚無資料</p>';
+      } else {
+        logs.innerHTML = `<table>
+          <tr><th>時間</th><th>學生</th><th>模型</th><th>狀態</th><th>訊息預覽</th><th>操作</th></tr>
+          ${items.map(item => `
+            <tr>
+              <td>${escapeHtml(item.created_at || '-')}</td>
+              <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
+              <td>${escapeHtml(item.model || '-')}</td>
+              <td>${escapeHtml(item.status || '-')}</td>
+              <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
+              <td><button class="btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="showPromptDetail(${item.id})">查看完整</button></td>
+            </tr>
+          `).join('')}
+        </table>`;
+      }
+      logsHint.textContent = payload.has_filter
+        ? `共 ${items.length} 筆（最多 ${payload.limit} 筆）`
+        : '未篩選，顯示最新 10 筆';
+    }
+    async function showPromptDetail(logId) {
+      const classId = monitorClassId.value;
+      if (!classId) return;
+      const detail = await api(`/teacher/classes/${classId}/prompt-logs/${logId}`);
+      document.getElementById('promptDetailContent').textContent = formatLogDetailMessages(detail);
+      document.getElementById('promptDetailModal').classList.add('show');
+    }
+    function closePromptDetailModal() {
+      document.getElementById('promptDetailModal').classList.remove('show');
+      document.getElementById('promptDetailContent').textContent = '';
     }
     async function redeem() {
       const data = await api('/sessions/redeem', {method:'POST', body: JSON.stringify({invite_code: invite.value})});
@@ -168,11 +278,20 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     async function loadRedemptions(id) { redemptions.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${id}/redemptions`), null, 2)}</pre>`; }
     async function disableClass(id) { await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})}); await refresh(); }
     async function loadLogs() {
+      const classId = monitorClassId.value;
+      if (!classId) {
+        showLogsError('請先選擇班級');
+        return;
+      }
       const params = new URLSearchParams();
       if (monitorKeyword.value) params.set('keyword', monitorKeyword.value);
       if (monitorStart.value) params.set('start_at', monitorStart.value);
       if (monitorEnd.value) params.set('end_at', monitorEnd.value);
-      logs.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${monitorClassId.value}/prompt-logs?${params.toString()}`), null, 2)}</pre>`;
+      try {
+        renderPromptLogs(await api(`/teacher/classes/${classId}/prompt-logs?${params.toString()}`));
+      } catch (err) {
+        showLogsError(err.message);
+      }
     }
     async function loadUsage() {
       logs.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${monitorClassId.value}/usage`), null, 2)}</pre>`;

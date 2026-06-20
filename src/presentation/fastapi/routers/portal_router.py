@@ -232,17 +232,32 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         session_user_id: str | None = Cookie(default=None),
     ):
         return portal_call(
-            lambda: {
-                "items": portal_use_case.prompt_logs(
-                    current_user_id(session_user_id),
-                    class_id,
-                    session_id,
-                    keyword,
-                    start_at,
-                    end_at,
-                )
-            }
+            lambda: portal_use_case.prompt_logs(
+                current_user_id(session_user_id),
+                class_id,
+                session_id,
+                keyword,
+                start_at,
+                end_at,
+            )
         )
+
+    @router.get("/teacher/classes/{class_id}/prompt-logs/{log_id}")
+    async def prompt_log_detail(
+        class_id: int,
+        log_id: int,
+        session_user_id: str | None = Cookie(default=None),
+    ):
+        detail = portal_call(
+            lambda: portal_use_case.prompt_log_detail(
+                current_user_id(session_user_id),
+                class_id,
+                log_id,
+            )
+        )
+        if detail is None:
+            raise HTTPException(status_code=404, detail="prompt log not found")
+        return detail
 
     @router.post("/sessions/redeem")
     async def redeem(data: RedeemRequest, session_user_id: str | None = Cookie(default=None)):

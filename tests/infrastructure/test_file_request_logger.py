@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 
-from src.infrastructure.logging.file_request_logger import (
+from src.infrastructure.logging.message_preview import (
     PREVIEW_MAX_LEN,
     PREVIEW_TRUNCATED_SUFFIX,
-    FileRequestLogger,
-    _build_message_preview,
+    build_message_preview,
 )
+from src.infrastructure.logging.file_request_logger import FileRequestLogger
 
 
 def test_summary_log_excludes_messages(tmp_path: Path):
@@ -77,7 +77,7 @@ def test_build_message_preview_extracts_user_request():
         "<reminderInstructions>tool rules</reminderInstructions>\n"
         "<userRequest>幫我新增番茄鐘頁面</userRequest>"
     )
-    preview = _build_message_preview([{"role": "user", "content": wrapped}])
+    preview = build_message_preview([{"role": "user", "content": wrapped}])
     assert preview == "幫我新增番茄鐘頁面"
 
 
@@ -95,7 +95,7 @@ def test_build_message_preview_prefers_last_user_request():
             ),
         },
     ]
-    preview = _build_message_preview(messages)
+    preview = build_message_preview(messages)
     assert preview == "調整計時器顏色"
 
 
@@ -105,18 +105,18 @@ def test_build_message_preview_extracts_user_query_for_cursor():
         "<user_query>學生真正的問題</user_query>\n"
         "<reminderInstructions>more noise</reminderInstructions>"
     )
-    preview = _build_message_preview([{"role": "user", "content": wrapped}])
+    preview = build_message_preview([{"role": "user", "content": wrapped}])
     assert preview == "學生真正的問題"
 
 
 def test_build_message_preview_without_tags_uses_raw_user_text():
-    preview = _build_message_preview([{"role": "user", "content": "hello from langchain"}])
+    preview = build_message_preview([{"role": "user", "content": "hello from langchain"}])
     assert preview == "hello from langchain"
 
 
 def test_build_message_preview_truncates_long_text():
     long_text = "a" * (PREVIEW_MAX_LEN + 100)
-    preview = _build_message_preview([{"role": "user", "content": long_text}])
+    preview = build_message_preview([{"role": "user", "content": long_text}])
     assert preview.endswith(PREVIEW_TRUNCATED_SUFFIX)
     assert len(preview) < len(long_text)
 

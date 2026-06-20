@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.infrastructure.logging.file_request_logger import _build_message_preview
+from src.infrastructure.logging.message_preview import build_message_preview
 
 
 class FakeApiKeyRepository:
@@ -114,7 +114,7 @@ class FakeRequestLogger:
                 "messages": messages,
                 "is_valid": is_valid,
                 "client_ip": client_ip or "unknown",
-                "message_preview": _build_message_preview(messages),
+                "message_preview": build_message_preview(messages),
             }
         )
 

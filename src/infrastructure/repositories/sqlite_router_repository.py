@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
+import json
 from pathlib import Path
 import secrets
 import sqlite3
@@ -24,6 +25,19 @@ def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value)
+
+
+def _prompt_log_messages(messages_json: str | None, raw_prompt: str | None) -> list[dict[str, Any]]:
+    if messages_json:
+        try:
+            parsed = json.loads(messages_json)
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
+        except json.JSONDecodeError:
+            pass
+    if raw_prompt:
+        return [{"role": "user", "content": raw_prompt}]
+    return []
 
 
 class SqliteRouterRepository:
@@ -124,6 +138,8 @@ class SqliteRouterRepository:
             self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
+            self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
             self._backfill_user_roles(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -481,15 +497,18 @@ class SqliteRouterRepository:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         total_tokens: int = 0,
+        message_preview: str = "",
+        messages_json: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO prompt_logs(
                     user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
-                    prompt_tokens, completion_tokens, total_tokens, client_ip, created_at
+                    prompt_tokens, completion_tokens, total_tokens, client_ip, created_at,
+                    message_preview, messages_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     auth.user_id if auth else None,
@@ -504,6 +523,8 @@ class SqliteRouterRepository:
                     total_tokens,
                     client_ip,
                     _dt(_utc_now()),
+                    message_preview,
+                    messages_json,
                 ),
             )
 
@@ -558,7 +579,21 @@ class SqliteRouterRepository:
     ) -> list[dict[str, Any]]:
         params: list[Any] = [teacher_id, class_id]
         sql = """
-            SELECT l.*, u.name AS user_name, u.email AS user_email
+            SELECT
+                l.id,
+                l.user_id,
+                l.class_id,
+                l.session_id,
+                l.model,
+                l.status,
+                l.prompt_tokens,
+                l.completion_tokens,
+                l.total_tokens,
+                l.client_ip,
+                l.created_at,
+                l.message_preview,
+                u.name AS user_name,
+                u.email AS user_email
             FROM prompt_logs l
             JOIN classes c ON c.id = l.class_id
             LEFT JOIN users u ON u.id = l.user_id
@@ -568,9 +603,12 @@ class SqliteRouterRepository:
             sql += " AND l.session_id = ?"
             params.append(session_id)
         if keyword:
-            sql += " AND (l.raw_prompt LIKE ? OR u.name LIKE ? OR u.email LIKE ?)"
+            sql += (
+                " AND (l.raw_prompt LIKE ? OR l.message_preview LIKE ?"
+                " OR u.name LIKE ? OR u.email LIKE ?)"
+            )
             like = f"%{keyword}%"
-            params.extend([like, like, like])
+            params.extend([like, like, like, like])
         if start_at:
             sql += " AND l.created_at >= ?"
             params.append(start_at)
@@ -581,6 +619,23 @@ class SqliteRouterRepository:
         params.append(limit)
         with self._connect() as conn:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+    def get_prompt_log(self, teacher_id: int, class_id: int, log_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT l.messages_json, l.raw_prompt
+                FROM prompt_logs l
+                JOIN classes c ON c.id = l.class_id
+                WHERE c.teacher_id = ? AND l.class_id = ? AND l.id = ?
+                """,
+                (teacher_id, class_id, log_id),
+            ).fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            messages = _prompt_log_messages(item.get("messages_json"), item.get("raw_prompt"))
+            return {"messages": messages}
 
     def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
         current = now or _utc_now()
@@ -624,15 +679,20 @@ class SqliteRouterRepository:
                     status TEXT NOT NULL,
                     client_ip TEXT,
                     created_at TEXT NOT NULL,
-                    archived_at TEXT NOT NULL
+                    archived_at TEXT NOT NULL,
+                    message_preview TEXT,
+                    messages_json TEXT
                 )
                 """
             )
+            self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
+            self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
             conn.execute(
                 """
                 INSERT INTO prompt_logs_archive(
-                    id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status, client_ip, created_at, archived_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
+                    client_ip, created_at, archived_at, message_preview, messages_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -646,5 +706,7 @@ class SqliteRouterRepository:
                     row["client_ip"],
                     row["created_at"],
                     _dt(archived_at),
+                    row.get("message_preview") or "",
+                    row.get("messages_json") or "",
                 ),
             )
