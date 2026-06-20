@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vans Coding Router Portal</title>
+  <style>
+    body { font-family: system-ui, "Noto Sans TC", sans-serif; margin: 0; color: #17202a; background: #f6f7f9; }
+    header { background: #17324d; color: white; padding: 20px 28px; }
+    main { max-width: 1120px; margin: 24px auto; padding: 0 16px; }
+    section, form { background: white; border: 1px solid #d8dee6; border-radius: 8px; padding: 16px; margin: 14px 0; }
+    input, button, select { font: inherit; padding: 9px 10px; margin: 4px; }
+    button { background: #1d6f9f; color: white; border: 0; border-radius: 6px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; background: white; }
+    th, td { text-align: left; border-bottom: 1px solid #e4e7eb; padding: 8px; vertical-align: top; }
+    .tabs button { background: #e9eef4; color: #17324d; }
+    .hidden { display: none; }
+    .error { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+    .oauth-btn { display: inline-block; background: white; color: #17202a; border: 1px solid #d8dee6; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; }
+    .oauth-btn:hover { background: #f6f7f9; }
+    .dev-note { color: #5d6d7e; font-size: 0.92rem; margin-top: 8px; }
+    pre { white-space: pre-wrap; background: #101820; color: #d7f5e9; padding: 12px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <header><h1>Vans Coding Router Portal</h1></header>
+  <main>
+    <section id="login">
+      <h2>Google 登入</h2>
+      <div id="loginError" class="error hidden"></div>
+      <div id="oauthLogin" class="hidden">
+        <a class="oauth-btn" href="/auth/google/login">使用 Google 帳號登入</a>
+      </div>
+      <div id="devLogin" class="hidden">
+        <input id="email" placeholder="Gmail" />
+        <input id="displayName" placeholder="姓名" />
+        <button onclick="login()">開發模式登入</button>
+        <p class="dev-note">僅在未設定 Google OAuth 時可用，請勿在正式環境使用。</p>
+      </div>
+    </section>
+
+    <section id="profile" class="hidden">
+      <h2 id="who"></h2>
+      <button onclick="logout()">登出</button>
+      <pre>OPENAI_BASE_URL=https://ai.vanscoding.com/v1
+OPENAI_API_KEY=vcr_sk_xxx</pre>
+    </section>
+
+    <section id="student" class="hidden">
+      <h2>本節邀請碼</h2>
+      <input id="invite" placeholder="輸入老師提供的邀請碼" />
+      <button onclick="redeem()">領取 API Key</button>
+      <pre id="redeemResult"></pre>
+      <h3>有效 Key</h3>
+      <div id="keys"></div>
+    </section>
+
+    <section id="teacher" class="hidden">
+      <div class="tabs">
+        <button onclick="showTab('keyTab')">我的 API Key</button>
+        <button onclick="showTab('classTab')">我的班級</button>
+        <button onclick="showTab('monitorTab')">Prompt 監控</button>
+        <button id="adminBtn" class="hidden" onclick="showTab('adminTab')">系統管理</button>
+      </div>
+      <div id="keyTab">
+        <button onclick="teacherKey()">重設長期 API Key</button>
+        <pre id="teacherKey"></pre>
+      </div>
+      <div id="classTab" class="hidden">
+        <h3>建立班級</h3>
+        <input id="className" placeholder="班級名稱" />
+        <input id="endsAt" placeholder="結束日期 ISO 格式，可空白" />
+        <input id="ttl" type="number" placeholder="Key TTL 小時" />
+        <button onclick="createClass()">建立</button>
+        <div id="classes"></div>
+      </div>
+      <div id="monitorTab" class="hidden">
+        <input id="monitorClassId" placeholder="class_id" />
+        <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
+        <input id="monitorStart" placeholder="開始時間 ISO" />
+        <input id="monitorEnd" placeholder="結束時間 ISO" />
+        <button onclick="loadLogs()">查詢</button>
+        <button onclick="loadUsage()">用量</button>
+        <div id="logs"></div>
+      </div>
+      <div id="adminTab" class="hidden">
+        <button onclick="loadAdmin()">載入系統管理資料</button>
+        <button onclick="runArchive()">執行封存</button>
+        <h3>系統設定</h3>
+        <input id="settingRetention" type="number" placeholder="Prompt log 保留天數" />
+        <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
+        <select id="settingRegistration">
+          <option value="true">開放注册</option>
+          <option value="false">關閉開放注册</option>
+        </select>
+        <button onclick="saveSettings()">儲存設定</button>
+        <div id="admin"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    let currentRoles = ['student'];
+    function showLoginError(message) {
+      const box = document.getElementById('loginError');
+      if (!message) {
+        box.classList.add('hidden');
+        box.textContent = '';
+        return;
+      }
+      box.textContent = message;
+      box.classList.remove('hidden');
+    }
+    async function api(url, options = {}) {
+      const r = await fetch(url, {headers: {'content-type': 'application/json'}, ...options});
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+    async function initLogin() {
+      const params = new URLSearchParams(location.search);
+      showLoginError(params.get('login_error'));
+      const config = await api('/auth/config');
+      document.getElementById('oauthLogin').classList.toggle('hidden', !config.oauth_enabled);
+      document.getElementById('devLogin').classList.toggle('hidden', config.oauth_enabled);
+    }
+    async function login() {
+      await api('/auth/google', {method:'POST', body: JSON.stringify({
+        email: document.getElementById('email').value,
+        name: document.getElementById('displayName').value,
+      })});
+      await refresh();
+    }
+    async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
+    function showTab(id) { ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id)); }
+    async function refresh() {
+      const me = await api('/auth/me');
+      currentRoles = me.roles || [me.role];
+      document.getElementById('login').classList.add('hidden');
+      profile.classList.remove('hidden');
+      who.textContent = `${me.name} (${me.email}) - ${currentRoles.join(', ')}`;
+      keys.innerHTML = (me.keys || []).map(k => `<div>${k.key_prefix} - ${k.class_name || '長期'} - ${k.expires_at || '不過期'}</div>`).join('');
+      student.classList.toggle('hidden', !currentRoles.includes('student'));
+      teacher.classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
+      if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
+        adminBtn.classList.toggle('hidden', !currentRoles.includes('admin'));
+        renderClasses(me.classes || []);
+      }
+    }
+    async function redeem() {
+      const data = await api('/sessions/redeem', {method:'POST', body: JSON.stringify({invite_code: invite.value})});
+      redeemResult.textContent = `API Key: ${data.api_key}\n班級: ${data.session.class_name}\n到期: ${data.session.expires_at}`;
+      await refresh();
+    }
+    async function teacherKey() { teacherKey.textContent = (await api('/portal/teacher/api-key', {method:'POST'})).api_key; }
+    async function createClass() {
+      await api('/teacher/classes', {method:'POST', body: JSON.stringify({name: className.value, ends_at: endsAt.value || null, api_key_ttl_hours: Number(ttl.value) || null})});
+      await refresh();
+    }
+    function renderClasses(items) {
+      classes.innerHTML = `<table><tr><th>ID</th><th>名稱</th><th>狀態</th><th>成員</th><th>操作</th></tr>${items.map(c => {
+        const adminAction = currentRoles.includes('admin') ? `<button onclick="disableClass(${c.id})">結束</button>` : '';
+        return `<tr><td>${c.id}</td><td>${c.name}</td><td>${c.status}</td><td>${c.member_count}</td><td><button onclick="openSession(${c.id})">開本節</button><button onclick="loadRedemptions(${c.id})">名單</button>${adminAction}</td></tr>`;
+      }).join('')}</table><div id="redemptions"></div>`;
+    }
+    async function openSession(id) {
+      const ttl_hours = Number(prompt('本節 TTL 小時', ttl.value || '2')) || null;
+      alert(JSON.stringify(await api(`/teacher/classes/${id}/sessions`, {method:'POST', body: JSON.stringify({ttl_hours})}), null, 2));
+    }
+    async function loadRedemptions(id) { redemptions.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${id}/redemptions`), null, 2)}</pre>`; }
+    async function disableClass(id) { await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})}); await refresh(); }
+    async function loadLogs() {
+      const params = new URLSearchParams();
+      if (monitorKeyword.value) params.set('keyword', monitorKeyword.value);
+      if (monitorStart.value) params.set('start_at', monitorStart.value);
+      if (monitorEnd.value) params.set('end_at', monitorEnd.value);
+      logs.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${monitorClassId.value}/prompt-logs?${params.toString()}`), null, 2)}</pre>`;
+    }
+    async function loadUsage() {
+      logs.innerHTML = `<pre>${JSON.stringify(await api(`/teacher/classes/${monitorClassId.value}/usage`), null, 2)}</pre>`;
+    }
+    async function loadAdmin() { admin.innerHTML = `<pre>${JSON.stringify({users: await api('/admin/users'), classes: await api('/admin/classes'), settings: await api('/admin/settings')}, null, 2)}</pre>`; }
+    async function runArchive() { admin.innerHTML = `<pre>${JSON.stringify(await api('/admin/archive/run', {method:'POST'}), null, 2)}</pre>`; }
+    async function saveSettings() {
+      const body = {
+        retention_days: Number(settingRetention.value) || null,
+        student_default_ttl_hours: Number(settingTtl.value) || null,
+        open_registration: settingRegistration.value === 'true'
+      };
+      admin.innerHTML = `<pre>${JSON.stringify(await api('/admin/settings', {method:'PATCH', body: JSON.stringify(body)}), null, 2)}</pre>`;
+    }
+    initLogin().catch(() => {});
+    refresh().catch(() => {});
+  </script>
+</body>
+</html>
