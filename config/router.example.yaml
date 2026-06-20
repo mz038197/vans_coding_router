@@ -1,0 +1,48 @@
+public_url: "http://127.0.0.1:8000"
+student_default_ttl_hours: 2
+
+auth:
+  teacher_domain: ""
+  admin_emails:
+    - "mz038197@gmail.com"
+  google_client_id: ""
+  google_client_secret: ""
+  session_secret: "change-me"
+  open_registration: true
+
+database:
+  path: "~/.vans_coding_router/router.db"
+  archive_dir: "~/.vans_coding_router/archive"
+  # Render PostgreSQL can be supplied via DATABASE_URL.
+  url: ""
+
+prompt_logs:
+  retention_days: 30
+
+providers:
+  ollama_cloud:
+    type: openai_compatible
+    base_url: "https://ollama.com/v1"
+    api_key_env: "OLLAMA_CLOUD_API_KEY"
+    enabled: true
+
+  openrouter:
+    type: openai_compatible
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    enabled: true
+    extra_headers:
+      HTTP-Referer: "https://ai.vanscoding.com"
+      X-Title: "Vans Coding Router"
+
+routing:
+  default_provider: ollama_cloud
+  rules:
+    - match: "claude-*"
+      provider: openrouter
+    - match: "anthropic/*"
+      provider: openrouter
+    - match: "gpt-*"
+      provider: openrouter
+    - match: "llama*"
+      provider: ollama_cloud
