@@ -327,3 +327,22 @@ def test_list_and_create_class_sessions(tmp_path):
     )
     assert patch.status_code == 200
     assert patch.json()["name"] == "第二堂"
+
+
+def test_install_vscode_models_download_requires_login(tmp_path):
+    client, _, _ = _client(tmp_path)
+    response = client.get("/portal/download/install-vscode-models.ps1")
+    assert response.status_code == 401
+
+
+def test_install_vscode_models_download_returns_script(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    student = repo.upsert_google_user("student@example.com", "Student")
+    response = client.get(
+        "/portal/download/install-vscode-models.ps1",
+        cookies={"session_user_id": str(student["id"])},
+    )
+    assert response.status_code == 200
+    assert "install-vscode-models.ps1" in response.headers["content-disposition"]
+    assert "VSRouter" in response.text
+    assert "Merge-ChatLanguageModels" in response.text

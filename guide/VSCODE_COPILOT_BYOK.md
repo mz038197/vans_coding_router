@@ -50,6 +50,32 @@ OpenRouter (Chat Completions):
 
 Set the API key via **Chat: Manage Language Models** → **Update API Key** (`vcr_sk_...`).
 
+## Portal one-click install (Windows)
+
+Logged-in students can download `install-vscode-models.ps1` from the Portal **課堂邀請碼** section.
+
+The script merges the bundled **VSRouter** provider from [`config/chatLanguageModels.vans.json`](../config/chatLanguageModels.vans.json) into:
+
+| VS Code | Path |
+|---------|------|
+| Stable | `%APPDATA%\Code\User\chatLanguageModels.json` |
+| Insiders | `%APPDATA%\Code - Insiders\User\chatLanguageModels.json` |
+
+Merge rules:
+
+- Existing providers and models are **not overwritten**
+- Missing VSRouter models are appended
+- Existing `apiKey` values are preserved
+- A timestamped `.bak` backup is created before writing
+
+After running the script:
+
+1. **Developer: Reload Window**
+2. **Chat: Manage Language Models** → set API Key to your `vcr_sk_...`
+3. Pick a **VSRouter** model in Copilot (avoid **Auto**)
+
+Optional parameter: `-Edition Stable|Insiders|Both` (default `Both`).
+
 ## Endpoints
 
 - Chat: `POST /v1/chat/completions`

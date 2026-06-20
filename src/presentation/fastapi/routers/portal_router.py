@@ -2,12 +2,13 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, HTTPException, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
+from src.infrastructure.vscode.install_vscode_models_script import render_install_vscode_models_script
 
 PORTAL_HTML_PATH = Path(__file__).resolve().parent.parent / "web" / "portal.html"
 
@@ -277,6 +278,16 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.post("/sessions/redeem")
     async def redeem(data: RedeemRequest, session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: portal_use_case.redeem(current_user_id(session_user_id), data.invite_code))
+
+    @router.get("/portal/download/install-vscode-models.ps1")
+    async def download_install_vscode_models(session_user_id: str | None = Cookie(default=None)):
+        current_user_id(session_user_id)
+        script = render_install_vscode_models_script()
+        return PlainTextResponse(
+            script,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="install-vscode-models.ps1"'},
+        )
 
     @router.get("/admin/users")
     async def admin_users(session_user_id: str | None = Cookie(default=None)):
