@@ -6,7 +6,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.application.dto.chat_dto import ChatCompletionInputDto
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.domain.errors import AuthenticationError, ServiceUnavailableError, UpstreamServiceError
-from src.presentation.fastapi.openai_errors import openai_error_response, openai_stream_error_bytes
+from src.presentation.fastapi.openai_errors import (
+    openai_error_response,
+    openai_stream_chat_error_bytes,
+    openai_stream_error_bytes,
+)
 from src.presentation.fastapi.schemas.api import ChatCompletionsRequestSchema
 
 
@@ -40,11 +44,11 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             async for chunk in api_use_case.chat_stream(domain_req, api_key, client_ip, auth_context):
                 yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except ServiceUnavailableError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except Exception as e:
-            yield openai_stream_error_bytes(str(e), error_type="server_error")
+            yield openai_stream_chat_error_bytes(str(e), model=domain_req.model)
 
     async def _responses_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
         try:

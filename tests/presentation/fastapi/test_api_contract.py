@@ -146,9 +146,9 @@ def test_chat_completion_upstream_error_stream_openai_sse(fake_repo, fake_gatewa
     ) as response:
         body = b"".join(response.iter_bytes()).decode("utf-8")
         assert response.status_code == 200
-        assert '"error"' in body
+        assert "choices" in body
         assert "Upstream provider error" in body
-        assert "'error'" not in body
+        assert "data: [DONE]" in body
 
 
 def test_chat_completion_rejects_empty_content(fake_repo, fake_gateway, fake_logger):

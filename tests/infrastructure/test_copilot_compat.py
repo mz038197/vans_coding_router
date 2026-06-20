@@ -107,6 +107,27 @@ def test_sanitize_drops_invalid_reasoning_effort():
     assert "reasoning" not in out
 
 
+@pytest.mark.asyncio
+async def test_normalize_sse_converts_inline_error_to_choices():
+    error_chunk = (
+        b'data: {"error":{"message":"Upstream provider error","type":"server_error"}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    body = await _collect_sse([error_chunk])
+    text = body.decode("utf-8")
+    assert "choices" in text
+    assert "Upstream provider error" in text
+    assert '"error":' not in text.replace(" ", "")
+
+
 def test_derive_ollama_native_base():
     assert derive_ollama_native_base("https://ollama.com/v1") == "https://ollama.com"
     assert derive_ollama_native_base("https://ollama.com/v1/") == "https://ollama.com"
+
+
+@pytest.mark.asyncio
+async def test_normalize_sse_emits_role_chunk_when_stream_only_has_done():
+    body = await _collect_sse([b"data: [DONE]\n\n"])
+    text = body.decode("utf-8")
+    assert "choices" in text
+    assert "assistant" in text

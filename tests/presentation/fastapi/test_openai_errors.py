@@ -5,6 +5,7 @@ from src.presentation.fastapi.openai_errors import (
     is_openai_compatible_path,
     is_responses_path,
     make_openai_error_body,
+    openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
 )
 
@@ -35,3 +36,12 @@ def test_openai_stream_error_bytes_is_valid_json():
     assert line.startswith("data: ")
     payload = json.loads(line[6:])
     assert payload["error"]["message"] == "upstream down"
+
+
+def test_openai_stream_chat_error_bytes_includes_choices():
+    raw = openai_stream_chat_error_bytes("upstream down", model="m")
+    text = raw.decode("utf-8")
+    assert "choices" in text
+    assert "upstream down" in text
+    assert "data: [DONE]" in text
+    assert '"error"' not in text

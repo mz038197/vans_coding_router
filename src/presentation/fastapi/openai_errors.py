@@ -3,6 +3,8 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 
+from src.infrastructure.gateways.copilot_compat import encode_chat_stream_error
+
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 RESPONSES_PATH = "/v1/responses"
 OPENAI_COMPAT_PATHS = frozenset({CHAT_COMPLETIONS_PATH, RESPONSES_PATH})
@@ -70,3 +72,7 @@ def openai_stream_error_bytes(
         param=param,
     )
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def openai_stream_chat_error_bytes(message: str, *, model: str = "") -> bytes:
+    return encode_chat_stream_error(message, model=model)

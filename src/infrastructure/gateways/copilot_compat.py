@@ -136,9 +136,41 @@ def _encode_sse_data(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
+def encode_chat_stream_error(message: str, *, model: str = "") -> bytes:
+    """Emit chat.completion.chunk SSE so VS Code Copilot BYOK does not report 'no choices'."""
+    created = int(time.time())
+    request_id = "chatcmpl-router-error"
+    base = {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+    }
+    role_chunk = {
+        **base,
+        "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+    }
+    content_chunk = {
+        **base,
+        "choices": [{"index": 0, "delta": {"content": message}, "finish_reason": None}],
+    }
+    finish_chunk = {
+        **base,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    parts = (
+        f"data: {json.dumps(role_chunk, ensure_ascii=False)}\n\n",
+        f"data: {json.dumps(content_chunk, ensure_ascii=False)}\n\n",
+        f"data: {json.dumps(finish_chunk, ensure_ascii=False)}\n\n",
+        "data: [DONE]\n\n",
+    )
+    return "".join(parts).encode("utf-8")
+
+
 async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
     buffer = b""
     saw_meaningful_choice = False
+    emitted_choice_chunk = False
     pending_role_chunk: bytes | None = None
     first_payload: dict[str, Any] | None = None
 
@@ -159,6 +191,17 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
                 if pending_role_chunk is not None:
                     yield pending_role_chunk
                     pending_role_chunk = None
+                    emitted_choice_chunk = True
+                if not emitted_choice_chunk:
+                    yield _make_assistant_role_chunk(first_payload or {})
+                    finish = {
+                        "id": (first_payload or {}).get("id", "chatcmpl-router"),
+                        "object": "chat.completion.chunk",
+                        "created": (first_payload or {}).get("created", int(time.time())),
+                        "model": (first_payload or {}).get("model", ""),
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                    yield _encode_sse_data(finish)
                 yield b"data: [DONE]\n\n"
                 continue
 
@@ -171,6 +214,15 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
             if not isinstance(payload, dict):
                 yield event + b"\n\n"
                 continue
+
+            if payload.get("error"):
+                error_message = "Upstream provider error"
+                error_obj = payload.get("error")
+                if isinstance(error_obj, dict) and error_obj.get("message"):
+                    error_message = str(error_obj["message"])
+                model = str(payload.get("model") or (first_payload or {}).get("model") or "")
+                yield encode_chat_stream_error(error_message, model=model)
+                return
 
             if _is_empty_choices_chunk(payload):
                 continue
@@ -187,6 +239,7 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
                     yield pending_role_chunk
                     pending_role_chunk = None
 
+            emitted_choice_chunk = True
             yield _encode_sse_data(payload)
 
     if buffer.strip():
