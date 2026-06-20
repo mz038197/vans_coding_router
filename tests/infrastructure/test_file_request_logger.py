@@ -5,6 +5,7 @@ from src.infrastructure.logging.message_preview import (
     PREVIEW_MAX_LEN,
     PREVIEW_TRUNCATED_SUFFIX,
     build_message_preview,
+    messages_for_log,
 )
 from src.infrastructure.logging.file_request_logger import FileRequestLogger
 
@@ -119,6 +120,18 @@ def test_build_message_preview_truncates_long_text():
     preview = build_message_preview([{"role": "user", "content": long_text}])
     assert preview.endswith(PREVIEW_TRUNCATED_SUFFIX)
     assert len(preview) < len(long_text)
+
+
+def test_messages_for_log_flattens_assistant_output_text():
+    logged = messages_for_log(
+        [
+            {
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "done"}],
+            }
+        ]
+    )
+    assert logged[0]["content"] == "done"
 
 
 def test_get_log_detail_returns_none_for_missing_id(tmp_path: Path):

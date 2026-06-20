@@ -514,10 +514,40 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       return preview || '—';
     }
 
+    function formatLogDetailRole(role) {
+      const map = {
+        user: '使用者',
+        assistant: '助手',
+        system: '系統',
+        tool: '工具',
+        reasoning: '推理',
+        attachment: '附件',
+      };
+      const key = (role || '').trim().toLowerCase();
+      return map[key] || (key || 'unknown');
+    }
+
+    function formatLogDetailContent(content) {
+      const text = (content || '').trim();
+      if (!text.startsWith('[{') && !text.startsWith('[ {')) return content || '';
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) return content || '';
+        const parts = parsed.map(item => {
+          if (typeof item === 'string') return item;
+          if (!item || typeof item !== 'object') return '';
+          return item.text || item.input_text || item.output_text || item.content || '';
+        }).filter(Boolean);
+        return parts.length ? parts.join('\n') : content || '';
+      } catch (_) {
+        return content || '';
+      }
+    }
+
     function formatLogDetailMessages(detail) {
       const messages = detail.messages || [];
       if (!messages.length) return '（無 messages）';
-      return messages.map(msg => `[${msg.role || 'unknown'}]\n${msg.content || ''}`).join('\n\n');
+      return messages.map(msg => `[${formatLogDetailRole(msg.role)}]\n${formatLogDetailContent(msg.content)}`).join('\n\n');
     }
 
     function showLogsError(message) {
