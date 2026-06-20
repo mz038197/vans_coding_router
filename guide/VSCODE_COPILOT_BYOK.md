@@ -17,7 +17,7 @@ All requests must use **`provider@upstream_model`**:
 |---------|----------|----------|
 | `openrouter@anthropic/claude-sonnet-4` | OpenRouter | `anthropic/claude-sonnet-4` |
 | `openrouter@openai/gpt-oss-120b:free` | OpenRouter | `openai/gpt-oss-120b:free` |
-| `ollama_cloud@qwen3-coder-next` | Ollama Cloud | `qwen3-coder-next` |
+| `ollama_cloud@minimax-m3:cloud` | Ollama Cloud | `minimax-m3:cloud` |
 
 Copy IDs from `GET /v1/models`. Bare names (without `@`) return **400**.
 
@@ -32,19 +32,17 @@ Recommended for VS Code Copilot Agent / Edit workflows:
 ```json
 [
   {
-    "name": "Vans Coding Router",
+    "name": "VSRouter",
     "vendor": "customendpoint",
     "apiKey": "",
     "apiType": "responses",
     "models": [
       {
-        "id": "ollama_cloud@qwen3-coder-next",
-        "name": "Qwen3 Coder Next",
-        "url": "https://ai.vanscoding.com/v1/responses",
-        "apiType": "responses",
+        "id": "ollama_cloud@minimax-m3:cloud",
+        "name": "minimax-m3",
+        "url": "https://ai.vanscoding.com/v1",
         "toolCalling": true,
-        "thinking": true,
-        "reasoningEffortFormat": "responses",
+        "vision": true,
         "supportsReasoningEffort": ["none", "low", "medium", "high"],
         "zeroDataRetentionEnabled": true,
         "maxInputTokens": 128000,

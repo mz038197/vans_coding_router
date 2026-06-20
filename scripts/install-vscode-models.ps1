@@ -23,13 +23,9 @@ $TemplateJson = @'
     "apiType": "responses",
     "models": [
       {
-        "id": "ollama_cloud@qwen3-coder-next",
-        "name": "Qwen3 Coder Next",
-        "url": "https://ai.vanscoding.com/v1/responses",
-        "apiType": "responses",
-        "toolCalling": true,
-        "thinking": true,
-        "reasoningEffortFormat": "responses",
+        "id": "ollama_cloud@minimax-m3:cloud",
+        "name": "minimax-m3",
+        "url": "https://ai.vanscoding.com/v1",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -37,17 +33,31 @@ $TemplateJson = @'
           "high"
         ],
         "zeroDataRetentionEnabled": true,
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      },
+      {
+        "id": "ollama_cloud@qwen3.5:cloud",
+        "name": "qwen3.5:cloud",
+        "url": "https://ai.vanscoding.com/v1",
+        "supportsReasoningEffort": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "zeroDataRetentionEnabled": true,
+        "toolCalling": true,
+        "vision": true,
         "maxInputTokens": 128000,
         "maxOutputTokens": 16000
       },
       {
         "id": "ollama_cloud@nemotron-3-super:cloud",
-        "name": "Nemotron 3 Super",
-        "url": "https://ai.vanscoding.com/v1/responses",
-        "apiType": "responses",
-        "toolCalling": true,
-        "thinking": true,
-        "reasoningEffortFormat": "responses",
+        "name": "nemotron-3-super",
+        "url": "https://ai.vanscoding.com/v1",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -55,6 +65,8 @@ $TemplateJson = @'
           "high"
         ],
         "zeroDataRetentionEnabled": true,
+        "toolCalling": true,
+        "vision": false,
         "maxInputTokens": 128000,
         "maxOutputTokens": 16000
       }
