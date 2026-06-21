@@ -107,6 +107,21 @@ def _is_empty_choices_chunk(payload: dict[str, Any]) -> bool:
     return isinstance(choices, list) and len(choices) == 0
 
 
+def _usage_only_chunk_to_finish(payload: dict[str, Any], first_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict) or not usage:
+        return None
+    base = first_payload or payload
+    return {
+        "id": payload.get("id") or base.get("id", "chatcmpl-router"),
+        "object": "chat.completion.chunk",
+        "created": payload.get("created") or base.get("created", int(time.time())),
+        "model": payload.get("model") or base.get("model", ""),
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        "usage": usage,
+    }
+
+
 def _chunk_has_meaningful_delta(payload: dict[str, Any]) -> bool:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -233,6 +248,10 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
                 return
 
             if _is_empty_choices_chunk(payload):
+                usage_chunk = _usage_only_chunk_to_finish(payload, first_payload)
+                if usage_chunk is not None:
+                    emitted_choice_chunk = True
+                    yield _encode_sse_data(usage_chunk)
                 continue
 
             if first_payload is None:

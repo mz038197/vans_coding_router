@@ -119,4 +119,5 @@ async def test_chat_stream_filters_empty_choices_from_upstream(ollama_gateway):
 
     body = b"".join(parts).decode("utf-8")
     assert '"choices":[]' not in body.replace(" ", "")
+    assert '"total_tokens":12' in body.replace(" ", "")
     assert "OK" in body

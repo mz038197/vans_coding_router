@@ -29,7 +29,7 @@ async def test_normalize_sse_drops_empty_choices_usage_chunk():
     )
     empty_choices_chunk = (
         b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"m",'
-        b'"choices":[],"usage":{"total_tokens":12}}\n\n'
+        b'"choices":[],"usage":{"total_tokens":12,"prompt_tokens":8,"completion_tokens":4}}\n\n'
     )
     done = b"data: [DONE]\n\n"
 
@@ -37,6 +37,8 @@ async def test_normalize_sse_drops_empty_choices_usage_chunk():
     text = body.decode("utf-8")
 
     assert '"choices":[]' not in text.replace(" ", "")
+    assert '"total_tokens":12' in text.replace(" ", "")
+    assert '"finish_reason":"stop"' in text.replace(" ", "")
     assert "OK" in text
     assert "data: [DONE]" in text
 
@@ -56,6 +58,7 @@ async def test_normalize_sse_handles_split_events_across_byte_chunks():
     body = await _collect_sse([split_a, split_b])
     assert b"Hi" in body
     assert b'"choices":[]' not in body.replace(b" ", b"")
+    assert b'"total_tokens":5' in body.replace(b" ", b"")
 
 
 @pytest.mark.asyncio
