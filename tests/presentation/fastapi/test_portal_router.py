@@ -262,6 +262,52 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     assert "raw_prompt" not in payload["items"][0]
 
 
+def test_prompt_logs_can_filter_by_session_id(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session_a = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    session_b = repo.create_class_session(klass["id"], teacher["id"], "第二堂")
+    context_a = repo.verify_api_key_context(repo.redeem_invite(session_a["invite_code"], student["id"])["api_key"])
+    context_b = repo.verify_api_key_context(repo.redeem_invite(session_b["invite_code"], student["id"])["api_key"])
+    assert context_a is not None and context_b is not None
+
+    repo.log_prompt(
+        auth=context_a,
+        raw_prompt="session a",
+        final_prompt="session a",
+        model="openrouter@test",
+        status="ok",
+        client_ip="127.0.0.1",
+        message_preview="from session a",
+    )
+    repo.log_prompt(
+        auth=context_b,
+        raw_prompt="session b",
+        final_prompt="session b",
+        model="openrouter@test",
+        status="ok",
+        client_ip="127.0.0.1",
+        message_preview="from session b",
+    )
+
+    cookies = {"session_user_id": str(teacher["id"])}
+    filtered = client.get(
+        f"/teacher/classes/{klass['id']}/prompt-logs",
+        params={"session_id": session_a["id"]},
+        cookies=cookies,
+    )
+
+    assert filtered.status_code == 200
+    payload = filtered.json()
+    assert payload["has_filter"] is True
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["message_preview"] == "from session a"
+    assert payload["items"][0]["session_id"] == session_a["id"]
+
+
 def test_prompt_log_detail_endpoint(tmp_path):
     from src.domain.entities.auth import AuthContext
 

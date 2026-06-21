@@ -138,6 +138,10 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <select id="monitorClassId" onchange="onMonitorClassChange()">
           <option value="">請選擇課程</option>
         </select>
+        <label for="monitorSessionId">課堂</label>
+        <select id="monitorSessionId" onchange="onMonitorSessionChange()">
+          <option value="">全部課堂</option>
+        </select>
         <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
         <input id="monitorStart" type="datetime-local" />
         <input id="monitorEnd" type="datetime-local" />
@@ -176,6 +180,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
   <script>
     let currentRoles = ['student'];
     let teacherClasses = [];
+    let monitorSessions = [];
     let portalPublicUrl = 'https://ai.vanscoding.com';
     let redemptionsCache = {};
     let lastRedeemedKey = '';
@@ -476,6 +481,46 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       loadClassSessions(course.id).catch(err => showSessionError(course.id, err.message));
     }
 
+    function monitorSessionOptionLabel(session) {
+      const name = sessionDisplayName(session);
+      const when = session.session_at || session.created_at;
+      return when ? `${name}（${formatLocalDateTime(when)}）` : name;
+    }
+
+    function getSelectedMonitorSessionId() {
+      const value = document.getElementById('monitorSessionId').value;
+      return value ? Number(value) : null;
+    }
+
+    function resetMonitorSessionSelect() {
+      monitorSessions = [];
+      document.getElementById('monitorSessionId').innerHTML = '<option value="">全部課堂</option>';
+    }
+
+    async function syncMonitorSessionSelect(classId) {
+      const select = document.getElementById('monitorSessionId');
+      const previous = select.value;
+      if (!classId) {
+        resetMonitorSessionSelect();
+        return;
+      }
+      try {
+        const payload = await api(`/teacher/classes/${classId}/sessions`);
+        monitorSessions = payload.items || [];
+        select.innerHTML = '<option value="">全部課堂</option>' + monitorSessions.map(s =>
+          `<option value="${s.id}">${escapeHtml(monitorSessionOptionLabel(s))}</option>`
+        ).join('');
+        if (previous && monitorSessions.some(s => String(s.id) === previous)) {
+          select.value = previous;
+        } else {
+          select.value = '';
+        }
+      } catch (err) {
+        resetMonitorSessionSelect();
+        throw err;
+      }
+    }
+
     function syncMonitorCourseSelect() {
       const statusEl = document.getElementById('monitorStatusFilter');
       const status = statusEl ? statusEl.value : 'active';
@@ -487,9 +532,14 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       ).join('');
       if (previous && filtered.some(c => String(c.id) === previous)) {
         select.value = previous;
+        syncMonitorSessionSelect(previous).catch(err => showLogsError(err.message));
       } else if (filtered.length === 1) {
         select.value = String(filtered[0].id);
-        loadLogs().catch(err => showLogsError(err.message));
+        syncMonitorSessionSelect(filtered[0].id)
+          .then(() => loadLogs())
+          .catch(err => showLogsError(err.message));
+      } else {
+        resetMonitorSessionSelect();
       }
     }
 
@@ -503,12 +553,25 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       }
     }
 
-    function onMonitorClassChange() {
-      if (document.getElementById('monitorClassId').value) {
-        loadLogs().catch(err => showLogsError(err.message));
+    async function onMonitorClassChange() {
+      const classId = document.getElementById('monitorClassId').value;
+      if (classId) {
+        try {
+          await syncMonitorSessionSelect(classId);
+          await loadLogs();
+        } catch (err) {
+          showLogsError(err.message);
+        }
       } else {
+        resetMonitorSessionSelect();
         document.getElementById('logs').innerHTML = '';
         document.getElementById('logsHint').textContent = '';
+      }
+    }
+
+    function onMonitorSessionChange() {
+      if (document.getElementById('monitorClassId').value) {
+        loadLogs().catch(err => showLogsError(err.message));
       }
     }
 
@@ -578,8 +641,13 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           `).join('')}
         </table>`;
       }
+      const sessionId = getSelectedMonitorSessionId();
+      const sessionLabel = sessionId
+        ? monitorSessionOptionLabel(monitorSessions.find(s => s.id === sessionId) || {})
+        : '';
+      const scopeHint = sessionId ? `課堂：${sessionLabel} · ` : '';
       document.getElementById('logsHint').textContent = payload.has_filter
-        ? `共 ${items.length} 筆（最多 ${payload.limit} 筆）`
+        ? `${scopeHint}共 ${items.length} 筆（最多 ${payload.limit} 筆）`
         : '未篩選，顯示最新 10 筆';
     }
 
@@ -744,6 +812,19 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       await refresh();
     }
 
+    function filterUsageBySession(items, sessionId) {
+      if (!sessionId) return items;
+      return items.map(item => {
+        const session = (item.sessions || []).find(s => s.session_id === sessionId);
+        return {
+          ...item,
+          prompt_tokens: session?.prompt_tokens ?? 0,
+          completion_tokens: session?.completion_tokens ?? 0,
+          total_tokens: session?.total_tokens ?? 0,
+        };
+      });
+    }
+
     async function loadLogs() {
       const classId = document.getElementById('monitorClassId').value;
       if (!classId) {
@@ -751,9 +832,11 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         return;
       }
       const params = new URLSearchParams();
+      const sessionId = getSelectedMonitorSessionId();
       const keyword = document.getElementById('monitorKeyword').value;
       const start = document.getElementById('monitorStart').value;
       const end = document.getElementById('monitorEnd').value;
+      if (sessionId) params.set('session_id', String(sessionId));
       if (keyword) params.set('keyword', keyword);
       if (start) params.set('start_at', datetimeLocalToUtcIso(start));
       if (end) params.set('end_at', datetimeLocalToUtcIso(end));
@@ -786,9 +869,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         showLogsError('請先選擇課程');
         return;
       }
+      const sessionId = getSelectedMonitorSessionId();
       const payload = await api(`/teacher/classes/${classId}/usage`);
-      document.getElementById('logs').innerHTML = renderUsageTable(payload.items || []);
-      document.getElementById('logsHint').textContent = 'Token 用量統計';
+      const items = filterUsageBySession(payload.items || [], sessionId);
+      document.getElementById('logs').innerHTML = renderUsageTable(items);
+      const sessionLabel = sessionId
+        ? monitorSessionOptionLabel(monitorSessions.find(s => s.id === sessionId) || {})
+        : '';
+      document.getElementById('logsHint').textContent = sessionId
+        ? `Token 用量統計（課堂：${sessionLabel}）`
+        : 'Token 用量統計（全部課堂）';
     }
 
     function renderAdminPanel(data) {
