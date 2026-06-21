@@ -50,6 +50,12 @@ def sanitize_responses_request(body: dict[str, Any], supports_thinking: bool) ->
     return out
 
 
+def _non_empty_str(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
 def _assistant_visible_text(message: dict[str, Any]) -> str:
     raw = message.get("content")
     if raw is None:
@@ -60,9 +66,9 @@ def _assistant_visible_text(message: dict[str, Any]) -> str:
         text = str(raw)
     if text.strip():
         return text
-    for key in ("thinking", "reasoning"):
-        alt = message.get(key)
-        if isinstance(alt, str) and alt.strip():
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        alt = _non_empty_str(message.get(key))
+        if alt is not None:
             return alt
     return text
 
@@ -115,6 +121,8 @@ def _chunk_has_meaningful_delta(payload: dict[str, Any]) -> bool:
         return True
     content = delta.get("content")
     if isinstance(content, str) and content:
+        return True
+    if _non_empty_str(delta.get("reasoning_content")) is not None:
         return True
     if delta.get("tool_calls"):
         return True

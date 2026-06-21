@@ -59,6 +59,24 @@ async def test_normalize_sse_handles_split_events_across_byte_chunks():
 
 
 @pytest.mark.asyncio
+async def test_normalize_sse_prepends_role_when_first_delta_is_reasoning_content():
+    reasoning_only = (
+        b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"m",'
+        b'"choices":[{"index":0,"delta":{"reasoning_content":"Thinking"},"finish_reason":null}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    body = await _collect_sse([reasoning_only])
+    text = body.decode("utf-8")
+    assert "assistant" in text
+    assert "Thinking" in text
+    role_index = text.find("assistant")
+    reasoning_index = text.find("Thinking")
+    assert role_index != -1
+    assert reasoning_index != -1
+    assert role_index < reasoning_index
+
+
+@pytest.mark.asyncio
 async def test_normalize_sse_prepends_role_when_first_delta_has_no_role():
     content_only = (
         b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"m",'
@@ -87,6 +105,60 @@ def test_normalize_nonstream_fills_content_from_reasoning():
     }
     out = normalize_chat_completions_response(body)
     assert out["choices"][0]["message"]["content"] == "Canberra"
+
+
+def test_normalize_nonstream_fills_content_from_reasoning_content():
+    body = {
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "", "reasoning_content": "Thinking..."},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    out = normalize_chat_completions_response(body)
+    assert out["choices"][0]["message"]["content"] == "Thinking..."
+    assert out["choices"][0]["message"]["reasoning_content"] == "Thinking..."
+
+
+def test_normalize_nonstream_prefers_content_over_reasoning_content():
+    body = {
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Answer",
+                    "reasoning_content": "Thinking...",
+                },
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    out = normalize_chat_completions_response(body)
+    message = out["choices"][0]["message"]
+    assert message["content"] == "Answer"
+    assert message["reasoning_content"] == "Thinking..."
+
+
+def test_normalize_nonstream_reasoning_content_before_reasoning():
+    body = {
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Primary",
+                    "reasoning": "Secondary",
+                },
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    out = normalize_chat_completions_response(body)
+    assert out["choices"][0]["message"]["content"] == "Primary"
 
 
 def test_sanitize_removes_reasoning_for_non_thinking_model():
