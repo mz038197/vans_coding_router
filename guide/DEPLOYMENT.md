@@ -371,14 +371,14 @@ OPENAI_API_KEY=vcr_sk_xxxxxxxx
 | 登入成功但不是 admin | `admin_emails` 未含該 Gmail | 改 Secret File，redeploy |
 | 改 Secret File 沒效果 | 未 redeploy 或 env 覆蓋 | Save + Manual Deploy |
 | 改 yaml 的 Google 沒效果 | Environment 優先 | 改 Environment 而非 yaml |
-| Deploy 後資料消失 | SQLite 在 `/tmp` | 已知限制；正式需 PostgreSQL |
+| Deploy 後資料消失 | `DATABASE_URL` 未生效或仍走 SQLite | 確認 Render Environment 有 `DATABASE_URL`；redeploy 後 users/classes 應保留 |
 | Blueprint Postgres `starter` 錯誤 | 舊 plan 名稱 | 使用 `basic-256mb`（已修正於 render.yaml） |
 
 ---
 
 ## 14. 已知限制
 
-- **資料庫**：目前實作以 SQLite 為主（Render 上用 `/tmp/router.db`）。`DATABASE_URL` 已預留，Postgres 尚未作為正式儲存。Redeploy 可能清空資料。
+- **資料庫**：本地預設 SQLite；Render 上 Blueprint 會注入 `DATABASE_URL`，app 自動使用 PostgreSQL。Prompt log archive 在 Postgres 存於同庫 `prompt_logs_archive` 表（SQLite 仍用 yearly `.db` 檔）。
 - **雙網域 OAuth**：未實作依 Host 動態切換 callback；OAuth 以單一 `PUBLIC_URL` 為準。
 - **Free tier**：Render 免費服務可能休眠，首請求較慢。
 

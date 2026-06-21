@@ -2,46 +2,43 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
-import sqlite3
 from typing import Any, Iterator
+
+import psycopg
+from psycopg.rows import dict_row
 
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_base import RouterRepositoryBase
 from src.infrastructure.repositories.router_repository_helpers import dt
 
 
-class SqliteRouterRepository(RouterRepositoryBase):
-    def __init__(self, db_path: str, settings: RouterSettings):
-        self.db_path = str(Path(db_path).expanduser())
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+class PostgresRouterRepository(RouterRepositoryBase):
+    def __init__(self, database_url: str, settings: RouterSettings):
+        self.database_url = _normalize_database_url(database_url)
         super().__init__(settings)
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
     @property
     def dialect(self) -> str:
-        return "sqlite"
+        return "postgres"
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        try:
+    def _connect(self) -> Iterator[Any]:
+        with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
             yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
-            conn.executescript(
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     email TEXT NOT NULL UNIQUE,
                     name TEXT NOT NULL,
                     role TEXT NOT NULL,
@@ -49,15 +46,23 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     google_sub TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_roles (
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     role TEXT NOT NULL,
                     granted_at TEXT NOT NULL,
                     PRIMARY KEY(user_id, role)
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS classes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     name TEXT NOT NULL,
                     teacher_id INTEGER NOT NULL REFERENCES users(id),
                     api_key_ttl_hours INTEGER NOT NULL DEFAULT 2,
@@ -65,9 +70,13 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     ends_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS class_sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     class_id INTEGER NOT NULL REFERENCES classes(id),
                     invite_code TEXT NOT NULL UNIQUE,
                     expires_at TEXT NOT NULL,
@@ -76,25 +85,37 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     status TEXT NOT NULL DEFAULT 'active',
                     session_at TEXT,
                     name TEXT
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS api_keys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     session_id INTEGER REFERENCES class_sessions(id),
                     key_hash TEXT NOT NULL UNIQUE,
                     key_prefix TEXT NOT NULL,
                     expires_at TEXT,
-                    enabled INTEGER NOT NULL DEFAULT 1,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     created_at TEXT NOT NULL,
                     last_used_at TEXT
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS session_redemptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     session_id INTEGER NOT NULL REFERENCES class_sessions(id),
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     redeemed_at TEXT NOT NULL,
                     UNIQUE(session_id, user_id)
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS class_members (
                     class_id INTEGER NOT NULL REFERENCES classes(id),
                     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -102,9 +123,13 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     status TEXT NOT NULL DEFAULT 'active',
                     joined_at TEXT NOT NULL,
                     PRIMARY KEY(class_id, user_id)
-                );
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS prompt_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     user_id INTEGER REFERENCES users(id),
                     class_id INTEGER REFERENCES classes(id),
                     session_id INTEGER REFERENCES class_sessions(id),
@@ -119,31 +144,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     message_preview TEXT,
                     messages_json TEXT
-                );
+                )
                 """
             )
-            self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
-            self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
-            self._ensure_column(conn, "class_sessions", "name", "TEXT")
-            self._backfill_user_roles(conn)
-
-    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-    def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
-        from src.infrastructure.repositories.router_repository_helpers import parse_dt
-
-        created = parse_dt(row["created_at"]) or archived_at
-        archive_dir = Path(self.settings.database.archive_dir).expanduser()
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / f"archive_{created.year}.db"
-        with sqlite3.connect(archive_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS prompt_logs_archive (
@@ -155,6 +158,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     final_prompt TEXT NOT NULL,
                     model TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
                     client_ip TEXT,
                     created_at TEXT NOT NULL,
                     archived_at TEXT NOT NULL,
@@ -163,15 +169,20 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
-            self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
-            self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
+            self._backfill_user_roles(conn)
+
+    def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
+        with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO prompt_logs_archive(
-                    id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
-                    client_ip, created_at, archived_at, message_preview, messages_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                self._sql(
+                    """
+                    INSERT INTO prompt_logs_archive(
+                        id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
+                        prompt_tokens, completion_tokens, total_tokens, client_ip, created_at, archived_at,
+                        message_preview, messages_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                ),
                 (
                     row["id"],
                     row["user_id"],
@@ -181,6 +192,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     row["final_prompt"],
                     row["model"],
                     row["status"],
+                    row.get("prompt_tokens") or 0,
+                    row.get("completion_tokens") or 0,
+                    row.get("total_tokens") or 0,
                     row["client_ip"],
                     row["created_at"],
                     dt(archived_at),
@@ -188,10 +202,3 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     row.get("messages_json") or "",
                 ),
             )
-            conn.commit()
-
-    def _after_archive(self, archived_count: int) -> None:
-        if archived_count <= 0:
-            return
-        with sqlite3.connect(self.db_path, isolation_level=None) as conn:
-            conn.execute("VACUUM")

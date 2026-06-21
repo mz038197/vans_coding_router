@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Any
 
+from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.config import RouterSettings, settings_summary, update_non_secret_settings
-from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 
 
 class PortalUseCase:
-    def __init__(self, repo: SqliteRouterRepository, settings: RouterSettings):
+    def __init__(self, repo: RouterRepositoryPort, settings: RouterSettings):
         self.repo = repo
         self.settings = settings
 

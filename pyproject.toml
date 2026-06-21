@@ -4,7 +4,7 @@ testpaths = ["tests"]
 
 [project]
 name = "vans-coding-router"
-version = "0.2.2"
+version = "0.3.0"
 description = "OpenAI-compatible cloud provider router for Vans Coding classes"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -18,4 +18,5 @@ dependencies = [
     "pytest-asyncio>=0.24.0",
     "google-auth>=2.55.0",
     "requests>=2.34.2",
+    "psycopg[binary]>=3.2.0",
 ]

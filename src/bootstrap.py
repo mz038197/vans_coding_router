@@ -5,7 +5,7 @@ from src.infrastructure.config import load_router_settings
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.logging.file_request_logger import FileRequestLogger
-from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.infrastructure.repositories.factory import build_router_repository
 from src.presentation.fastapi.dependencies import AppContainer
 
 
@@ -14,7 +14,7 @@ def build_container(
     config_path: str | None = None,
 ) -> AppContainer:
     settings = load_router_settings(config_path)
-    api_key_repo = SqliteRouterRepository(settings.database.path, settings)
+    api_key_repo = build_router_repository(settings)
     request_logger = FileRequestLogger()
     provider_gateways = {
         name: OpenAICompatibleGateway(provider, timeout=request_timeout)

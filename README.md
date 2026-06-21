@@ -114,4 +114,10 @@ uv sync --frozen
 uv run uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-Note: the current local repository implementation is SQLite-first. `DATABASE_URL` is parsed for deployment configuration and documented for the Render target; a production PostgreSQL repository should be enabled before using Render PostgreSQL as the source of truth.
+Note: **local dev defaults to SQLite** (`~/.vans_coding_router/router.db`). When `DATABASE_URL` is set (automatically on Render), the app uses **PostgreSQL** as the source of truth. Optional local Postgres verification:
+
+```powershell
+docker compose up -d
+$env:DATABASE_URL = "postgresql://vcr:vcr@localhost:5432/vans_coding_router"
+uv run uvicorn app:app --reload
+```
