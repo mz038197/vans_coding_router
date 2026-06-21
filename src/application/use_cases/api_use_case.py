@@ -46,11 +46,11 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
-        usage: dict[str, int] = {}
+        usage_tracker = _SseUsageTracker()
         async for chunk in self.gateway.chat_completions_stream(req):
-            usage = _usage_from_sse_chunk(chunk) or usage
+            usage_tracker.feed(chunk)
             yield chunk
-        self._log_request(req, api_key, client_ip, auth_context, usage)
+        self._log_request(req, api_key, client_ip, auth_context, usage_tracker.usage)
 
     def validate_responses_request(self, body: dict[str, Any]) -> None:
         self._validate_responses_body(body)
@@ -75,11 +75,11 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         self._validate_responses_body(body)
-        usage: dict[str, int] = {}
+        usage_tracker = _SseUsageTracker()
         async for chunk in self.gateway.responses_create_stream(body):
-            usage = _usage_from_sse_chunk(chunk) or usage
+            usage_tracker.feed(chunk)
             yield chunk
-        self._log_responses_request(body, api_key, client_ip, auth_context, usage)
+        self._log_responses_request(body, api_key, client_ip, auth_context, usage_tracker.usage)
 
     def _validate_responses_body(self, body: dict[str, Any]) -> None:
         previous_response_id = body.get("previous_response_id")
@@ -206,10 +206,19 @@ def _messages_to_text(messages: list[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:
-    usage = response.get("usage")
-    if not isinstance(usage, dict):
-        return {}
+def _extract_usage_raw(payload: dict[str, Any]) -> dict[str, Any] | None:
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        return usage
+    response = payload.get("response")
+    if isinstance(response, dict):
+        nested = response.get("usage")
+        if isinstance(nested, dict):
+            return nested
+    return None
+
+
+def _usage_from_raw_usage(usage: dict[str, Any]) -> dict[str, int]:
     prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
     completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
@@ -220,9 +229,15 @@ def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _usage_from_sse_chunk(chunk: bytes) -> dict[str, int] | None:
-    text = chunk.decode("utf-8", errors="ignore")
-    for line in text.splitlines():
+def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:
+    usage = _extract_usage_raw(response)
+    if not usage:
+        return {}
+    return _usage_from_raw_usage(usage)
+
+
+def _usage_from_sse_event(event: str) -> dict[str, int] | None:
+    for line in event.splitlines():
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()
@@ -232,10 +247,44 @@ def _usage_from_sse_chunk(chunk: bytes) -> dict[str, int] | None:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        usage = _usage_from_response(parsed)
-        if usage:
-            return usage
+        if not isinstance(parsed, dict):
+            continue
+        usage = _extract_usage_raw(parsed)
+        if usage is not None:
+            return _usage_from_raw_usage(usage)
     return None
+
+
+def _merge_usage(current: dict[str, int], new: dict[str, int]) -> dict[str, int]:
+    if not new:
+        return current
+    if not current:
+        return new
+    if (new.get("total_tokens") or 0) >= (current.get("total_tokens") or 0):
+        return new
+    return current
+
+
+class _SseUsageTracker:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.usage: dict[str, int] = {}
+
+    def feed(self, chunk: bytes) -> None:
+        self._buffer += chunk.decode("utf-8", errors="ignore")
+        while "\n\n" in self._buffer:
+            event, self._buffer = self._buffer.split("\n\n", 1)
+            if not event.strip():
+                continue
+            found = _usage_from_sse_event(event)
+            if found is not None:
+                self.usage = _merge_usage(self.usage, found)
+
+
+def _usage_from_sse_chunk(chunk: bytes) -> dict[str, int] | None:
+    tracker = _SseUsageTracker()
+    tracker.feed(chunk)
+    return tracker.usage or None
 
 
 def _responses_input_for_log(body: dict[str, Any]) -> list[dict[str, Any]]:
