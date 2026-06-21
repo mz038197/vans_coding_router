@@ -43,6 +43,16 @@ class RouterRepositoryBase(ABC):
     def _disabled_enabled_value(self) -> int | bool:
         return False if self.dialect == "postgres" else 0
 
+    def _executemany(self, conn: Any, query: str, params: list[tuple[Any, ...]]) -> None:
+        sql = self._sql(query)
+        if not params:
+            return
+        if self.dialect == "postgres":
+            with conn.cursor() as cur:
+                cur.executemany(sql, params)
+            return
+        conn.executemany(sql, params)
+
     def _insert_or_ignore_user_role(self, conn: Any, user_id: int, role: str, granted_at: str) -> None:
         if self.dialect == "postgres":
             conn.execute(
@@ -162,8 +172,9 @@ class RouterRepositoryBase(ABC):
             valid_roles = ("student",)
         now = dt(utc_now())
         conn.execute(self._sql("DELETE FROM user_roles WHERE user_id = ?"), (user_id,))
-        conn.executemany(
-            self._sql("INSERT INTO user_roles(user_id, role, granted_at) VALUES (?, ?, ?)"),
+        self._executemany(
+            conn,
+            "INSERT INTO user_roles(user_id, role, granted_at) VALUES (?, ?, ?)",
             [(user_id, role, now) for role in valid_roles],
         )
         conn.execute(
@@ -733,8 +744,9 @@ class RouterRepositoryBase(ABC):
             for row in rows:
                 self._archive_row(dict(row), current)
             if rows:
-                conn.executemany(
-                    self._sql("DELETE FROM prompt_logs WHERE id = ?"),
+                self._executemany(
+                    conn,
+                    "DELETE FROM prompt_logs WHERE id = ?",
                     [(row["id"],) for row in rows],
                 )
         self._after_archive(len(rows))

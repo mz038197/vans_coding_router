@@ -1,5 +1,6 @@
 from pathlib import Path
 from urllib.parse import quote
+import logging
 
 from fastapi import APIRouter, Cookie, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -15,6 +16,7 @@ from src.infrastructure.vscode.install_vscode_models_script import (
 )
 
 PORTAL_HTML_PATH = Path(__file__).resolve().parent.parent / "web" / "portal.html"
+logger = logging.getLogger(__name__)
 
 
 class GoogleLoginRequest(BaseModel):
@@ -146,6 +148,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         except ValueError as exc:
             return _portal_redirect(str(exc))
         except Exception:
+            logger.exception("Google login callback failed")
             return _portal_redirect("Google 登入失敗，請稍後再試")
 
         redirect = _portal_redirect()
