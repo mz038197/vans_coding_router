@@ -579,6 +579,8 @@
     .tag-role-teacher { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
     .tag-role-student { background: rgba(45, 212, 191, 0.15); color: #5eead4; }
     .tag-personal { background: rgba(129, 140, 248, 0.15); color: #a5b4fc; }
+    .tag-endpoint-chat { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
+    .tag-endpoint-responses { background: rgba(192, 132, 252, 0.15); color: #d8b4fe; }
 
     .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
@@ -1530,11 +1532,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       return preview || '—';
     }
 
-    function formatLogEndpoint(item) {
+    function renderLogEndpointTag(item) {
       const endpoint = (item.api_endpoint || '').trim();
-      if (endpoint === '/v1/chat/completions') return 'Chat Completions';
-      if (endpoint === '/v1/responses') return 'Responses';
-      return '—';
+      if (endpoint === '/v1/chat/completions') {
+        return '<span class="tag tag-endpoint-chat">chat-completions</span>';
+      }
+      if (endpoint === '/v1/responses') {
+        return '<span class="tag tag-endpoint-responses">responses</span>';
+      }
+      if (!endpoint) return '<span class="tag tag-ended">—</span>';
+      return `<span class="tag tag-ended">${escapeHtml(endpoint)}</span>`;
     }
 
     function formatLogDetailRole(role) {
@@ -1576,8 +1583,9 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     function renderPromptDetail(detail) {
       const meta = document.getElementById('promptDetailMeta');
       const container = document.getElementById('promptDetailContent');
-      const endpointLabel = formatLogEndpoint({ api_endpoint: detail.api_endpoint });
-      meta.textContent = endpointLabel !== '—' ? `端點：${endpointLabel}` : '';
+      const endpoint = (detail.api_endpoint || '').trim();
+      const endpointTag = renderLogEndpointTag({ api_endpoint: endpoint });
+      meta.innerHTML = endpoint ? `端點 ${endpointTag}` : '';
 
       const messages = detail.messages || [];
       const userText = formatLogDetailMessagesBlock(messages, ['user', 'system', 'tool', 'attachment']) || '（無使用者訊息）';
@@ -1635,7 +1643,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
             <tr>
               <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
               <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
-              <td>${escapeHtml(formatLogEndpoint(item))}</td>
+              <td>${renderLogEndpointTag(item)}</td>
               <td>${escapeHtml(item.model || '-')}</td>
               <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
