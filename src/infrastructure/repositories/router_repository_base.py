@@ -579,6 +579,8 @@ class RouterRepositoryBase(ABC):
         total_tokens: int = 0,
         message_preview: str = "",
         messages_json: str = "",
+        api_endpoint: str = "",
+        response_preview: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -587,9 +589,9 @@ class RouterRepositoryBase(ABC):
                     INSERT INTO prompt_logs(
                         user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                         prompt_tokens, completion_tokens, total_tokens, client_ip, created_at,
-                        message_preview, messages_json
+                        message_preview, messages_json, api_endpoint, response_preview
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -607,6 +609,8 @@ class RouterRepositoryBase(ABC):
                     dt(utc_now()),
                     message_preview,
                     messages_json,
+                    api_endpoint,
+                    response_preview,
                 ),
             )
 
@@ -679,6 +683,8 @@ class RouterRepositoryBase(ABC):
                 l.client_ip,
                 l.created_at,
                 l.message_preview,
+                l.response_preview,
+                l.api_endpoint,
                 u.name AS user_name,
                 u.email AS user_email
             FROM prompt_logs l
@@ -690,9 +696,9 @@ class RouterRepositoryBase(ABC):
             sql += " AND l.session_id = ?"
             params.append(session_id)
         if keyword:
-            sql += " AND (l.raw_prompt LIKE ? OR l.message_preview LIKE ? OR u.name LIKE ? OR u.email LIKE ?)"
+            sql += " AND (l.raw_prompt LIKE ? OR l.message_preview LIKE ? OR l.response_preview LIKE ? OR u.name LIKE ? OR u.email LIKE ?)"
             like = f"%{keyword}%"
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like])
         if start_at:
             sql += " AND l.created_at >= ?"
             params.append(start_at)
@@ -709,7 +715,7 @@ class RouterRepositoryBase(ABC):
             row = conn.execute(
                 self._sql(
                     """
-                    SELECT l.messages_json, l.raw_prompt
+                    SELECT l.messages_json, l.raw_prompt, l.api_endpoint, l.response_preview
                     FROM prompt_logs l
                     JOIN classes c ON c.id = l.class_id
                     WHERE c.teacher_id = ? AND l.class_id = ? AND l.id = ?
@@ -721,7 +727,11 @@ class RouterRepositoryBase(ABC):
                 return None
             item = dict(row)
             messages = prompt_log_messages(item.get("messages_json"), item.get("raw_prompt"))
-            return {"messages": messages}
+            return {
+                "messages": messages,
+                "api_endpoint": item.get("api_endpoint") or "",
+                "response_preview": item.get("response_preview") or "",
+            }
 
     def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
         current = now or utc_now()

@@ -246,7 +246,9 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
         status="ok",
         client_ip="127.0.0.1",
         message_preview="hello portal",
-        messages_json='[{"role":"user","content":"<userRequest>hello portal</userRequest>"}]',
+        response_preview="assistant reply",
+        api_endpoint="/v1/responses",
+        messages_json='[{"role":"user","content":"<userRequest>hello portal</userRequest>"},{"role":"assistant","content":"assistant reply"}]',
     )
 
     response = client.get(
@@ -259,6 +261,8 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     assert payload["limit"] == 10
     assert payload["has_filter"] is False
     assert payload["items"][0]["message_preview"] == "hello portal"
+    assert payload["items"][0]["response_preview"] == "assistant reply"
+    assert payload["items"][0]["api_endpoint"] == "/v1/responses"
     assert "raw_prompt" not in payload["items"][0]
 
 
@@ -329,7 +333,9 @@ def test_prompt_log_detail_endpoint(tmp_path):
         status="ok",
         client_ip="127.0.0.1",
         message_preview="detail me",
-        messages_json='[{"role":"user","content":"detail me"}]',
+        response_preview="agent says hi",
+        api_endpoint="/v1/chat/completions",
+        messages_json='[{"role":"user","content":"detail me"},{"role":"assistant","content":"agent says hi"}]',
     )
     log_id = repo.list_prompt_logs(teacher["id"], klass["id"], limit=1)[0]["id"]
 
@@ -339,7 +345,14 @@ def test_prompt_log_detail_endpoint(tmp_path):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"messages": [{"role": "user", "content": "detail me"}]}
+    assert response.json() == {
+        "messages": [
+            {"role": "user", "content": "detail me"},
+            {"role": "assistant", "content": "agent says hi"},
+        ],
+        "api_endpoint": "/v1/chat/completions",
+        "response_preview": "agent says hi",
+    }
 
 
 def test_list_and_create_class_sessions(tmp_path):

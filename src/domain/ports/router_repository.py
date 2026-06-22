@@ -102,6 +102,8 @@ class RouterRepositoryPort(Protocol):
         total_tokens: int = 0,
         message_preview: str = "",
         messages_json: str = "",
+        api_endpoint: str = "",
+        response_preview: str = "",
     ) -> None:
         ...
 

@@ -170,6 +170,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 """
             )
             self._backfill_user_roles(conn)
+            for table in ("prompt_logs", "prompt_logs_archive"):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS api_endpoint TEXT")
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")
 
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
         with self._connect() as conn:
@@ -179,8 +182,8 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     INSERT INTO prompt_logs_archive(
                         id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                         prompt_tokens, completion_tokens, total_tokens, client_ip, created_at, archived_at,
-                        message_preview, messages_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        message_preview, messages_json, api_endpoint, response_preview
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -200,5 +203,7 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     dt(archived_at),
                     row.get("message_preview") or "",
                     row.get("messages_json") or "",
+                    row.get("api_endpoint") or "",
+                    row.get("response_preview") or "",
                 ),
             )

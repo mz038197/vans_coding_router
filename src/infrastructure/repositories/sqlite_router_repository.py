@@ -127,6 +127,8 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
+            self._ensure_column(conn, "prompt_logs", "api_endpoint", "TEXT")
+            self._ensure_column(conn, "prompt_logs", "response_preview", "TEXT")
             self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
             self._ensure_column(conn, "class_sessions", "name", "TEXT")
             self._backfill_user_roles(conn)
@@ -165,12 +167,15 @@ class SqliteRouterRepository(RouterRepositoryBase):
             )
             self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
+            self._ensure_column(conn, "prompt_logs_archive", "api_endpoint", "TEXT")
+            self._ensure_column(conn, "prompt_logs_archive", "response_preview", "TEXT")
             conn.execute(
                 """
                 INSERT INTO prompt_logs_archive(
                     id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
-                    client_ip, created_at, archived_at, message_preview, messages_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    client_ip, created_at, archived_at, message_preview, messages_json,
+                    api_endpoint, response_preview
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -186,6 +191,8 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     dt(archived_at),
                     row.get("message_preview") or "",
                     row.get("messages_json") or "",
+                    row.get("api_endpoint") or "",
+                    row.get("response_preview") or "",
                 ),
             )
             conn.commit()

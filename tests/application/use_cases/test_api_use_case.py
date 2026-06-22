@@ -1,6 +1,47 @@
+import json
+
 import pytest
 
 from src.application.use_cases.api_use_case import ApiUseCase
+from fakes import FakeApiKeyRepository, FakeLLMGateway, FakeRequestLogger
+
+
+class CapturingPromptRepo(FakeApiKeyRepository):
+    def __init__(self):
+        super().__init__(force_enabled=False)
+        self.prompts: list[dict] = []
+
+    def log_prompt(self, **kwargs) -> None:
+        self.prompts.append(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_chat_nonstream_persists_assistant_reply_and_endpoint(sample_chat_request):
+    repo = CapturingPromptRepo()
+    use_case = ApiUseCase(gateway=FakeLLMGateway(), api_key_repo=repo, logger=FakeRequestLogger())
+
+    await use_case.chat_nonstream(sample_chat_request, None)
+
+    assert len(repo.prompts) == 1
+    prompt = repo.prompts[0]
+    assert prompt["api_endpoint"] == "/v1/chat/completions"
+    assert prompt["response_preview"] == "hello"
+    messages = json.loads(prompt["messages_json"])
+    assert messages[-1]["role"] == "assistant"
+    assert messages[-1]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_responses_create_persists_assistant_reply_and_endpoint():
+    repo = CapturingPromptRepo()
+    use_case = ApiUseCase(gateway=FakeLLMGateway(), api_key_repo=repo, logger=FakeRequestLogger())
+
+    await use_case.responses_create({"model": "fake-model", "input": "hi"}, None)
+
+    assert len(repo.prompts) == 1
+    prompt = repo.prompts[0]
+    assert prompt["api_endpoint"] == "/v1/responses"
+    assert prompt["response_preview"] == "hello"
 
 
 @pytest.mark.asyncio

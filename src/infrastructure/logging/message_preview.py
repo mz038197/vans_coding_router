@@ -197,3 +197,104 @@ def build_message_preview(messages: list[dict[str, Any]]) -> str:
             return _truncate_preview(content)
 
     return ""
+
+
+CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+RESPONSES_PATH = "/v1/responses"
+RESPONSE_LOG_MAX_CHARS = 131_072
+LOG_TRUNCATED_SUFFIX = "...[log truncated]"
+TOOL_CALLS_ONLY_LABEL = "[僅 tool_calls]"
+
+
+def truncate_log_text(text: str) -> tuple[str, bool]:
+    if len(text) <= RESPONSE_LOG_MAX_CHARS:
+        return text, False
+    keep = RESPONSE_LOG_MAX_CHARS - len(LOG_TRUNCATED_SUFFIX)
+    return text[:keep] + LOG_TRUNCATED_SUFFIX, True
+
+
+def build_response_preview(messages: list[dict[str, Any]]) -> str:
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        content = content_to_str(msg.get("content")).strip()
+        if content:
+            return _truncate_preview(content)
+    return ""
+
+
+def _responses_output_list(response: dict[str, Any]) -> list[Any]:
+    output = response.get("output")
+    if isinstance(output, list):
+        return output
+    nested = response.get("response")
+    if isinstance(nested, dict):
+        nested_output = nested.get("output")
+        if isinstance(nested_output, list):
+            return nested_output
+    return []
+
+
+def _assistant_from_responses_output(output: list[Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "message" or item.get("role") != "assistant":
+            continue
+        content = flatten_content(item.get("content")).strip()
+        if content:
+            truncated, _ = truncate_log_text(content)
+            messages.append({"role": "assistant", "content": truncated})
+    return messages
+
+
+def _assistant_from_chat_message(message: dict[str, Any]) -> list[dict[str, Any]]:
+    if message.get("tool_calls"):
+        return [{"role": "assistant", "content": TOOL_CALLS_ONLY_LABEL}]
+    raw = message.get("content")
+    if isinstance(raw, str):
+        text = raw
+    elif raw is None:
+        text = ""
+    else:
+        text = flatten_content(raw)
+    text = text.strip()
+    if not text:
+        return []
+    truncated, _ = truncate_log_text(text)
+    return [{"role": "assistant", "content": truncated}]
+
+
+def extract_assistant_messages_for_log(response: dict[str, Any], api_endpoint: str) -> list[dict[str, Any]]:
+    if not isinstance(response, dict):
+        return []
+
+    if api_endpoint == RESPONSES_PATH:
+        return _assistant_from_responses_output(_responses_output_list(response))
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return []
+    first = choices[0]
+    if not isinstance(first, dict):
+        return []
+    message = first.get("message")
+    if not isinstance(message, dict):
+        delta = first.get("delta")
+        if isinstance(delta, dict):
+            return _assistant_from_chat_message({"content": delta.get("content") or ""})
+        return []
+    return _assistant_from_chat_message(message)
+
+
+def truncate_assistant_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    truncated_messages: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            truncated_messages.append(msg)
+            continue
+        content = content_to_str(msg.get("content"))
+        text, _ = truncate_log_text(content)
+        truncated_messages.append({**msg, "content": text})
+    return truncated_messages

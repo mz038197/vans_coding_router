@@ -478,6 +478,55 @@
       white-space: pre-wrap;
     }
 
+    .log-detail-meta {
+      margin-bottom: 12px;
+      color: var(--text-secondary, #94a3b8);
+      font-size: 0.9rem;
+    }
+
+    .log-detail-section {
+      margin-bottom: 14px;
+    }
+
+    .log-detail-section-head {
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+
+    .log-detail-block {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.55);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-y: auto;
+    }
+
+    .log-detail-block-user {
+      max-height: 25vh;
+    }
+
+    .log-detail-block-assistant {
+      max-height: 50vh;
+    }
+
+    .log-detail-empty {
+      color: var(--text-secondary, #94a3b8);
+      font-style: italic;
+    }
+
+    .modal-footer-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      width: 100%;
+    }
+
     details.course-expander {
       border: 1px solid #334155;
       border-radius: 8px;
@@ -744,12 +793,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
 
   <div class="modal" id="promptDetailModal">
     <div class="modal-content">
-      <div class="modal-header">完整請求內容</div>
+      <div class="modal-header">對話紀錄</div>
       <div class="modal-body">
-        <pre class="log-detail-pre" id="promptDetailContent"></pre>
+        <div id="promptDetailMeta" class="log-detail-meta"></div>
+        <div id="promptDetailContent"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-secondary" onclick="closePromptDetailModal()">關閉</button>
+        <div class="modal-footer-actions">
+          <button class="btn-secondary" id="copyPromptResponseBtn" onclick="copyPromptResponse()">複製回覆</button>
+          <button class="btn-secondary" onclick="closePromptDetailModal()">關閉</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1470,9 +1523,23 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       }
     }
 
+    let lastPromptDetailAssistantText = '';
+
     function formatLogPreview(item) {
       const preview = (item.message_preview || '').trim();
       return preview || '—';
+    }
+
+    function formatResponsePreview(item) {
+      const preview = (item.response_preview || '').trim();
+      return preview || '—';
+    }
+
+    function formatLogEndpoint(item) {
+      const endpoint = (item.api_endpoint || '').trim();
+      if (endpoint === '/v1/chat/completions') return 'Chat Completions';
+      if (endpoint === '/v1/responses') return 'Responses';
+      return '—';
     }
 
     function formatLogDetailRole(role) {
@@ -1505,10 +1572,55 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       }
     }
 
-    function formatLogDetailMessages(detail) {
+    function formatLogDetailMessagesBlock(messages, roles) {
+      const filtered = (messages || []).filter(msg => roles.includes((msg.role || '').trim().toLowerCase()));
+      if (!filtered.length) return '';
+      return filtered.map(msg => `[${formatLogDetailRole(msg.role)}]\n${formatLogDetailContent(msg.content)}`).join('\n\n');
+    }
+
+    function renderPromptDetail(detail) {
+      const meta = document.getElementById('promptDetailMeta');
+      const container = document.getElementById('promptDetailContent');
+      const endpointLabel = formatLogEndpoint({ api_endpoint: detail.api_endpoint });
+      meta.textContent = endpointLabel !== '—' ? `端點：${endpointLabel}` : '';
+
       const messages = detail.messages || [];
-      if (!messages.length) return '（無 messages）';
-      return messages.map(msg => `[${formatLogDetailRole(msg.role)}]\n${formatLogDetailContent(msg.content)}`).join('\n\n');
+      const userText = formatLogDetailMessagesBlock(messages, ['user', 'system', 'tool', 'attachment']) || '（無使用者訊息）';
+      const assistantMessages = (messages || []).filter(msg => (msg.role || '').trim().toLowerCase() === 'assistant');
+      const assistantText = assistantMessages.length
+        ? assistantMessages.map(msg => formatLogDetailContent(msg.content)).join('\n\n')
+        : '';
+      lastPromptDetailAssistantText = assistantText;
+      const assistantChars = assistantText.length;
+      const truncated = assistantText.includes('...[log truncated]');
+      const assistantHead = assistantText
+        ? `助手回覆${assistantChars ? ` · ${assistantChars.toLocaleString()} 字` : ''}${truncated ? ' · 已截斷' : ''}`
+        : '助手回覆';
+
+      container.innerHTML = `
+        <div class="log-detail-section">
+          <div class="log-detail-section-head">使用者</div>
+          <pre class="log-detail-block log-detail-block-user">${escapeHtml(userText)}</pre>
+        </div>
+        <div class="log-detail-section">
+          <div class="log-detail-section-head">${escapeHtml(assistantHead)}</div>
+          ${assistantText
+            ? `<pre class="log-detail-block log-detail-block-assistant">${escapeHtml(assistantText)}</pre>`
+            : '<div class="log-detail-empty">（無回覆）</div>'}
+        </div>
+      `;
+
+      const copyBtn = document.getElementById('copyPromptResponseBtn');
+      if (copyBtn) copyBtn.disabled = !assistantText;
+    }
+
+    async function copyPromptResponse() {
+      if (!lastPromptDetailAssistantText) return;
+      try {
+        await navigator.clipboard.writeText(lastPromptDetailAssistantText);
+      } catch (_) {
+        /* clipboard may be unavailable */
+      }
     }
 
     function showLogsError(message) {
@@ -1523,14 +1635,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         logs.innerHTML = '<p class="hint">尚無資料</p>';
       } else {
         logs.innerHTML = `<table>
-          <tr><th>時間</th><th>學生</th><th>模型</th><th>狀態</th><th>訊息預覽</th><th>操作</th></tr>
+          <tr><th>時間</th><th>學生</th><th>端點</th><th>模型</th><th>狀態</th><th>使用者預覽</th><th>回覆預覽</th><th>操作</th></tr>
           ${items.map(item => `
             <tr>
               <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
               <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
+              <td>${escapeHtml(formatLogEndpoint(item))}</td>
               <td>${escapeHtml(item.model || '-')}</td>
               <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
+              <td><div class="logs-message-preview">${escapeHtml(formatResponsePreview(item))}</div></td>
               <td><button class="btn-secondary btn-sm" onclick="showPromptDetail(${item.id})">查看完整</button></td>
             </tr>
           `).join('')}
@@ -1550,13 +1664,15 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       const classId = document.getElementById('monitorClassId').value;
       if (!classId) return;
       const detail = await api(`/teacher/classes/${classId}/prompt-logs/${logId}`);
-      document.getElementById('promptDetailContent').textContent = formatLogDetailMessages(detail);
+      renderPromptDetail(detail);
       document.getElementById('promptDetailModal').classList.add('show');
     }
 
     function closePromptDetailModal() {
       document.getElementById('promptDetailModal').classList.remove('show');
-      document.getElementById('promptDetailContent').textContent = '';
+      document.getElementById('promptDetailMeta').textContent = '';
+      document.getElementById('promptDetailContent').innerHTML = '';
+      lastPromptDetailAssistantText = '';
     }
 
     async function redeem() {

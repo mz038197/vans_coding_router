@@ -1,7 +1,16 @@
 import json
 from typing import Any, AsyncGenerator
 
-from src.infrastructure.logging.message_preview import build_message_preview, messages_for_log
+from src.infrastructure.logging.message_preview import (
+    CHAT_COMPLETIONS_PATH,
+    RESPONSES_PATH,
+    build_message_preview,
+    build_response_preview,
+    extract_assistant_messages_for_log,
+    messages_for_log,
+    truncate_assistant_messages,
+    truncate_log_text,
+)
 
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
@@ -36,7 +45,16 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         response = await self.gateway.chat_completions_nonstream(req)
-        self._log_request(req, api_key, client_ip, auth_context, _usage_from_response(response))
+        assistant_messages = extract_assistant_messages_for_log(response, CHAT_COMPLETIONS_PATH)
+        self._log_request(
+            req,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(response),
+            assistant_messages=assistant_messages,
+            api_endpoint=CHAT_COMPLETIONS_PATH,
+        )
         return response
 
     async def chat_stream(
@@ -46,11 +64,19 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
-        usage_tracker = _SseUsageTracker()
+        tracker = _SseStreamTracker(CHAT_COMPLETIONS_PATH)
         async for chunk in self.gateway.chat_completions_stream(req):
-            usage_tracker.feed(chunk)
+            tracker.feed(chunk)
             yield chunk
-        self._log_request(req, api_key, client_ip, auth_context, usage_tracker.usage)
+        self._log_request(
+            req,
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            assistant_messages=tracker.assistant_messages,
+            api_endpoint=CHAT_COMPLETIONS_PATH,
+        )
 
     def validate_responses_request(self, body: dict[str, Any]) -> None:
         self._validate_responses_body(body)
@@ -64,7 +90,16 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         self._validate_responses_body(body)
         response = await self.gateway.responses_create(body)
-        self._log_responses_request(body, api_key, client_ip, auth_context, _usage_from_response(response))
+        assistant_messages = extract_assistant_messages_for_log(response, RESPONSES_PATH)
+        self._log_responses_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(response),
+            assistant_messages=assistant_messages,
+            api_endpoint=RESPONSES_PATH,
+        )
         return response
 
     async def responses_create_stream(
@@ -75,11 +110,19 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         self._validate_responses_body(body)
-        usage_tracker = _SseUsageTracker()
+        tracker = _SseStreamTracker(RESPONSES_PATH)
         async for chunk in self.gateway.responses_create_stream(body):
-            usage_tracker.feed(chunk)
+            tracker.feed(chunk)
             yield chunk
-        self._log_responses_request(body, api_key, client_ip, auth_context, usage_tracker.usage)
+        self._log_responses_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            assistant_messages=tracker.assistant_messages,
+            api_endpoint=RESPONSES_PATH,
+        )
 
     def _validate_responses_body(self, body: dict[str, Any]) -> None:
         previous_response_id = body.get("previous_response_id")
@@ -93,6 +136,8 @@ class ApiUseCase:
         client_ip: str | None,
         auth_context: AuthContext | None,
         usage: dict[str, int] | None,
+        assistant_messages: list[dict[str, Any]] | None = None,
+        api_endpoint: str = RESPONSES_PATH,
     ) -> None:
         model = body.get("model")
         model_name = model if isinstance(model, str) else "N/A"
@@ -106,7 +151,16 @@ class ApiUseCase:
             is_valid=is_valid,
             client_ip=client_ip,
         )
-        self._log_prompt(auth_context, messages, model_name, "ok" if is_valid else "rejected", client_ip, usage)
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            usage,
+            assistant_messages=assistant_messages,
+            api_endpoint=api_endpoint,
+        )
 
     def _log_request(
         self,
@@ -115,6 +169,8 @@ class ApiUseCase:
         client_ip: str | None,
         auth_context: AuthContext | None,
         usage: dict[str, int] | None,
+        assistant_messages: list[dict[str, Any]] | None = None,
+        api_endpoint: str = CHAT_COMPLETIONS_PATH,
     ) -> None:
         is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
         messages = [_message_to_log_dict(m) for m in req.messages]
@@ -126,7 +182,16 @@ class ApiUseCase:
             is_valid=is_valid,
             client_ip=client_ip,
         )
-        self._log_prompt(auth_context, messages, req.model, "ok" if is_valid else "rejected", client_ip, usage)
+        self._log_prompt(
+            auth_context,
+            messages,
+            req.model,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            usage,
+            assistant_messages=assistant_messages,
+            api_endpoint=api_endpoint,
+        )
 
     def _auth_for_log(
         self,
@@ -154,10 +219,14 @@ class ApiUseCase:
         status: str,
         client_ip: str | None,
         usage: dict[str, int] | None,
+        assistant_messages: list[dict[str, Any]] | None = None,
+        api_endpoint: str = "",
     ) -> None:
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
-        logged_messages = messages_for_log(messages)
+        logged_request = messages_for_log(messages)
+        logged_assistant = truncate_assistant_messages(messages_for_log(assistant_messages or []))
+        logged_messages = logged_request + logged_assistant
         raw_prompt = _messages_to_text(messages)
         self.api_key_repo.log_prompt(
             auth=auth_context,
@@ -169,8 +238,10 @@ class ApiUseCase:
             prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
             completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
             total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
-            message_preview=build_message_preview(logged_messages),
+            message_preview=build_message_preview(logged_request),
+            response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
+            api_endpoint=api_endpoint,
         )
 
     def log_invalid_auth(self, api_key: str, client_ip: str | None = None) -> None:
@@ -236,7 +307,7 @@ def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:
     return _usage_from_raw_usage(usage)
 
 
-def _usage_from_sse_event(event: str) -> dict[str, int] | None:
+def _payload_from_sse_event(event: str) -> dict[str, Any] | None:
     for line in event.splitlines():
         if not line.startswith("data:"):
             continue
@@ -247,11 +318,18 @@ def _usage_from_sse_event(event: str) -> dict[str, int] | None:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        if not isinstance(parsed, dict):
-            continue
-        usage = _extract_usage_raw(parsed)
-        if usage is not None:
-            return _usage_from_raw_usage(usage)
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _usage_from_sse_event(event: str) -> dict[str, int] | None:
+    parsed = _payload_from_sse_event(event)
+    if not parsed:
+        return None
+    usage = _extract_usage_raw(parsed)
+    if usage is not None:
+        return _usage_from_raw_usage(usage)
     return None
 
 
@@ -265,10 +343,46 @@ def _merge_usage(current: dict[str, int], new: dict[str, int]) -> dict[str, int]
     return current
 
 
-class _SseUsageTracker:
-    def __init__(self) -> None:
+def _assistant_text_from_sse_payload(payload: dict[str, Any], api_endpoint: str) -> str | None:
+    if api_endpoint == RESPONSES_PATH:
+        messages = extract_assistant_messages_for_log(payload, RESPONSES_PATH)
+        if messages:
+            content = messages[0].get("content")
+            return content if isinstance(content, str) else None
+        nested = payload.get("response")
+        if isinstance(nested, dict):
+            messages = extract_assistant_messages_for_log(nested, RESPONSES_PATH)
+            if messages:
+                content = messages[0].get("content")
+                return content if isinstance(content, str) else None
+        return None
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0]
+    if not isinstance(first, dict):
+        return None
+    delta = first.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            return content
+    message = first.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            return content
+    return None
+
+
+class _SseStreamTracker:
+    def __init__(self, api_endpoint: str) -> None:
+        self.api_endpoint = api_endpoint
         self._buffer = ""
         self.usage: dict[str, int] = {}
+        self._assistant_parts: list[str] = []
+        self._responses_completed = False
 
     def feed(self, chunk: bytes) -> None:
         self._buffer += chunk.decode("utf-8", errors="ignore")
@@ -279,6 +393,41 @@ class _SseUsageTracker:
             found = _usage_from_sse_event(event)
             if found is not None:
                 self.usage = _merge_usage(self.usage, found)
+            payload = _payload_from_sse_event(event)
+            if payload is not None:
+                self._feed_payload(payload)
+
+    def _feed_payload(self, payload: dict[str, Any]) -> None:
+        if self.api_endpoint == RESPONSES_PATH and payload.get("type") == "response.completed":
+            self._responses_completed = True
+            self._assistant_parts = []
+            text = _assistant_text_from_sse_payload(payload, self.api_endpoint)
+            if text:
+                self._assistant_parts.append(text)
+            return
+
+        if self._responses_completed:
+            return
+
+        text = _assistant_text_from_sse_payload(payload, self.api_endpoint)
+        if text:
+            self._assistant_parts.append(text)
+
+    @property
+    def assistant_messages(self) -> list[dict[str, Any]]:
+        if not self._assistant_parts:
+            return []
+        combined, _ = truncate_log_text("".join(self._assistant_parts))
+        if not combined:
+            return []
+        return [{"role": "assistant", "content": combined}]
+
+
+class _SseUsageTracker(_SseStreamTracker):
+    """Backward-compatible alias for tests that only track usage."""
+
+    def __init__(self) -> None:
+        super().__init__(CHAT_COMPLETIONS_PATH)
 
 
 def _usage_from_sse_chunk(chunk: bytes) -> dict[str, int] | None:
