@@ -97,21 +97,13 @@ def _non_empty_str(value: Any) -> str | None:
     return None
 
 
-def _assistant_visible_text(message: dict[str, Any]) -> str:
+def _normalize_message_content(message: dict[str, Any]) -> str:
     raw = message.get("content")
     if raw is None:
-        text = ""
-    elif isinstance(raw, str):
-        text = raw
-    else:
-        text = str(raw)
-    if text.strip():
-        return text
-    for key in ("reasoning_content", "reasoning", "thinking"):
-        alt = _non_empty_str(message.get(key))
-        if alt is not None:
-            return alt
-    return text
+        return ""
+    if isinstance(raw, str):
+        return raw
+    return str(raw)
 
 
 def normalize_chat_completions_response(body: dict[str, Any]) -> dict[str, Any]:
@@ -134,7 +126,7 @@ def normalize_chat_completions_response(body: dict[str, Any]) -> dict[str, Any]:
                 if raw is None:
                     message_out["content"] = ""
             else:
-                message_out["content"] = _assistant_visible_text(message_out)
+                message_out["content"] = _normalize_message_content(message_out)
             choice_out["message"] = message_out
         normalized_choices.append(choice_out)
     out["choices"] = normalized_choices
@@ -178,8 +170,9 @@ def _chunk_has_meaningful_delta(payload: dict[str, Any]) -> bool:
     content = delta.get("content")
     if isinstance(content, str) and content:
         return True
-    if _non_empty_str(delta.get("reasoning_content")) is not None:
-        return True
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        if _non_empty_str(delta.get(key)) is not None:
+            return True
     if delta.get("tool_calls"):
         return True
     return False
