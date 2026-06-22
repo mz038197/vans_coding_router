@@ -1530,11 +1530,6 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       return preview || '—';
     }
 
-    function formatResponsePreview(item) {
-      const preview = (item.response_preview || '').trim();
-      return preview || '—';
-    }
-
     function formatLogEndpoint(item) {
       const endpoint = (item.api_endpoint || '').trim();
       if (endpoint === '/v1/chat/completions') return 'Chat Completions';
@@ -1635,7 +1630,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         logs.innerHTML = '<p class="hint">尚無資料</p>';
       } else {
         logs.innerHTML = `<table>
-          <tr><th>時間</th><th>學生</th><th>端點</th><th>模型</th><th>狀態</th><th>使用者預覽</th><th>回覆預覽</th><th>操作</th></tr>
+          <tr><th>時間</th><th>學生</th><th>端點</th><th>模型</th><th>狀態</th><th>使用者預覽</th><th>操作</th></tr>
           ${items.map(item => `
             <tr>
               <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
@@ -1644,8 +1639,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
               <td>${escapeHtml(item.model || '-')}</td>
               <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
-              <td><div class="logs-message-preview">${escapeHtml(formatResponsePreview(item))}</div></td>
-              <td><button class="btn-secondary btn-sm" onclick="showPromptDetail(${item.id})">查看完整</button></td>
+              <td><button class="btn-secondary btn-sm" onclick="showPromptDetail(${item.id})">查看詳情</button></td>
             </tr>
           `).join('')}
         </table>`;
