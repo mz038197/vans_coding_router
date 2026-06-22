@@ -5,7 +5,10 @@ from typing import Any, AsyncGenerator
 
 from src.domain.entities.chat import ChatCompletionRequest
 from src.domain.ports.llm_gateway import LLMGatewayPort
+from src.infrastructure.gateways.copilot_compat import to_ollama_cloud_inference_id
 from src.infrastructure.routing.model_id import format_model_id, parse_model_id
+
+_OLLAMA_CLOUD_PROVIDER = "ollama_cloud"
 
 
 class RoutingGateway:
@@ -39,7 +42,10 @@ class RoutingGateway:
                     if not upstream_id:
                         continue
                     entry = dict(item)
-                    entry["id"] = format_model_id(name, upstream_id)
+                    client_upstream_id = upstream_id
+                    if name == _OLLAMA_CLOUD_PROVIDER:
+                        client_upstream_id = to_ollama_cloud_inference_id(upstream_id)
+                    entry["id"] = format_model_id(name, client_upstream_id)
                     entry["provider"] = name
                     data.append(entry)
             except Exception as exc:
@@ -73,10 +79,16 @@ class RoutingGateway:
     def _resolve_chat_request(self, req: ChatCompletionRequest) -> tuple[LLMGatewayPort, ChatCompletionRequest]:
         provider_name, upstream_model = parse_model_id(req.model, self._known_providers())
         gateway = self.gateways[provider_name]
+        upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
         return gateway, replace(req, model=upstream_model)
 
     def _resolve_responses_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
         payload = dict(body)
-        payload["model"] = upstream_model
+        payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
+
+    def _normalize_upstream_model(self, provider_name: str, upstream_model: str) -> str:
+        if provider_name == _OLLAMA_CLOUD_PROVIDER:
+            return to_ollama_cloud_inference_id(upstream_model)
+        return upstream_model

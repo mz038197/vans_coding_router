@@ -244,6 +244,16 @@ curl -s http://127.0.0.1:8000/auth/config
 - [ ] 不要加 sidebar，除非使用者明确要求
 - [ ] 本機 reload 後請使用者重新整理 `/portal`
 
+### 老師 API 連線測試（Portal UI）
+
+Teacher/admin 登入後 → **API 測試** tab：
+
+1. 到「個人 API Key」重設並複製 key（或貼上既有 key）
+2. **載入模型** → 確認 `ollama_cloud@…` 含 `:cloud` / `-cloud`
+3. 分別按 **測試 Chat Completions**、**測試 Responses**；有回應即成功
+
+此 tab 直接 `fetch` 正式 `/v1/*`，無額外後端端點；測試請求會寫入 Prompt 監控。
+
 ### 不要做的事
 
 - 不要把 Google secret 寫進 repo 內的 yaml 或 commit

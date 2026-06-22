@@ -21,7 +21,9 @@ All requests must use **`provider@upstream_model`**:
 
 Copy IDs from `GET /v1/models`. Bare names (without `@`) return **400**.
 
-Do not invent suffixes such as `:397b-cloud` unless they appear in `/v1/models`.
+For **`ollama_cloud` only**, the router adds Ollama cloud inference suffixes (`:cloud` or `-cloud` on tagged models) to listed IDs and when forwarding requests. Use the ID exactly as returned by `/v1/models`.
+
+Do not invent model suffixes for other providers unless they appear in `/v1/models`.
 
 ## VS Code `chatLanguageModels.json` examples
 

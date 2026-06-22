@@ -13,6 +13,7 @@ from src.infrastructure.gateways.copilot_compat import (
     OllamaThinkingCache,
     derive_ollama_native_base,
     is_ollama_provider,
+    strip_ollama_cloud_inference_suffix,
     normalize_chat_completions_response,
     normalize_chat_completions_sse,
     sanitize_responses_request,
@@ -137,10 +138,11 @@ class OpenAICompatibleGateway:
 
         await self.startup()
         assert self._client is not None
+        show_model = strip_ollama_cloud_inference_suffix(model)
         supports_thinking = await _ollama_thinking_cache.supports_thinking(
             self._client,
             native_base,
-            model,
+            show_model,
             self._headers(),
         )
         return sanitize_responses_request(payload, supports_thinking)

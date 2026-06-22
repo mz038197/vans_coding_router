@@ -7,6 +7,8 @@ from src.infrastructure.gateways.copilot_compat import (
     normalize_chat_completions_response,
     normalize_chat_completions_sse,
     sanitize_responses_request,
+    strip_ollama_cloud_inference_suffix,
+    to_ollama_cloud_inference_id,
 )
 
 
@@ -198,6 +200,37 @@ async def test_normalize_sse_converts_inline_error_to_choices():
 def test_derive_ollama_native_base():
     assert derive_ollama_native_base("https://ollama.com/v1") == "https://ollama.com"
     assert derive_ollama_native_base("https://ollama.com/v1/") == "https://ollama.com"
+
+
+@pytest.mark.parametrize(
+    ("registry", "inference"),
+    [
+        ("minimax-m3", "minimax-m3:cloud"),
+        ("qwen3.5", "qwen3.5:cloud"),
+        ("gpt-oss:20b", "gpt-oss:20b-cloud"),
+        ("qwen3-coder:480b", "qwen3-coder:480b-cloud"),
+        ("user/repo", "user/repo:cloud"),
+        ("user/repo:tag", "user/repo:tag-cloud"),
+        ("minimax-m3:cloud", "minimax-m3:cloud"),
+        ("gpt-oss:20b-cloud", "gpt-oss:20b-cloud"),
+    ],
+)
+def test_to_ollama_cloud_inference_id(registry: str, inference: str):
+    assert to_ollama_cloud_inference_id(registry) == inference
+
+
+@pytest.mark.parametrize(
+    ("inference", "registry"),
+    [
+        ("minimax-m3:cloud", "minimax-m3"),
+        ("qwen3.5:cloud", "qwen3.5"),
+        ("gpt-oss:20b-cloud", "gpt-oss:20b"),
+        ("qwen3-coder:480b-cloud", "qwen3-coder:480b"),
+        ("minimax-m3", "minimax-m3"),
+    ],
+)
+def test_strip_ollama_cloud_inference_suffix(inference: str, registry: str):
+    assert strip_ollama_cloud_inference_suffix(inference) == registry
 
 
 @pytest.mark.asyncio

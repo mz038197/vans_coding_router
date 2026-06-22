@@ -19,6 +19,47 @@ def is_ollama_provider(provider_name: str, base_url: str) -> bool:
     return host in {"ollama.com", "www.ollama.com"}
 
 
+def _has_explicit_ollama_tag(name: str) -> bool:
+    last_slash = name.rfind("/")
+    last_colon = name.rfind(":")
+    return last_colon > last_slash
+
+
+def _ollama_cloud_inference_suffix_present(name: str) -> bool:
+    if name.endswith(":cloud"):
+        return True
+    last_colon = name.rfind(":")
+    if last_colon < 0:
+        return False
+    tag = name[last_colon + 1 :]
+    return tag.endswith("-cloud") and "/" not in tag
+
+
+def to_ollama_cloud_inference_id(registry_id: str) -> str:
+    """Registry model name → Ollama cloud inference name (mirror toLegacyCloudPullName)."""
+    name = registry_id.strip()
+    if not name or _ollama_cloud_inference_suffix_present(name):
+        return name
+    if _has_explicit_ollama_tag(name):
+        return f"{name}-cloud"
+    return f"{name}:cloud"
+
+
+def strip_ollama_cloud_inference_suffix(inference_id: str) -> str:
+    """Inference name → registry base (mirror modelref.StripCloudSourceTag)."""
+    name = inference_id.strip()
+    if not name:
+        return name
+    if name.endswith(":cloud"):
+        return name[: -len(":cloud")]
+    last_colon = name.rfind(":")
+    if last_colon >= 0:
+        tag = name[last_colon + 1 :]
+        if tag.endswith("-cloud") and "/" not in tag:
+            return name[: last_colon + 1] + tag[: -len("-cloud")]
+    return name
+
+
 def derive_ollama_native_base(openai_base_url: str) -> str | None:
     parsed = urlparse(openai_base_url.rstrip("/"))
     if not parsed.scheme or not parsed.netloc:

@@ -352,6 +352,14 @@
 
     .hint-inline { margin: 0; }
 
+    .probe-panel { display: grid; gap: 12px; max-width: 640px; }
+    .probe-panel input, .probe-panel select { width: 100%; max-width: 100%; }
+    .probe-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .probe-result { margin-top: 8px; padding: 12px 14px; border-radius: 10px; font-size: 0.9rem; line-height: 1.5; }
+    .probe-result.ok { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.35); color: #a7f3d0; }
+    .probe-result.fail { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.35); color: #fecaca; }
+    .probe-result pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; }
+
     .dev-note { color: var(--text-muted); font-size: 0.88rem; margin-top: 12px; }
 
     pre.key-display, .code-font {
@@ -628,6 +636,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           <button type="button" data-tab="keyTab" onclick="showTab('keyTab')">個人 API Key</button>
           <button type="button" data-tab="classTab" onclick="showTab('classTab')">我的課程</button>
           <button type="button" data-tab="monitorTab" onclick="showTab('monitorTab')">Prompt 監控</button>
+          <button type="button" data-tab="probeTab" onclick="showTab('probeTab')">API 測試</button>
           <button type="button" id="adminBtn" class="hidden" data-tab="adminTab" onclick="showTab('adminTab')">系統管理</button>
         </div>
         <div id="keyTab">
@@ -677,6 +686,23 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           </div>
           <div id="logsHint" class="hint"></div>
           <div id="logs" class="table-wrap"></div>
+        </div>
+        <div id="probeTab" class="hidden">
+          <p class="hint">使用個人 API Key 測試 Router 是否打通 upstream。有 HTTP 回應即視為成功；測試請求會寫入 Prompt 監控。</p>
+          <div class="probe-panel">
+            <label for="probeApiKey">API Key</label>
+            <input id="probeApiKey" type="password" placeholder="vcr_sk_…（可從「個人 API Key」重設後複製）" autocomplete="off" />
+            <label for="probeModel">模型</label>
+            <div class="probe-actions">
+              <select id="probeModel"><option value="">請先載入模型列表</option></select>
+              <button type="button" class="btn-secondary" onclick="loadProbeModels()">載入模型</button>
+            </div>
+            <div class="probe-actions">
+              <button type="button" onclick="runProbeChat()">測試 Chat Completions</button>
+              <button type="button" onclick="runProbeResponses()">測試 Responses</button>
+            </div>
+            <div id="probeResult" class="probe-result hidden"></div>
+          </div>
         </div>
         <div id="adminTab" class="hidden">
           <button onclick="loadAdmin()">載入系統管理資料</button>
@@ -930,13 +956,148 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
 
     function showTab(id) {
-      ['keyTab','classTab','monitorTab','adminTab'].forEach(x =>
+      ['keyTab','classTab','monitorTab','probeTab','adminTab'].forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
       document.querySelectorAll('.tabs button[data-tab]').forEach(btn => {
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
       });
       if (id === 'monitorTab') syncMonitorCourseSelect();
       if (id === 'classTab') syncCourseSelect();
+      if (id === 'probeTab') syncProbeApiKey();
+    }
+
+    function syncProbeApiKey() {
+      const input = document.getElementById('probeApiKey');
+      if (!input) return;
+      if (lastTeacherKey) {
+        input.value = lastTeacherKey;
+        try { sessionStorage.setItem('vcr_probe_api_key', lastTeacherKey); } catch (_) {}
+        return;
+      }
+      try {
+        const saved = sessionStorage.getItem('vcr_probe_api_key');
+        if (saved && !input.value) input.value = saved;
+      } catch (_) {}
+    }
+
+    function probeApiKeyValue() {
+      const value = document.getElementById('probeApiKey')?.value.trim();
+      if (!value) throw new Error('請輸入 API Key（可到「個人 API Key」重設後複製）');
+      try { sessionStorage.setItem('vcr_probe_api_key', value); } catch (_) {}
+      return value;
+    }
+
+    function probeModelValue() {
+      const value = document.getElementById('probeModel')?.value.trim();
+      if (!value) throw new Error('請選擇模型（先按「載入模型」）');
+      return value;
+    }
+
+    function renderProbeResult(ok, title, detail) {
+      const box = document.getElementById('probeResult');
+      box.className = `probe-result ${ok ? 'ok' : 'fail'}`;
+      box.innerHTML = `<strong>${escapeHtml(title)}</strong><pre>${escapeHtml(detail)}</pre>`;
+      box.classList.remove('hidden');
+    }
+
+    function extractChatPreview(body) {
+      const content = body?.choices?.[0]?.message?.content;
+      if (typeof content === 'string' && content.trim()) return content.trim().slice(0, 200);
+      return JSON.stringify(body).slice(0, 400);
+    }
+
+    function extractResponsesPreview(body) {
+      if (body?.status === 'completed') return 'status: completed';
+      const output = body?.output;
+      if (Array.isArray(output) && output.length) {
+        for (const item of output) {
+          if (item?.type === 'message' && Array.isArray(item.content)) {
+            for (const part of item.content) {
+              if (part?.type === 'output_text' && part.text) return String(part.text).slice(0, 200);
+            }
+          }
+        }
+      }
+      return JSON.stringify(body).slice(0, 400);
+    }
+
+    async function v1Fetch(path, apiKey, payload) {
+      const t0 = performance.now();
+      const response = await fetch(`${portalPublicUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      let body;
+      const text = await response.text();
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+      return { ok: response.ok, status: response.status, latency_ms: Math.round(performance.now() - t0), body };
+    }
+
+    async function loadProbeModels() {
+      const apiKey = probeApiKeyValue();
+      const response = await fetch(`${portalPublicUrl}/v1/models`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+      const payload = JSON.parse(text);
+      const select = document.getElementById('probeModel');
+      const items = (payload.data || []).map(item => item.id).filter(Boolean).sort();
+      if (!items.length) {
+        select.innerHTML = '<option value="">（無可用模型）</option>';
+        return;
+      }
+      select.innerHTML = items.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('');
+      renderProbeResult(true, '模型列表已載入', `${items.length} 個模型`);
+    }
+
+    async function runProbeChat() {
+      try {
+        const apiKey = probeApiKeyValue();
+        const model = probeModelValue();
+        const result = await v1Fetch('/v1/chat/completions', apiKey, {
+          model,
+          messages: [{ role: 'user', content: 'ping' }],
+          stream: false,
+          max_tokens: 16,
+        });
+        const preview = extractChatPreview(result.body);
+        const hasContent = Boolean(result.body?.choices?.[0]?.message?.content);
+        const ok = result.ok && hasContent;
+        renderProbeResult(
+          ok,
+          ok ? 'Chat Completions：有回應' : 'Chat Completions：失敗',
+          `model: ${model}\nHTTP ${result.status} · ${result.latency_ms} ms\n${preview}`,
+        );
+      } catch (err) {
+        renderProbeResult(false, 'Chat Completions：錯誤', String(err.message || err));
+      }
+    }
+
+    async function runProbeResponses() {
+      try {
+        const apiKey = probeApiKeyValue();
+        const model = probeModelValue();
+        const result = await v1Fetch('/v1/responses', apiKey, {
+          model,
+          input: 'ping',
+          stream: false,
+          max_output_tokens: 16,
+        });
+        const preview = extractResponsesPreview(result.body);
+        const ok = result.ok && (result.body?.status === 'completed' || Boolean(result.body?.output?.length));
+        renderProbeResult(
+          ok,
+          ok ? 'Responses：有回應' : 'Responses：失敗',
+          `model: ${model}\nHTTP ${result.status} · ${result.latency_ms} ms\n${preview}`,
+        );
+      } catch (err) {
+        renderProbeResult(false, 'Responses：錯誤', String(err.message || err));
+      }
     }
 
     async function refresh() {
@@ -1221,6 +1382,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     async function resetTeacherKey() {
       const data = await api('/portal/teacher/api-key', {method:'POST'});
       lastTeacherKey = data.api_key;
+      syncProbeApiKey();
       const display = document.getElementById('teacherKeyDisplay');
       display.textContent =
         `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n\n⚠ 此 key 只會顯示這一次，請立即複製保存。`;

@@ -86,7 +86,34 @@ async def test_routing_gateway_routes_ollama_at_model(gateway: RoutingGateway):
     response = await gateway.responses_create({"model": "ollama_cloud@qwen3-coder-next", "input": "hi"})
 
     assert response == {"provider": "ollama_cloud"}
-    assert ollama_cloud.requests == ["qwen3-coder-next"]
+    assert ollama_cloud.requests == ["qwen3-coder-next:cloud"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_ollama_responses_adds_cloud_suffix(gateway: RoutingGateway):
+    ollama_cloud = gateway.gateways["ollama_cloud"]
+
+    await gateway.responses_create({"model": "ollama_cloud@minimax-m3", "input": "hi"})
+
+    assert ollama_cloud.requests == ["minimax-m3:cloud"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_ollama_tagged_model_uses_dash_cloud(gateway: RoutingGateway):
+    ollama = gateway.gateways["ollama_cloud"]
+
+    await gateway.responses_create({"model": "ollama_cloud@gpt-oss:20b", "input": "hi"})
+
+    assert ollama.requests == ["gpt-oss:20b-cloud"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_ollama_cloud_suffix_idempotent(gateway: RoutingGateway):
+    ollama_cloud = gateway.gateways["ollama_cloud"]
+
+    await gateway.responses_create({"model": "ollama_cloud@minimax-m3:cloud", "input": "hi"})
+
+    assert ollama_cloud.requests == ["minimax-m3:cloud"]
 
 
 @pytest.mark.asyncio
@@ -101,5 +128,5 @@ async def test_routing_gateway_models_return_prefixed_ids(gateway: RoutingGatewa
 
     assert models["object"] == "list"
     ids = {item["id"] for item in models["data"]}
-    assert ids == {"openrouter@anthropic/claude-sonnet", "ollama_cloud@qwen3-coder-next"}
+    assert ids == {"openrouter@anthropic/claude-sonnet", "ollama_cloud@qwen3-coder-next:cloud"}
     assert {item["provider"] for item in models["data"]} == {"openrouter", "ollama_cloud"}
