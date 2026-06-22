@@ -241,6 +241,7 @@ curl -s http://127.0.0.1:8000/auth/config
 
 - [ ] 只編輯 `src/presentation/fastapi/web/portal.html`
 - [ ] 維持 `#loginShell` / `#appShell` 與既有 `id`
+- [ ] 登入頁 `#loginShell` 有 Canvas 粒子白線背景（滑鼠互動）；登入後自動停止
 - [ ] 不要加 sidebar，除非使用者明确要求
 - [ ] 本機 reload 後請使用者重新整理 `/portal`
 

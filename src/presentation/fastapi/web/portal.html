@@ -153,6 +153,25 @@
       filter: blur(150px);
     }
 
+    .login-orbs {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .login-network-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .login-network-canvas { display: none; }
+    }
+
     .login-card {
       position: relative;
       z-index: 1;
@@ -577,6 +596,7 @@
     </header>
     <main class="login-hero neural-grid">
       <div class="login-orbs" aria-hidden="true"></div>
+      <canvas id="loginNetworkCanvas" class="login-network-canvas" aria-hidden="true"></canvas>
       <section id="login" class="glass-card login-card">
         <h1>Vans Coding <span class="gradient-text">Router</span></h1>
         <p class="login-subtitle">課堂 LLM 路由與 API Key 管理</p>
@@ -747,11 +767,177 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     function showLoginShell() {
       document.getElementById('loginShell').classList.remove('hidden');
       document.getElementById('appShell').classList.add('hidden');
+      startLoginNetwork();
     }
 
     function showAppShell() {
       document.getElementById('loginShell').classList.add('hidden');
       document.getElementById('appShell').classList.remove('hidden');
+      stopLoginNetwork();
+    }
+
+    const loginNetwork = (() => {
+      const LINK_DIST = 120;
+      const MOUSE_LINK_DIST = 150;
+      const MAX_PARTICLES = 80;
+      let canvas = null;
+      let ctx = null;
+      let hero = null;
+      let particles = [];
+      let rafId = 0;
+      let running = false;
+      let mouse = { x: 0, y: 0, active: false };
+      let reducedMotion = false;
+
+      function particleCount(w, h) {
+        return Math.min(MAX_PARTICLES, Math.max(35, Math.floor((w * h) / 15000)));
+      }
+
+      function resetParticles(w, h) {
+        const n = particleCount(w, h);
+        particles = Array.from({ length: n }, () => ({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: (Math.random() - 0.5) * 0.35,
+          vy: (Math.random() - 0.5) * 0.35,
+        }));
+      }
+
+      function resizeCanvas() {
+        if (!canvas || !hero) return;
+        const rect = hero.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.floor(rect.width));
+        const h = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (!particles.length || particles.length !== particleCount(w, h)) {
+          resetParticles(w, h);
+        }
+      }
+
+      function onMouseMove(event) {
+        if (!hero) return;
+        const rect = hero.getBoundingClientRect();
+        mouse.x = event.clientX - rect.left;
+        mouse.y = event.clientY - rect.top;
+        mouse.active = true;
+      }
+
+      function onMouseLeave() {
+        mouse.active = false;
+      }
+
+      function drawLine(x1, y1, x2, y2, dist, maxDist) {
+        const t = 1 - dist / maxDist;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.08 + t * 0.28})`;
+        ctx.lineWidth = 0.6 + t * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+
+      function tick() {
+        if (!running || !ctx || !canvas) return;
+        const w = canvas.width / (window.devicePixelRatio || 1);
+        const h = canvas.height / (window.devicePixelRatio || 1);
+        ctx.clearRect(0, 0, w, h);
+
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < 0 || p.x > w) p.vx *= -1;
+          if (p.y < 0 || p.y > h) p.vy *= -1;
+          p.x = Math.max(0, Math.min(w, p.x));
+          p.y = Math.max(0, Math.min(h, p.y));
+        }
+
+        for (let i = 0; i < particles.length; i++) {
+          for (let j = i + 1; j < particles.length; j++) {
+            const a = particles[i];
+            const b = particles[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < LINK_DIST) drawLine(a.x, a.y, b.x, b.y, dist, LINK_DIST);
+          }
+        }
+
+        if (mouse.active) {
+          for (const p of particles) {
+            const dist = Math.hypot(p.x - mouse.x, p.y - mouse.y);
+            if (dist < MOUSE_LINK_DIST) drawLine(p.x, p.y, mouse.x, mouse.y, dist, MOUSE_LINK_DIST);
+          }
+        }
+
+        for (const p of particles) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        rafId = requestAnimationFrame(tick);
+      }
+
+      function onVisibilityChange() {
+        if (document.hidden) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        } else if (running) {
+          rafId = requestAnimationFrame(tick);
+        }
+      }
+
+      return {
+        start() {
+          if (running || reducedMotion) return;
+          canvas = document.getElementById('loginNetworkCanvas');
+          hero = document.querySelector('#loginShell .login-hero');
+          if (!canvas || !hero || !window.requestAnimationFrame) return;
+          ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          running = true;
+          resizeCanvas();
+          hero.addEventListener('mousemove', onMouseMove);
+          hero.addEventListener('mouseleave', onMouseLeave);
+          window.addEventListener('resize', resizeCanvas);
+          document.addEventListener('visibilitychange', onVisibilityChange);
+          rafId = requestAnimationFrame(tick);
+        },
+        stop() {
+          running = false;
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+          if (hero) {
+            hero.removeEventListener('mousemove', onMouseMove);
+            hero.removeEventListener('mouseleave', onMouseLeave);
+          }
+          window.removeEventListener('resize', resizeCanvas);
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+          if (ctx && canvas) {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            ctx.clearRect(0, 0, w, h);
+          }
+          mouse.active = false;
+        },
+        init() {
+          reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        },
+      };
+    })();
+
+    function startLoginNetwork() {
+      loginNetwork.start();
+    }
+
+    function stopLoginNetwork() {
+      loginNetwork.stop();
     }
 
     function renderStatusTag(kind, value) {
@@ -943,6 +1129,9 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       updateProfileConfig();
       document.getElementById('oauthLogin').classList.toggle('hidden', !config.oauth_enabled);
       document.getElementById('devLogin').classList.toggle('hidden', config.oauth_enabled);
+      if (!document.getElementById('loginShell').classList.contains('hidden')) {
+        startLoginNetwork();
+      }
     }
 
     async function login() {
@@ -1642,6 +1831,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       });
     }
 
+    loginNetwork.init();
     initLogin()
       .catch(() => showLoginShell());
     refresh()
