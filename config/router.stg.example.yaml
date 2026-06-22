@@ -1,0 +1,36 @@
+public_url: "https://vans-coding-router-stg.onrender.com"
+student_default_ttl_hours: 2
+
+auth:
+  teacher_domain: ""
+  admin_emails:
+    - "mz038197@gmail.com"
+  google_client_id: ""
+  google_client_secret: ""
+  session_secret: "change-me-stg"
+  open_registration: true
+
+database:
+  # Stg 不設 DATABASE_URL → 使用 SQLite。路徑在 Render ephemeral FS，deploy 後清空。
+  url: ""
+  path: "/tmp/vans_coding_router_stg.db"
+  archive_dir: "/tmp/vans_coding_router_archive"
+
+prompt_logs:
+  retention_days: 30
+
+providers:
+  ollama_cloud:
+    type: openai_compatible
+    base_url: "https://ollama.com/v1"
+    api_key_env: "OLLAMA_CLOUD_API_KEY"
+    enabled: true
+
+  openrouter:
+    type: openai_compatible
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    enabled: true
+    extra_headers:
+      HTTP-Referer: "https://vans-coding-router-stg.onrender.com"
+      X-Title: "Vans Coding Router (Stg)"

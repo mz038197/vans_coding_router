@@ -1,7 +1,7 @@
 # 本機開發與 Portal 指引（Agent Runbook）
 
 > **給 Cursor / AI Agent 用**：下次要在本機跑 Portal、改 UI、或設定 Google 登入，照這份文件做。  
-> 正式部署見 [`DEPLOYMENT.md`](DEPLOYMENT.md)；OAuth 摘要見 [`OAUTH_AND_RENDER.md`](OAUTH_AND_RENDER.md)。
+> 正式部署見 [`DEPLOYMENT.md`](DEPLOYMENT.md)（含 **Stg 環境**）；OAuth 摘要見 [`OAUTH_AND_RENDER.md`](OAUTH_AND_RENDER.md)。
 
 ---
 

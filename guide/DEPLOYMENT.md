@@ -7,9 +7,12 @@
 | 用途 | URL |
 |------|-----|
 | Portal（管理／登入） | `https://ai.vanscoding.com/portal` |
+| **Stg Portal** | `https://vans-coding-router-stg.onrender.com/portal` |
 | 根路徑（自動導向 Portal） | `https://ai.vanscoding.com/` |
 | 健康檢查 | `https://ai.vanscoding.com/health` |
+| **Stg 健康檢查** | `https://vans-coding-router-stg.onrender.com/health` |
 | OAuth 設定檢查 | `https://ai.vanscoding.com/auth/config` |
+| **Stg OAuth 檢查** | `https://vans-coding-router-stg.onrender.com/auth/config` |
 | 學生 API | `https://ai.vanscoding.com/v1/*` |
 | Render 測試網址 | `https://vans-coding-router.onrender.com` |
 
@@ -90,8 +93,9 @@ Render 從 GitHub 拉程式部署，**必须先 push**。
 1. Render Dashboard → **New** → **Blueprint**
 2. 連接 GitHub repo：`vans_coding_router`
 3. 確認預覽資源：
-   - Web Service：`vans-coding-router`
-   - PostgreSQL：`vans-coding-router-db`（plan: `basic-256mb`）
+   - Web Service：`vans-coding-router`（`master` → PostgreSQL）
+   - Web Service：`vans-coding-router-stg`（`stg` → SQLite、`plan: free`）
+   - PostgreSQL：`vans-coding-router-db`（plan: `basic-256mb`，僅 prod 使用）
 4. 按 **Apply**
 
 ### 4.2 Build / Start 指令（Blueprint 已含）
@@ -109,6 +113,69 @@ Health check path：`/health`
 ### 4.3 第一次 Deploy 後
 
 第一次常因 Secret File 或 env 未填而 unhealthy，屬正常。完成第 5、6 步後 **Manual Deploy**。
+
+---
+
+## Stg 環境（SQLite）
+
+Stg 用於在 merge 到 `master` 前驗證 UI、OAuth、Portal 流程。**與 prod 完全分離**。
+
+| | **Prod** | **Stg** |
+|---|----------|---------|
+| Service | `vans-coding-router` | `vans-coding-router-stg` |
+| Render plan | `starter` | **`free`** |
+| Git 分支 | `master` | `stg` |
+| 網址 | `https://ai.vanscoding.com` | `https://vans-coding-router-stg.onrender.com` |
+| 資料庫 | PostgreSQL（`DATABASE_URL`） | SQLite（**不設** `DATABASE_URL`） |
+| 資料持久性 | 永久 | **Ephemeral**（每次 deploy / 重啟清空） |
+
+### Stg 第一次設定
+
+1. **Push `stg` 分支**（若 remote 尚無）：
+   ```powershell
+   git push -u origin stg
+   ```
+2. Render Blueprint **Sync** 或 Manual Deploy，確認 `vans-coding-router-stg` 已建立。
+3. Stg Service → **Environment** → **Secret Files**：
+   - Filename：`router.yaml`
+   - Mount path：`/etc/secrets/router.yaml`
+   - 內容以 [`config/router.stg.example.yaml`](../config/router.stg.example.yaml) 為底（**勿**在 yaml 寫 Google secret）
+4. Stg Service → **Environment** 變數（可與 prod 相同 API keys，但 `SESSION_SECRET` 必須獨立）：
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+   - `OLLAMA_CLOUD_API_KEY` / `OPENROUTER_API_KEY`
+   - **不要**設定 `DATABASE_URL`
+5. Google Console → OAuth Client → **Authorized redirect URIs** 新增：
+   ```text
+   https://vans-coding-router-stg.onrender.com/auth/google/callback
+   ```
+6. Manual Deploy stg service。
+
+### Stg 驗證
+
+```text
+GET https://vans-coding-router-stg.onrender.com/auth/config
+```
+
+預期：
+
+```json
+{
+  "oauth_enabled": true,
+  "redirect_uri": "https://vans-coding-router-stg.onrender.com/auth/google/callback",
+  "public_url": "https://vans-coding-router-stg.onrender.com"
+}
+```
+
+- [ ] Portal Google 登入
+- [ ] 建立 class / redeem 邀請碼
+- [ ] **再 Manual Deploy 一次** → 確認 users/classes 清空（ephemeral SQLite 預期行為）
+
+### Stg 日常流程
+
+```text
+功能開發 → merge / push 到 stg → 自動 deploy stg → 驗證
+OK → merge stg → master → prod 自動 deploy
+```
 
 ---
 
@@ -278,6 +345,7 @@ Google OAuth callback 固定為：
 ```text
 https://ai.vanscoding.com/auth/google/callback
 https://vans-coding-router.onrender.com/auth/google/callback
+https://vans-coding-router-stg.onrender.com/auth/google/callback
 ```
 
 4. 複製 Client ID、Client Secret → 填入 Render Environment
@@ -371,27 +439,35 @@ OPENAI_API_KEY=vcr_sk_xxxxxxxx
 | 登入成功但不是 admin | `admin_emails` 未含該 Gmail | 改 Secret File，redeploy |
 | 改 Secret File 沒效果 | 未 redeploy 或 env 覆蓋 | Save + Manual Deploy |
 | 改 yaml 的 Google 沒效果 | Environment 優先 | 改 Environment 而非 yaml |
-| Deploy 後資料消失 | `DATABASE_URL` 未生效或仍走 SQLite | 確認 Render Environment 有 `DATABASE_URL`；redeploy 後 users/classes 應保留 |
+| Deploy 後資料消失 | **Prod**：`DATABASE_URL` 未生效或仍走 SQLite | 確認 Render Environment 有 `DATABASE_URL`；redeploy 後 users/classes 應保留 |
+| Stg deploy 後資料消失 | **Stg 預期行為**（ephemeral SQLite） | 不需修；若要保留資料請改 prod 或加 Render Disk / Postgres |
 | Blueprint Postgres `starter` 錯誤 | 舊 plan 名稱 | 使用 `basic-256mb`（已修正於 render.yaml） |
 
 ---
 
 ## 14. 已知限制
 
-- **資料庫**：本地預設 SQLite；Render 上 Blueprint 會注入 `DATABASE_URL`，app 自動使用 PostgreSQL。Prompt log archive 在 Postgres 存於同庫 `prompt_logs_archive` 表（SQLite 仍用 yearly `.db` 檔）。
+- **資料庫**：本地預設 SQLite；Render **prod** Blueprint 注入 `DATABASE_URL` → PostgreSQL。**Stg** 不設 `DATABASE_URL` → SQLite（ephemeral）。Prompt log archive 在 Postgres 存於同庫 `prompt_logs_archive` 表（SQLite 仍用 yearly `.db` 檔）。
 - **雙網域 OAuth**：未實作依 Host 動態切換 callback；OAuth 以單一 `PUBLIC_URL` 為準。
+- **Free tier（stg）**：`plan: free` 閒置約 15 分鐘會休眠，首請求需冷啟動（數十秒），僅適合 stg 驗證。
 - **Free tier**：Render 免費服務可能休眠，首請求較慢。
 
 ---
 
 ## 15. 日常更新流程
 
-程式有變更時：
+**Production（`master`）：**
 
 ```powershell
 git add .
 git commit -m "..."
 git push origin master
+```
+
+**Stg（`stg`）：**
+
+```powershell
+git push origin stg
 ```
 
 Render 若開 automatic deploy 會自動建置；否則 **Manual Deploy**。
@@ -407,5 +483,7 @@ Render 若開 automatic deploy 會自動建置；否則 **Manual Deploy**。
 | [`README.md`](../README.md) | 專案概覽與 API |
 | [`guide/OAUTH_AND_RENDER.md`](OAUTH_AND_RENDER.md) | OAuth 與 Render 設定摘要 |
 | [`guide/VSCODE_COPILOT_BYOK.md`](VSCODE_COPILOT_BYOK.md) | 學生端 Copilot 設定 |
-| [`config/router.example.yaml`](../config/router.example.yaml) | 本機設定範本 |
+| [`config/router.example.yaml`](../config/router.example.yaml) | 本機 / prod Secret File 範本 |
+| [`config/router.stg.example.yaml`](../config/router.stg.example.yaml) | Stg Secret File 範本（SQLite） |
+| [`guide/LOCAL_DEV.md`](LOCAL_DEV.md) | 本機開發與 Portal UI（agent runbook） |
 | [`render.yaml`](../render.yaml) | Render Blueprint |
