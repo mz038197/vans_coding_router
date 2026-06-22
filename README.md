@@ -6,13 +6,13 @@ The router does not run or manage local Ollama. It forwards OpenAI-compatible re
 
 **Full deployment runbook (Render, OAuth, DNS, troubleshooting):** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md)
 
+**Local dev + Portal UI + Google OAuth (agent runbook):** [`guide/LOCAL_DEV.md`](guide/LOCAL_DEV.md)
+
 ## Quick Start
 
 ```powershell
 cd D:\Work\Python\vans_coding_router
-Copy-Item config\router.example.yaml $HOME\.vans_coding_router\router.yaml
-$env:VCR_CONFIG="$HOME\.vans_coding_router\router.yaml"
-uv run uvicorn app:app --reload
+powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
 ```
 
 Open `http://127.0.0.1:8000/portal` (or `http://127.0.0.1:8000/` — root redirects to `/portal`).

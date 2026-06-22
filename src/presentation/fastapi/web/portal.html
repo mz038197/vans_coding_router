@@ -3,169 +3,699 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
   <title>Vans Coding Router Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
-    body { font-family: system-ui, "Noto Sans TC", sans-serif; margin: 0; color: #17202a; background: #f6f7f9; }
-    header { background: #17324d; color: white; padding: 20px 28px; }
-    main { max-width: 1120px; margin: 24px auto; padding: 0 16px; }
-    section, form { background: white; border: 1px solid #d8dee6; border-radius: 8px; padding: 16px; margin: 14px 0; }
-    input, button, select { font: inherit; padding: 9px 10px; margin: 4px; }
-    button { background: #1d6f9f; color: white; border: 0; border-radius: 6px; cursor: pointer; }
-    table { width: 100%; border-collapse: collapse; background: white; }
-    th, td { text-align: left; border-bottom: 1px solid #e4e7eb; padding: 8px; vertical-align: top; }
-    .tabs button { background: #e9eef4; color: #17324d; }
-    .hidden { display: none; }
-    .error { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
-    .hint { color: #5d6d7e; font-size: 0.92rem; margin: 8px 0; }
-    .oauth-btn { display: inline-block; background: white; color: #17202a; border: 1px solid #d8dee6; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; }
-    .oauth-btn:hover { background: #f6f7f9; }
-    .dev-note { color: #5d6d7e; font-size: 0.92rem; margin-top: 8px; }
-    pre.key-display { white-space: pre-wrap; background: #101820; color: #d7f5e9; padding: 12px; border-radius: 6px; }
-    .logs-message-preview { max-width: 420px; max-height: 4.5em; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
-    .btn-secondary { background: #e9eef4; color: #17324d; }
-    .btn-link { background: none; color: #1d6f9f; padding: 0; text-decoration: underline; }
-    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    :root {
+      --bg-base: #020617;
+      --bg-glass: rgba(30, 41, 59, 0.4);
+      --bg-glass-strong: rgba(30, 41, 59, 0.7);
+      --border-glass: rgba(255, 255, 255, 0.1);
+      --text-primary: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #4f46e5;
+      --accent-hover: #6366f1;
+      --code-bg: #0d1117;
+      --danger: #f87171;
+      --success: #34d399;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: Inter, "Noto Sans TC", system-ui, sans-serif;
+      margin: 0;
+      color: var(--text-primary);
+      background: var(--bg-base);
+      min-height: 100vh;
+    }
+
+    h1, h2, h3, h4 { margin: 0 0 0.75rem; font-weight: 700; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.05rem; color: var(--text-primary); }
+
+    .hidden { display: none !important; }
+
+    .neural-grid {
+      background-image: radial-gradient(circle at 2px 2px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+      background-size: 40px 40px;
+    }
+
+    .glass-card {
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-glass);
+      border-radius: 12px;
+    }
+
+    .glass-panel {
+      background: var(--bg-glass-strong);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--border-glass);
+    }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .site-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: rgba(15, 23, 42, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      font-size: 0.95rem;
+    }
+
+    .nav-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-user {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.9rem;
+    }
+
+    .login-hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 96px 16px 48px;
+      overflow: hidden;
+    }
+
+    .login-orbs::before,
+    .login-orbs::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .login-orbs::before {
+      top: 10rem;
+      left: 2.5rem;
+      width: 18rem;
+      height: 18rem;
+      background: rgba(79, 70, 229, 0.2);
+      filter: blur(120px);
+    }
+
+    .login-orbs::after {
+      bottom: 5rem;
+      right: 2.5rem;
+      width: 24rem;
+      height: 24rem;
+      background: rgba(147, 51, 234, 0.1);
+      filter: blur(150px);
+    }
+
+    .login-card {
+      position: relative;
+      z-index: 1;
+      width: min(420px, 100%);
+      padding: 32px 28px;
+      text-align: center;
+    }
+
+    .login-card h1 {
+      font-size: 1.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .login-card .login-subtitle {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+    }
+
+    .page-main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 88px 16px 32px;
+    }
+
+    section, form {
+      padding: 20px;
+      margin: 14px 0;
+    }
+
+    section.glass-card { padding: 20px; }
+
+    input, button, select {
+      font: inherit;
+      padding: 9px 12px;
+      margin: 4px;
+      border-radius: 8px;
+    }
+
+    input, select {
+      background: #0f172a;
+      color: var(--text-primary);
+      border: 1px solid #334155;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.35);
+    }
+
+    button, .btn-secondary, .oauth-btn {
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s, border-color 0.15s;
+    }
+
+    button {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
+    }
+
+    button:hover { background: var(--accent-hover); }
+
+    .btn-secondary {
+      display: inline-block;
+      background: #1e293b;
+      color: var(--text-primary);
+      border: 1px solid #334155;
+      text-decoration: none;
+      font-weight: 500;
+      box-shadow: none;
+    }
+
+    .btn-secondary:hover { background: #334155; }
+
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+      box-shadow: none;
+    }
+
+    .btn-link {
+      background: none;
+      color: #818cf8;
+      padding: 0;
+      text-decoration: underline;
+      border: 0;
+      box-shadow: none;
+      font-weight: 500;
+    }
+
+    .btn-link:hover { color: #a5b4fc; background: none; }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      box-shadow: none;
+    }
+
+    .btn-danger:hover { background: rgba(248, 113, 113, 0.1); }
+
+    .oauth-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: white;
+      color: #0f172a;
+      border: 0;
+      padding: 12px 24px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .oauth-btn:hover {
+      background: #eef2ff;
+      transform: translateY(-2px);
+    }
+
+    .nav-logout {
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      box-shadow: none;
+    }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: transparent;
+    }
+
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid #334155;
+      padding: 10px 8px;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #334155;
+    }
+
+    .tabs button {
+      background: #1e293b;
+      color: var(--text-muted);
+      box-shadow: none;
+      font-weight: 500;
+    }
+
+    .tabs button:hover {
+      background: #334155;
+      color: var(--text-primary);
+    }
+
+    .tabs button.tab-active {
+      background: rgba(79, 70, 229, 0.15);
+      color: #a5b4fc;
+      border: 1px solid rgba(79, 70, 229, 0.35);
+    }
+
+    .error {
+      color: #fca5a5;
+      background: rgba(127, 29, 29, 0.35);
+      border: 1px solid rgba(248, 113, 113, 0.35);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 8px 0;
+    }
+
+    .hint {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      margin: 8px 0;
+    }
+
+    .hint-inline { margin: 0; }
+
+    .dev-note { color: var(--text-muted); font-size: 0.88rem; margin-top: 12px; }
+
+    pre.key-display, .code-font {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    pre.key-display {
+      white-space: pre-wrap;
+      background: var(--code-bg);
+      color: #d7f5e9;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      font-size: 0.85rem;
+    }
+
+    .api-config {
+      margin-bottom: 16px;
+      padding: 0;
+    }
+
+    .api-config > summary {
+      cursor: pointer;
+      padding: 14px 18px;
+      font-weight: 600;
+      color: var(--text-muted);
+      list-style: none;
+    }
+
+    .api-config > summary::-webkit-details-marker { display: none; }
+
+    .api-config > summary::before {
+      content: "▸ ";
+      display: inline-block;
+      transition: transform 0.15s;
+    }
+
+    .api-config[open] > summary::before { transform: rotate(90deg); }
+
+    .api-config[open] > summary { color: var(--text-primary); }
+
+    .api-config pre { margin: 0 18px 16px; }
+
+    .logs-message-preview {
+      max-width: 420px;
+      max-height: 4.5em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.4;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+
     .modal.show { display: flex; }
-    .modal-content { background: white; border-radius: 8px; width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; }
-    .modal-header { padding: 14px 16px; border-bottom: 1px solid #e4e7eb; font-weight: 600; }
+
+    .modal-content {
+      background: var(--bg-glass-strong);
+      border: 1px solid var(--border-glass);
+      border-radius: 12px;
+      width: min(900px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #334155;
+      font-weight: 600;
+    }
+
     .modal-body { padding: 16px; overflow: auto; }
-    .modal-footer { padding: 12px 16px; border-top: 1px solid #e4e7eb; text-align: right; }
-    .log-detail-pre { margin: 0; max-height: 60vh; overflow: auto; }
-    details.course-expander { border: 1px solid #e4e7eb; border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: #fafbfc; }
+
+    .modal-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #334155;
+      text-align: right;
+    }
+
+    .log-detail-pre {
+      margin: 0;
+      max-height: 60vh;
+      overflow: auto;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+    }
+
+    details.course-expander {
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      background: rgba(15, 23, 42, 0.5);
+    }
+
     details.course-expander > summary { cursor: pointer; font-weight: 600; }
-    .session-form { margin: 12px 0; padding: 10px; background: white; border: 1px solid #e4e7eb; border-radius: 6px; }
-    .subtable { margin: 8px 0 0; background: #f6f7f9; }
-    .key-meta { margin: 8px 0; padding: 10px; background: #f6f7f9; border-radius: 6px; }
+
+    .session-form {
+      margin: 12px 0;
+      padding: 14px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid #334155;
+      border-radius: 8px;
+    }
+
+    .session-form label { display: inline-block; margin-right: 8px; }
+
+    .input-narrow { width: 5em; }
+
+    .subtable { margin: 8px 0 0; background: rgba(15, 23, 42, 0.5); }
+
+    .key-meta {
+      margin: 8px 0;
+      padding: 12px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
     .admin-block { margin-top: 16px; }
-    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
-    .tag-active { background: #e6f4ea; color: #137333; }
-    .tag-ended { background: #f1f3f4; color: #5d6d7e; }
-    .tag-expired { background: #fef3e6; color: #b45309; }
-    .tag-rejected { background: #fef3f2; color: #b42318; }
-    .tag-success { background: #e6f4ea; color: #137333; }
-    .tag-role-admin { background: #ede7f6; color: #5e35b1; }
-    .tag-role-teacher { background: #e3f2fd; color: #1565c0; }
-    .tag-role-student { background: #e0f2f1; color: #00695c; }
-    .tag-personal { background: #eef2ff; color: #4338ca; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .tag-active { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+    .tag-ended { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); }
+    .tag-expired { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+    .tag-rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+    .tag-success { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+    .tag-role-admin { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
+    .tag-role-teacher { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
+    .tag-role-student { background: rgba(45, 212, 191, 0.15); color: #5eead4; }
+    .tag-personal { background: rgba(129, 140, 248, 0.15); color: #a5b4fc; }
+
     .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .profile-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .btn-danger { background: #fff; color: #b42318; border: 1px solid #fecdca; }
-    .btn-danger:hover { background: #fef3f2; }
-    .course-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
-    .course-detail-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-weight: 600; }
-    code.key-prefix { font-family: ui-monospace, monospace; font-size: 0.9em; }
-    .session-name-sub { display: block; color: #5d6d7e; font-size: 0.85rem; font-weight: 400; margin-top: 2px; }
+
+    .profile-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .profile-line > span:first-child { color: var(--text-muted); }
+
+    .course-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 12px 0;
+    }
+
+    .course-detail-header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    code.key-prefix {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.9em;
+      color: #a5b4fc;
+    }
+
+    .session-name-sub {
+      display: block;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    .monitor-filters label {
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      margin-right: 4px;
+    }
+
+    @media (max-width: 640px) {
+      .nav-user { justify-content: flex-end; max-width: 60%; }
+      .profile-line > span:first-child { font-size: 0.82rem; }
+      .nav-title { font-size: 1rem; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>Vans Coding Router Portal</h1></header>
-  <main>
-    <section id="login">
-      <h2>Google 登入</h2>
-      <div id="loginError" class="error hidden"></div>
-      <div id="oauthLogin" class="hidden">
-        <a class="oauth-btn" href="/auth/google/login">使用 Google 帳號登入</a>
+  <div id="loginShell">
+    <header class="site-nav">
+      <div class="nav-brand">
+        <div class="nav-logo"><i class="fas fa-route"></i></div>
+        <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
       </div>
-      <div id="devLogin" class="hidden">
-        <input id="email" placeholder="Gmail" />
-        <input id="displayName" placeholder="姓名" />
-        <button onclick="login()">開發模式登入</button>
-        <p class="dev-note">僅在未設定 Google OAuth 時可用，請勿在正式環境使用。</p>
-      </div>
-    </section>
-
-    <section id="profile" class="hidden">
-      <h2 id="who"></h2>
-      <button onclick="logout()">登出</button>
-      <pre id="profileConfig" class="key-display">OPENAI_BASE_URL=...
-OPENAI_API_KEY=vcr_sk_xxx</pre>
-    </section>
-
-    <section id="student" class="hidden">
-      <h2>課堂邀請碼</h2>
-      <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
-      <input id="invite" placeholder="輸入老師提供的邀請碼" />
-      <button onclick="redeem()">領取 API Key</button>
-      <div id="redeemResultWrap" class="hidden">
-        <pre id="redeemResult" class="key-display"></pre>
-        <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
-      </div>
-      <h3>VS Code 一鍵設定</h3>
-      <p class="hint">下載後<strong>雙擊 `install-vscode-models.cmd`</strong>即可（單一檔案、略過 Windows 執行原則）。會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。</p>
-      <a class="btn-secondary" href="/portal/download/install-vscode-models.cmd" download="install-vscode-models.cmd">下載 install-vscode-models.cmd</a>
-      <h3>有效 Key</h3>
-      <div id="keys"></div>
-    </section>
-
-    <section id="teacher" class="hidden">
-      <div class="tabs">
-        <button onclick="showTab('keyTab')">個人 API Key</button>
-        <button onclick="showTab('classTab')">我的課程</button>
-        <button onclick="showTab('monitorTab')">Prompt 監控</button>
-        <button id="adminBtn" class="hidden" onclick="showTab('adminTab')">系統管理</button>
-      </div>
-      <div id="keyTab">
-        <div id="teacherKeyMeta" class="key-meta"></div>
-        <button onclick="resetTeacherKey()">重設個人 API Key</button>
-        <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製保存。</p>
-        <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
-        <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
-      </div>
-      <div id="classTab" class="hidden">
-        <h3>建立課程</h3>
-        <input id="className" placeholder="課程名稱" />
-        <button onclick="createClass()">建立</button>
-        <div class="course-toolbar">
-          <input id="courseSearch" placeholder="搜尋課程名稱" oninput="onCourseFilterChange()" />
-          <select id="courseStatusFilter" onchange="onCourseFilterChange()">
-            <option value="active">進行中</option>
-            <option value="all">全部</option>
-            <option value="ended">已結束</option>
-          </select>
-          <select id="courseSelect" onchange="onCourseSelectChange()">
-            <option value="">請選擇課程</option>
-          </select>
+    </header>
+    <main class="login-hero neural-grid">
+      <div class="login-orbs" aria-hidden="true"></div>
+      <section id="login" class="glass-card login-card">
+        <h1>Vans Coding <span class="gradient-text">Router</span></h1>
+        <p class="login-subtitle">課堂 LLM 路由與 API Key 管理</p>
+        <div id="loginError" class="error hidden"></div>
+        <div id="oauthLogin" class="hidden">
+          <a class="oauth-btn" href="/auth/google/login">
+            <i class="fab fa-google"></i>
+            使用 Google 帳號登入
+          </a>
         </div>
-        <div id="courseDetail"><p class="hint">請選擇課程</p></div>
+        <div id="devLogin" class="hidden">
+          <input id="email" placeholder="Gmail" />
+          <input id="displayName" placeholder="姓名" />
+          <button onclick="login()">開發模式登入</button>
+          <p class="dev-note">僅在未設定 Google OAuth 時可用，請勿在正式環境使用。</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="appShell" class="hidden">
+    <header class="site-nav">
+      <div class="nav-brand">
+        <div class="nav-logo"><i class="fas fa-route"></i></div>
+        <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
       </div>
-      <div id="monitorTab" class="hidden">
-        <label for="monitorClassId">課程</label>
-        <select id="monitorStatusFilter" onchange="onMonitorFilterChange()">
-          <option value="active">進行中</option>
-          <option value="all">全部</option>
-          <option value="ended">已結束</option>
-        </select>
-        <select id="monitorClassId" onchange="onMonitorClassChange()">
-          <option value="">請選擇課程</option>
-        </select>
-        <label for="monitorSessionId">課堂</label>
-        <select id="monitorSessionId" onchange="onMonitorSessionChange()">
-          <option value="">全部課堂</option>
-        </select>
-        <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
-        <input id="monitorStart" type="datetime-local" />
-        <input id="monitorEnd" type="datetime-local" />
-        <button onclick="loadLogs()">查詢</button>
-        <button class="btn-secondary" onclick="loadUsage()">用量</button>
-        <div id="logsHint" class="hint"></div>
-        <div id="logs"></div>
+      <div class="nav-user">
+        <span id="navWho"></span>
+        <button class="nav-logout" onclick="logout()">登出</button>
       </div>
-      <div id="adminTab" class="hidden">
-        <button onclick="loadAdmin()">載入系統管理資料</button>
-        <button class="btn-secondary" onclick="runArchive()">執行封存</button>
-        <h3>系統設定</h3>
-        <input id="settingRetention" type="number" placeholder="Prompt log 保留天數" />
-        <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
-        <select id="settingRegistration">
-          <option value="true">開放注册</option>
-          <option value="false">關閉開放注册</option>
-        </select>
-        <button onclick="saveSettings()">儲存設定</button>
-        <div id="adminStatus" class="hint"></div>
-        <div id="admin"></div>
-      </div>
-    </section>
-  </main>
+    </header>
+    <main class="page-main neural-grid">
+      <details class="api-config glass-card">
+        <summary>API 連線設定（BYOK）</summary>
+        <pre id="profileConfig" class="key-display">OPENAI_BASE_URL=...
+OPENAI_API_KEY=vcr_sk_xxx</pre>
+      </details>
+
+      <section id="student" class="glass-card hidden">
+        <h2>課堂邀請碼</h2>
+        <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
+        <input id="invite" placeholder="輸入老師提供的邀請碼" />
+        <button onclick="redeem()">領取 API Key</button>
+        <div id="redeemResultWrap" class="hidden">
+          <pre id="redeemResult" class="key-display"></pre>
+          <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
+        </div>
+        <h3>VS Code 一鍵設定</h3>
+        <p class="hint">下載後<strong>雙擊 `install-vscode-models.cmd`</strong>即可（單一檔案、略過 Windows 執行原則）。會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。</p>
+        <a class="btn-secondary" href="/portal/download/install-vscode-models.cmd" download="install-vscode-models.cmd">下載 install-vscode-models.cmd</a>
+        <h3>有效 Key</h3>
+        <div id="keys" class="table-wrap"></div>
+      </section>
+
+      <section id="teacher" class="glass-card hidden">
+        <div class="tabs">
+          <button type="button" data-tab="keyTab" onclick="showTab('keyTab')">個人 API Key</button>
+          <button type="button" data-tab="classTab" onclick="showTab('classTab')">我的課程</button>
+          <button type="button" data-tab="monitorTab" onclick="showTab('monitorTab')">Prompt 監控</button>
+          <button type="button" id="adminBtn" class="hidden" data-tab="adminTab" onclick="showTab('adminTab')">系統管理</button>
+        </div>
+        <div id="keyTab">
+          <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
+          <button onclick="resetTeacherKey()">重設個人 API Key</button>
+          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製保存。</p>
+          <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
+          <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
+        </div>
+        <div id="classTab" class="hidden">
+          <h3>建立課程</h3>
+          <input id="className" placeholder="課程名稱" />
+          <button onclick="createClass()">建立</button>
+          <div class="course-toolbar">
+            <input id="courseSearch" placeholder="搜尋課程名稱" oninput="onCourseFilterChange()" />
+            <select id="courseStatusFilter" onchange="onCourseFilterChange()">
+              <option value="active">進行中</option>
+              <option value="all">全部</option>
+              <option value="ended">已結束</option>
+            </select>
+            <select id="courseSelect" onchange="onCourseSelectChange()">
+              <option value="">請選擇課程</option>
+            </select>
+          </div>
+          <div id="courseDetail"><p class="hint">請選擇課程</p></div>
+        </div>
+        <div id="monitorTab" class="hidden">
+          <div class="monitor-filters">
+            <label for="monitorClassId">課程</label>
+            <select id="monitorStatusFilter" onchange="onMonitorFilterChange()">
+              <option value="active">進行中</option>
+              <option value="all">全部</option>
+              <option value="ended">已結束</option>
+            </select>
+            <select id="monitorClassId" onchange="onMonitorClassChange()">
+              <option value="">請選擇課程</option>
+            </select>
+            <label for="monitorSessionId">課堂</label>
+            <select id="monitorSessionId" onchange="onMonitorSessionChange()">
+              <option value="">全部課堂</option>
+            </select>
+            <input id="monitorKeyword" placeholder="姓名 / Gmail / prompt 關鍵字" />
+            <input id="monitorStart" type="datetime-local" />
+            <input id="monitorEnd" type="datetime-local" />
+            <button onclick="loadLogs()">查詢</button>
+            <button class="btn-secondary" onclick="loadUsage()">用量</button>
+          </div>
+          <div id="logsHint" class="hint"></div>
+          <div id="logs" class="table-wrap"></div>
+        </div>
+        <div id="adminTab" class="hidden">
+          <button onclick="loadAdmin()">載入系統管理資料</button>
+          <button class="btn-secondary" onclick="runArchive()">執行封存</button>
+          <h3>系統設定</h3>
+          <input id="settingRetention" type="number" placeholder="Prompt log 保留天數" />
+          <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
+          <select id="settingRegistration">
+            <option value="true">開放注册</option>
+            <option value="false">關閉開放注册</option>
+          </select>
+          <button onclick="saveSettings()">儲存設定</button>
+          <div id="adminStatus" class="hint"></div>
+          <div id="admin" class="table-wrap"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
   <div class="modal" id="promptDetailModal">
     <div class="modal-content">
       <div class="modal-header">完整請求內容</div>
@@ -177,6 +707,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       </div>
     </div>
   </div>
+
   <script>
     let currentRoles = ['student'];
     let teacherClasses = [];
@@ -186,6 +717,16 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     let lastRedeemedKey = '';
     let lastTeacherKey = '';
     let selectedCourseId = '';
+
+    function showLoginShell() {
+      document.getElementById('loginShell').classList.remove('hidden');
+      document.getElementById('appShell').classList.add('hidden');
+    }
+
+    function showAppShell() {
+      document.getElementById('loginShell').classList.add('hidden');
+      document.getElementById('appShell').classList.remove('hidden');
+    }
 
     function renderStatusTag(kind, value) {
       const map = {
@@ -389,7 +930,11 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
 
     function showTab(id) {
-      ['keyTab','classTab','monitorTab','adminTab'].forEach(x => document.getElementById(x).classList.toggle('hidden', x !== id));
+      ['keyTab','classTab','monitorTab','adminTab'].forEach(x =>
+        document.getElementById(x).classList.toggle('hidden', x !== id));
+      document.querySelectorAll('.tabs button[data-tab]').forEach(btn => {
+        btn.classList.toggle('tab-active', btn.dataset.tab === id);
+      });
       if (id === 'monitorTab') syncMonitorCourseSelect();
       if (id === 'classTab') syncCourseSelect();
     }
@@ -397,9 +942,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     async function refresh() {
       const me = await api('/auth/me');
       currentRoles = me.roles || [me.role];
-      document.getElementById('login').classList.add('hidden');
-      document.getElementById('profile').classList.remove('hidden');
-      document.getElementById('who').innerHTML = renderProfileLine(me);
+      showAppShell();
+      document.getElementById('navWho').innerHTML = renderProfileLine(me);
       document.getElementById('keys').innerHTML = renderActiveKeysTable(me.keys || []);
       document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
       document.getElementById('teacher').classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
@@ -409,6 +953,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         renderTeacherKeyMeta(me.keys || []);
         syncCourseSelect();
         syncMonitorCourseSelect();
+        showTab('keyTab');
       }
     }
 
@@ -465,13 +1010,13 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
         <div class="course-detail-header">
           <span>${escapeHtml(course.name)}</span>
           ${renderStatusTag('course', course.status)}
-          <span class="hint" style="margin:0;">${course.member_count ?? 0} 位成員</span>
+          <span class="hint hint-inline">${course.member_count ?? 0} 位成員</span>
         </div>
         ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
           <div class="session-form">
             <label>課堂名稱 <input type="text" id="sessionName" placeholder="例如：第一堂：環境建置" /></label>
             <label>課堂時間 <input type="datetime-local" id="sessionAt" value="${defaultDatetimeLocalValue()}" /></label>
-            <label>TTL 小時 <input type="number" id="sessionTtl" value="2" min="1" style="width:5em;" /></label>
+            <label>TTL 小時 <input type="number" id="sessionTtl" value="2" min="1" class="input-narrow" /></label>
             <button onclick="createSession(${course.id})">新增課堂</button>
             <span class="hint">key 將在課堂時間 + TTL 小時後到期</span>
           </div>`}
@@ -636,7 +1181,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
               <td>${escapeHtml(item.model || '-')}</td>
               <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
-              <td><button class="btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="showPromptDetail(${item.id})">查看完整</button></td>
+              <td><button class="btn-secondary btn-sm" onclick="showPromptDetail(${item.id})">查看完整</button></td>
             </tr>
           `).join('')}
         </table>`;
@@ -723,8 +1268,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
             <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
             <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
             <td>
-              <button type="button" class="btn-secondary copy-invite-btn" style="padding:4px 10px;font-size:12px;" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>
-              <button type="button" class="btn-secondary" style="padding:4px 10px;font-size:12px;" data-name="${escapeHtml((s.name || '').trim())}" onclick="editSessionName(${classId}, ${s.id}, this)">編輯名稱</button>
+              <button type="button" class="btn-secondary btn-sm copy-invite-btn" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>
+              <button type="button" class="btn-secondary btn-sm" data-name="${escapeHtml((s.name || '').trim())}" onclick="editSessionName(${classId}, ${s.id}, this)">編輯名稱</button>
             </td>
           </tr>
           <tr id="redemption-row-${s.id}" class="hidden">
@@ -935,8 +1480,10 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       });
     }
 
-    initLogin().catch(() => {});
-    refresh().catch(() => {});
+    initLogin()
+      .catch(() => showLoginShell());
+    refresh()
+      .catch(() => showLoginShell());
   </script>
 </body>
 </html>
