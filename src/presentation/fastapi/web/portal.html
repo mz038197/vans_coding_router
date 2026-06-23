@@ -1124,7 +1124,7 @@
         return;
       }
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>語音</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(s)}</td>
@@ -1138,6 +1138,14 @@
                 <span>${sessionImageEnabled(s) ? '開啟' : '關閉'}</span>
               </label>
             </td>
+            <td>
+              <label class="session-tts-toggle">
+                <input type="checkbox"
+                  ${sessionTtsEnabled(s) ? 'checked' : ''}
+                  onchange="toggleSessionTts(${classId}, ${s.id}, this.checked, this)" />
+                <span>${sessionTtsEnabled(s) ? '開啟' : '關閉'}</span>
+              </label>
+            </td>
             <td><code>${escapeHtml(s.invite_code)}</code></td>
             <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
             <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
@@ -1147,7 +1155,7 @@
             </td>
           </tr>
           <tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="8"><div id="redemption-body-${s.id}"></div></td>
+            <td colspan="9"><div id="redemption-body-${s.id}"></div></td>
           </tr>
         `).join('')}
       </table>`;
@@ -1166,6 +1174,27 @@
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
           body: JSON.stringify({ image_generation_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '開啟' : '關閉';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    function sessionTtsEnabled(session) {
+      const value = session.tts_enabled;
+      if (value === undefined || value === null) return true;
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function toggleSessionTts(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-tts-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ tts_enabled: enabled }),
         });
         if (label) label.textContent = enabled ? '開啟' : '關閉';
       } catch (err) {

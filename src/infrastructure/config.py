@@ -28,6 +28,9 @@ class PromptLogSettings:
     retention_days: int = 30
 
 
+CAPABILITY_AUDIO_SPEECH = "audio_speech"
+
+
 @dataclass(frozen=True)
 class ProviderSettings:
     name: str
@@ -37,6 +40,26 @@ class ProviderSettings:
     api_key_env: str = ""
     enabled: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
+    capabilities: tuple[str, ...] = ()
+
+
+def provider_supports(provider: ProviderSettings, capability: str) -> bool:
+    return capability in provider.capabilities
+
+
+def providers_with_capability(
+    providers: dict[str, ProviderSettings],
+    capability: str,
+    *,
+    enabled_only: bool = True,
+) -> list[str]:
+    names: list[str] = []
+    for name, provider in providers.items():
+        if enabled_only and not provider.enabled:
+            continue
+        if provider_supports(provider, capability):
+            names.append(name)
+    return names
 
 
 @dataclass(frozen=True)
@@ -98,6 +121,8 @@ def _load_providers(raw: dict[str, Any]) -> dict[str, ProviderSettings]:
     for name, item in raw.items():
         if not isinstance(item, dict):
             continue
+        raw_capabilities = item.get("capabilities") or ()
+        capabilities = tuple(str(c) for c in raw_capabilities) if isinstance(raw_capabilities, list) else ()
         providers[str(name)] = ProviderSettings(
             name=str(name),
             type=str(item.get("type", "openai_compatible")),
@@ -106,6 +131,7 @@ def _load_providers(raw: dict[str, Any]) -> dict[str, ProviderSettings]:
             api_key_env=str(item.get("api_key_env", "")),
             enabled=bool(item.get("enabled", True)),
             extra_headers={str(k): str(v) for k, v in (item.get("extra_headers") or {}).items()},
+            capabilities=capabilities,
         )
     return providers
 
@@ -188,6 +214,7 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
                 "base_url": provider.base_url,
                 "api_key": "***" if provider.api_key or provider.api_key_env else "",
                 "enabled": provider.enabled,
+                "capabilities": list(provider.capabilities),
             }
             for name, provider in settings.providers.items()
         },

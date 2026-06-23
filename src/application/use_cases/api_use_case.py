@@ -2,6 +2,7 @@ import json
 from typing import Any, AsyncGenerator
 
 from src.infrastructure.logging.message_preview import (
+    AUDIO_SPEECH_PATH,
     CHAT_COMPLETIONS_PATH,
     IMAGES_PATH,
     RESPONSES_PATH,
@@ -15,7 +16,7 @@ from src.infrastructure.logging.message_preview import (
 
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import ImageGenerationDisabledError, StatefulResponsesNotSupportedError
+from src.domain.errors import ImageGenerationDisabledError, StatefulResponsesNotSupportedError, TtsDisabledError
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
@@ -176,6 +177,26 @@ class ApiUseCase:
         self._assert_image_generation_allowed(auth_context)
         return await self.gateway.images_models()
 
+    async def audio_speech_stream(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> AsyncGenerator[bytes, None]:
+        byte_count = 0
+        async for chunk in self.gateway.audio_speech_create_stream(body):
+            byte_count += len(chunk)
+            yield chunk
+        self._log_tts_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            byte_count,
+            api_endpoint=AUDIO_SPEECH_PATH,
+        )
+
     def _assert_image_generation_allowed(self, auth_context: AuthContext | None) -> None:
         if auth_context is None or auth_context.session_id is None:
             return
@@ -183,6 +204,27 @@ class ApiUseCase:
             return
         if not self.api_key_repo.is_image_generation_enabled(auth_context.session_id):
             raise ImageGenerationDisabledError()
+
+    def _assert_tts_allowed(self, auth_context: AuthContext | None) -> None:
+        if auth_context is None or auth_context.session_id is None:
+            return
+        if not hasattr(self.api_key_repo, "is_tts_enabled"):
+            return
+        if not self.api_key_repo.is_tts_enabled(auth_context.session_id):
+            raise TtsDisabledError()
+
+    def validate_audio_speech_request(
+        self,
+        body: dict[str, Any],
+        auth_context: AuthContext | None = None,
+    ) -> None:
+        self._assert_tts_allowed(auth_context)
+        self._prepare_audio_speech_body(body)
+
+    def _prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
+        prepare = getattr(self.gateway, "prepare_audio_speech_body", None)
+        if callable(prepare):
+            prepare(body)
 
     def _validate_responses_body(self, body: dict[str, Any]) -> None:
         previous_response_id = body.get("previous_response_id")
@@ -341,6 +383,45 @@ class ApiUseCase:
             "ok" if is_valid else "rejected",
             client_ip,
             usage,
+            assistant_messages=assistant_messages,
+            api_endpoint=api_endpoint,
+        )
+
+    def _log_tts_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        byte_count: int,
+        api_endpoint: str = AUDIO_SPEECH_PATH,
+    ) -> None:
+        model = body.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        text_input = body.get("input")
+        input_text = text_input if isinstance(text_input, str) else ""
+        messages = [{"role": "user", "content": input_text}] if input_text else []
+        assistant_messages = (
+            [{"role": "assistant", "content": f"[audio: {byte_count} bytes streamed]"}]
+            if byte_count
+            else []
+        )
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            None,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
         )

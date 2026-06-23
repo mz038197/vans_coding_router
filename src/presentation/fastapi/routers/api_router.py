@@ -11,7 +11,7 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
 )
-from src.presentation.fastapi.schemas.api import ChatCompletionsRequestSchema, ImageGenerationRequestSchema
+from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
 
 
 def _client_ip(request: Request) -> str | None:
@@ -176,5 +176,53 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         data = await api_use_case.images_models(api_key, client_ip, auth_context)
         return JSONResponse(content=data)
+
+    def _audio_speech_media_type(response_format: str | None) -> str:
+        if response_format == "pcm":
+            return "audio/pcm"
+        if response_format == "wav":
+            return "audio/wav"
+        if response_format == "mp3":
+            return "audio/mpeg"
+        if response_format == "opus":
+            return "audio/opus"
+        if response_format == "aac":
+            return "audio/aac"
+        if response_format == "flac":
+            return "audio/flac"
+        return "application/octet-stream"
+
+    async def _audio_speech_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+        try:
+            async for chunk in api_use_case.audio_speech_stream(body, api_key, client_ip, auth_context):
+                yield chunk
+        except UpstreamServiceError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except ServiceUnavailableError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except Exception as e:
+            yield openai_stream_error_bytes(str(e), error_type="server_error")
+
+    @router.post("/v1/audio/speech")
+    async def audio_speech_create(req: AudioSpeechRequestSchema, request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            err = AuthenticationError()
+            return openai_error_response(
+                err.status_code,
+                err.message,
+                error_type="invalid_request_error",
+                code="invalid_api_key",
+            )
+
+        body = req.model_dump(exclude_none=True)
+        api_use_case.validate_audio_speech_request(body, auth_context)
+        generator = _audio_speech_stream_with_error_handling(body, api_key, client_ip, auth_context)
+        media_type = _audio_speech_media_type(body.get("response_format"))
+        return StreamingResponse(generator, media_type=media_type)
 
     return router

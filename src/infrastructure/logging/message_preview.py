@@ -202,6 +202,7 @@ def build_message_preview(messages: list[dict[str, Any]]) -> str:
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 RESPONSES_PATH = "/v1/responses"
 IMAGES_PATH = "/v1/images"
+AUDIO_SPEECH_PATH = "/v1/audio/speech"
 RESPONSE_LOG_MAX_CHARS = 131_072
 LOG_TRUNCATED_SUFFIX = "...[log truncated]"
 TOOL_CALLS_ONLY_LABEL = "[僅 tool_calls]"

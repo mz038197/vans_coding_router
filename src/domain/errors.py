@@ -74,6 +74,24 @@ class ImageGenerationDisabledError(AppError):
         )
 
 
+class TtsNotSupportedError(AppError):
+    def __init__(self, message: str = "此 provider 不支援 /v1/audio/speech"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="tts_not_supported",
+        )
+
+
+class TtsDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放語音"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="tts_disabled",
+        )
+
+
 class StatefulResponsesNotSupportedError(AppError):
     def __init__(
         self,

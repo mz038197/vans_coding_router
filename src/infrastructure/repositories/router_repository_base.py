@@ -495,8 +495,9 @@ class RouterRepositoryBase(ABC):
         expires_at: str | None = None,
         name: str | None = None,
         image_generation_enabled: bool | None = None,
+        tts_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
-        if expires_at is None and name is None and image_generation_enabled is None:
+        if expires_at is None and name is None and image_generation_enabled is None and tts_enabled is None:
             raise ValueError("nothing to update")
         with self._connect() as conn:
             row = conn.execute(
@@ -527,6 +528,11 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET image_generation_enabled = ? WHERE id = ?"),
                     (1 if image_generation_enabled else 0, session_id),
                 )
+            if tts_enabled is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET tts_enabled = ? WHERE id = ?"),
+                    (1 if tts_enabled else 0, session_id),
+                )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
@@ -542,6 +548,19 @@ class RouterRepositoryBase(ABC):
             if not row:
                 return False
             value = row["image_generation_enabled"]
+            if isinstance(value, bool):
+                return value
+            return bool(int(value or 0))
+
+    def is_tts_enabled(self, session_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT tts_enabled FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            value = row["tts_enabled"]
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))

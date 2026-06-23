@@ -34,3 +34,11 @@ providers:
     extra_headers:
       HTTP-Referer: "https://ai.vanscoding.com"
       X-Title: "Vans Coding Router"
+
+  openai:
+    type: openai_compatible
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    enabled: true
+    capabilities:
+      - audio_speech

@@ -226,6 +226,8 @@ class FakeLLMGateway:
             b'data: {"type":"image_generation.completed","data":[{"b64_json":"abc"}],"usage":{"total_tokens":3}}\n\n',
             b"data: [DONE]\n\n",
         ]
+        self.last_audio_speech_body: dict[str, Any] | None = None
+        self.audio_speech_stream_chunks = [b"\x00\x01", b"\x00\x02"]
 
     async def startup(self) -> None:
         return None
@@ -272,3 +274,8 @@ class FakeLLMGateway:
 
     async def images_models(self) -> dict[str, Any]:
         return self.images_models_response
+
+    async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self.last_audio_speech_body = body
+        for chunk in self.audio_speech_stream_chunks:
+            yield chunk

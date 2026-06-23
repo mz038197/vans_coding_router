@@ -177,6 +177,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
             conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS tts_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,

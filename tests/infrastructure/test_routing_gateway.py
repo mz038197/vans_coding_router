@@ -3,13 +3,15 @@ from typing import Any, AsyncGenerator
 import pytest
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import InvalidModelIdError
+from src.domain.errors import InvalidModelIdError, TtsNotSupportedError
+from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH, ProviderSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
 
 class FakeGateway:
-    def __init__(self, name: str):
+    def __init__(self, name: str, capabilities: tuple[str, ...] = ()):
         self.name = name
+        self.provider = ProviderSettings(name=name, capabilities=capabilities)
         self.requests: list[str] = []
 
     async def startup(self) -> None:
@@ -53,6 +55,10 @@ class FakeGateway:
     async def images_models(self) -> dict[str, Any]:
         return {"object": "list", "data": [{"id": "flux.2-pro"}]}
 
+    async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self.requests.append(str(body.get("model")))
+        yield b"\x00\x01"
+
 
 @pytest.fixture
 def gateway() -> RoutingGateway:
@@ -60,6 +66,17 @@ def gateway() -> RoutingGateway:
         {
             "openrouter": FakeGateway("openrouter"),
             "ollama_cloud": FakeGateway("ollama_cloud"),
+        }
+    )
+
+
+@pytest.fixture
+def audio_gateway() -> RoutingGateway:
+    return RoutingGateway(
+        {
+            "openrouter": FakeGateway("openrouter"),
+            "ollama_cloud": FakeGateway("ollama_cloud"),
+            "openai": FakeGateway("openai", (CAPABILITY_AUDIO_SPEECH,)),
         }
     )
 
@@ -161,3 +178,31 @@ async def test_routing_gateway_images_models_prefix_ids(gateway: RoutingGateway)
 
     assert models["data"][0]["id"] == "openrouter@flux.2-pro"
     assert models["data"][0]["provider"] == "openrouter"
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_audio_speech_strips_provider_prefix(audio_gateway: RoutingGateway):
+    openai = audio_gateway.gateways["openai"]
+
+    chunks = []
+    async for chunk in audio_gateway.audio_speech_create_stream(
+        {
+            "model": "openai@gpt-4o-mini-tts",
+            "input": "hello",
+            "voice": "nova",
+            "response_format": "pcm",
+        }
+    ):
+        chunks.append(chunk)
+
+    assert chunks == [b"\x00\x01"]
+    assert openai.requests == ["gpt-4o-mini-tts"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_audio_speech_rejects_unsupported_provider(audio_gateway: RoutingGateway):
+    with pytest.raises(TtsNotSupportedError):
+        async for _chunk in audio_gateway.audio_speech_create_stream(
+            {"model": "openrouter@gpt-4o-mini-tts", "input": "hello", "voice": "nova"}
+        ):
+            pass

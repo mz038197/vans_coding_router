@@ -45,6 +45,7 @@ class SessionPatchRequest(BaseModel):
     expires_at: str | None = None
     name: str | None = None
     image_generation_enabled: bool | None = None
+    tts_enabled: bool | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -238,6 +239,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 expires_at=data.expires_at,
                 name=data.name,
                 image_generation_enabled=data.image_generation_enabled,
+                tts_enabled=data.tts_enabled,
             )
         )
 

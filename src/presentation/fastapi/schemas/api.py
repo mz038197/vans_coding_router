@@ -99,3 +99,21 @@ class ImageGenerationRequestSchema(BaseModel):
         if not v.strip():
             raise ValueError("prompt 不可為空")
         return v
+
+
+class AudioSpeechRequestSchema(BaseModel):
+    model: str
+    input: str
+    voice: str
+    response_format: str | None = None
+    speed: float | None = None
+    instructions: str | None = None
+
+    model_config = {"extra": "allow"}
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("input 不可為空")
+        return v

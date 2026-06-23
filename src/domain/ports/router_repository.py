@@ -81,10 +81,14 @@ class RouterRepositoryPort(Protocol):
         expires_at: str | None = None,
         name: str | None = None,
         image_generation_enabled: bool | None = None,
+        tts_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         ...
 
     def is_image_generation_enabled(self, session_id: int) -> bool:
+        ...
+
+    def is_tts_enabled(self, session_id: int) -> bool:
         ...
 
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:

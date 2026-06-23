@@ -46,6 +46,7 @@ SESSION_SECRET=<strong-random-secret>
 DATABASE_URL=<render-postgres-url>
 OLLAMA_CLOUD_API_KEY=xxx
 OPENROUTER_API_KEY=xxx
+OPENAI_API_KEY=xxx
 ```
 
 Provider routing uses **`provider@upstream_model`** model IDs. The part before `@` is the router provider name (`openrouter`, `ollama_cloud`, …); the part after `@` is forwarded unchanged to that provider.
@@ -61,6 +62,13 @@ providers:
     type: openai_compatible
     base_url: "https://openrouter.ai/api/v1"
     api_key_env: "OPENROUTER_API_KEY"
+
+  openai:
+    type: openai_compatible
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    capabilities:
+      - audio_speech
 ```
 
 Examples:
@@ -91,10 +99,11 @@ Supported endpoints:
 - `POST /v1/responses`
 - `POST /v1/images` (OpenRouter image generation; model ID e.g. `openrouter@black-forest-labs/flux.2-pro`)
 - `GET /v1/images/models`
+- `POST /v1/audio/speech` (TTS via providers with `audio_speech` capability; model ID e.g. `openai@gpt-4o-mini-tts`)
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.
 
-Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). Teacher long-lived keys are not restricted by session toggles.
+Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). TTS follows each session's **語音** toggle (default on). Teacher long-lived keys are not restricted by session toggles.
 
 ## Portal Flow
 

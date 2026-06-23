@@ -7,8 +7,8 @@ from typing import Any, AsyncGenerator
 import httpx
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import ImageGenerationNotSupportedError, ServiceUnavailableError, UpstreamServiceError
-from src.infrastructure.config import ProviderSettings
+from src.domain.errors import ImageGenerationNotSupportedError, ServiceUnavailableError, TtsNotSupportedError, UpstreamServiceError
+from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH, ProviderSettings, providers_with_capability
 from src.infrastructure.gateways.copilot_compat import (
     OllamaThinkingCache,
     derive_ollama_native_base,
@@ -90,10 +90,23 @@ class OpenAICompatibleGateway:
         response = await self._request("GET", "/images/models")
         return self._json_or_error(response)
 
+    async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self._assert_audio_speech_provider()
+        async for chunk in self._stream("POST", "/audio/speech", json=body):
+            yield chunk
+
     def _assert_image_provider(self) -> None:
         if self.provider.name not in _IMAGE_API_PROVIDERS:
             raise ImageGenerationNotSupportedError(
                 f"provider「{self.provider.name}」不支援 /v1/images，請使用 openrouter@..."
+            )
+
+    def _assert_audio_speech_provider(self) -> None:
+        if CAPABILITY_AUDIO_SPEECH not in self.provider.capabilities:
+            capable = providers_with_capability({self.provider.name: self.provider}, CAPABILITY_AUDIO_SPEECH)
+            hint = f"{capable[0]}@..." if capable else "audio_speech provider"
+            raise TtsNotSupportedError(
+                f"provider「{self.provider.name}」不支援 /v1/audio/speech，請使用 {hint}"
             )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:

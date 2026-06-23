@@ -36,3 +36,6 @@ class LLMGatewayPort(Protocol):
 
     async def images_models(self) -> dict[str, Any]:
         ...
+
+    async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        ...
