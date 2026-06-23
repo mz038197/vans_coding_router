@@ -748,7 +748,7 @@
 
     .lobby-room-layout > .lobby-room-sidebar {
       grid-column: 2;
-      grid-row: 2;
+      grid-row: 1 / -1;
       min-height: 0;
     }
 
