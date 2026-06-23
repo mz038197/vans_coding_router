@@ -120,6 +120,11 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     message_preview TEXT,
                     messages_json TEXT
                 );
+                CREATE TABLE IF NOT EXISTS runtime_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")

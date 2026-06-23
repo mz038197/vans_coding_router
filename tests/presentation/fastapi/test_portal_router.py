@@ -205,6 +205,40 @@ def test_admin_update_settings_endpoint(tmp_path):
     assert payload["prompt_logs"]["retention_days"] == 10
     assert payload["student_default_ttl_hours"] == 4
     assert payload["auth"]["open_registration"] is False
+    assert repo.get_runtime_settings()["retention_days"] == "10"
+
+
+def test_admin_update_user_roles_endpoint(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    student = repo.upsert_google_user("student@example.com", "Student")
+
+    response = client.patch(
+        f"/admin/users/{student['id']}",
+        cookies={"session_user_id": str(admin["id"])},
+        json={"roles": ["student", "teacher"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload["roles"]) == {"student", "teacher"}
+
+
+def test_admin_update_user_status_endpoint(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    student = repo.upsert_google_user("student@example.com", "Student")
+
+    response = client.patch(
+        f"/admin/users/{student['id']}",
+        cookies={"session_user_id": str(admin["id"])},
+        json={"status": "inactive"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "inactive"
 
 
 def test_admin_update_class_endpoint(tmp_path):

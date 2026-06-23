@@ -565,6 +565,12 @@
     .tag-role-admin { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
     .tag-role-teacher { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
     .tag-role-student { background: rgba(45, 212, 191, 0.15); color: #5eead4; }
+    .tag-role-inactive { background: transparent; opacity: 0.45; border: 1px dashed currentColor; }
+    .tag-clickable { cursor: pointer; border: none; font: inherit; }
+    .tag-clickable:hover { filter: brightness(1.15); }
+    .tag-user-active { background: rgba(74, 222, 128, 0.15); color: #86efac; }
+    .tag-user-inactive { background: rgba(248, 113, 113, 0.15); color: #fca5a5; }
+    #adminUserSearch { margin-top: 12px; max-width: 320px; }
     .tag-personal { background: rgba(129, 140, 248, 0.15); color: #a5b4fc; }
     .tag-endpoint-chat { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
     .tag-endpoint-responses { background: rgba(192, 132, 252, 0.15); color: #d8b4fe; }

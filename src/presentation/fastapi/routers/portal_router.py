@@ -80,6 +80,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             raise HTTPException(status_code=403, detail="權限不足") from None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="設定檔不可寫入") from exc
 
     def current_user_id(session_user_id: str | None) -> int:
         if not session_user_id:

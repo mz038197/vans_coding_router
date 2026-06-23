@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import os
 from pathlib import Path
 from typing import Any
@@ -140,9 +140,35 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
     )
 
 
+def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> RouterSettings:
+    if not overrides:
+        return base
+    retention_days = base.prompt_logs.retention_days
+    student_default_ttl_hours = base.student_default_ttl_hours
+    open_registration = base.auth.open_registration
+    if "retention_days" in overrides:
+        retention_days = int(overrides["retention_days"])
+    if "student_default_ttl_hours" in overrides:
+        student_default_ttl_hours = int(overrides["student_default_ttl_hours"])
+    if "open_registration" in overrides:
+        open_registration = overrides["open_registration"].lower() in ("true", "1", "yes")
+    return RouterSettings(
+        path=base.path,
+        public_url=base.public_url,
+        student_default_ttl_hours=student_default_ttl_hours,
+        auth=replace(base.auth, open_registration=open_registration),
+        database=base.database,
+        prompt_logs=replace(base.prompt_logs, retention_days=retention_days),
+        providers=base.providers,
+        routing=base.routing,
+    )
+
+
 def settings_summary(settings: RouterSettings) -> dict[str, Any]:
+    config_path = settings.path or ""
     return {
         "config_path": settings.path,
+        "config_writable": not config_path.startswith("/etc/secrets/"),
         "public_url": settings.public_url,
         "database_path": settings.database.path,
         "database_url": "***" if settings.database.url else "",

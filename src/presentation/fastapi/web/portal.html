@@ -170,6 +170,7 @@
             <option value="false">關閉開放注册</option>
           </select>
           <button onclick="saveSettings()">儲存設定</button>
+          <input id="adminUserSearch" type="search" placeholder="搜尋姓名或 Email" oninput="filterAdminUsers(this.value)" />
           <div id="adminStatus" class="hint"></div>
           <div id="admin" class="table-wrap"></div>
         </div>
@@ -197,6 +198,10 @@
 
   <script>
     let currentRoles = ['student'];
+    let currentUserId = null;
+    let adminUsers = [];
+    let adminData = null;
+    let adminUserSearchQuery = '';
     let teacherClasses = [];
     let monitorSessions = [];
     let portalPublicUrl = 'https://ai.vanscoding.com';
@@ -510,7 +515,18 @@
 
     async function api(url, options = {}) {
       const r = await fetch(url, {headers: {'content-type': 'application/json'}, ...options});
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) {
+        const text = await r.text();
+        try {
+          const payload = JSON.parse(text);
+          const detail = payload.detail;
+          if (typeof detail === 'string') throw new Error(detail);
+          if (detail && typeof detail === 'object' && detail.message) throw new Error(detail.message);
+        } catch (err) {
+          if (err instanceof Error && err.message !== text) throw err;
+        }
+        throw new Error(text || r.statusText);
+      }
       return r.json();
     }
 
@@ -726,6 +742,7 @@
 
     async function refresh() {
       const me = await api('/auth/me');
+      currentUserId = me.id;
       currentRoles = me.roles || [me.role];
       showAppShell();
       document.getElementById('navWho').innerHTML = renderProfileLine(me);
@@ -1304,16 +1321,111 @@
         : 'Token 用量統計（全部課堂）';
     }
 
+    function renderAdminUserRoleTags(userId, roles) {
+      const order = [
+        ['admin', '管理員', 'tag-role-admin'],
+        ['teacher', '老師', 'tag-role-teacher'],
+        ['student', '學生', 'tag-role-student'],
+      ];
+      const set = new Set(roles || []);
+      return order.map(([role, label, cls]) => {
+        const active = set.has(role);
+        const stateClass = active ? cls : `${cls} tag-role-inactive`;
+        return `<button type="button" class="tag tag-clickable ${stateClass}" onclick="toggleUserRole(${userId}, '${role}')">${label}</button>`;
+      }).join('');
+    }
+
+    function renderAdminUserStatusTag(userId, status) {
+      const active = status === 'active';
+      const value = active ? 'active' : 'inactive';
+      const label = active ? '有效' : '停用';
+      const cls = active ? 'tag-user-active' : 'tag-user-inactive';
+      return `<button type="button" class="tag tag-clickable ${cls}" onclick="toggleUserStatus(${userId}, '${value}')">${label}</button>`;
+    }
+
+    function filterAdminUsers(query) {
+      adminUserSearchQuery = query || '';
+      rerenderAdminUsersTable();
+    }
+
+    function filteredAdminUsers() {
+      const query = adminUserSearchQuery.trim().toLowerCase();
+      if (!query) return adminUsers;
+      return adminUsers.filter(u =>
+        String(u.name || '').toLowerCase().includes(query) ||
+        String(u.email || '').toLowerCase().includes(query)
+      );
+    }
+
+    function rerenderAdminUsersTable() {
+      const host = document.getElementById('adminUsersTable');
+      if (!host) return;
+      const users = filteredAdminUsers();
+      host.innerHTML = `
+        <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>註冊時間</th><th>角色</th><th>狀態</th></tr>
+        ${users.map(u => `<tr>
+          <td>${u.id}</td>
+          <td>${escapeHtml(u.name)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${formatLocalDateTime(u.created_at)}</td>
+          <td><span class="tag-row">${renderAdminUserRoleTags(u.id, u.roles || [u.role])}</span></td>
+          <td>${renderAdminUserStatusTag(u.id, u.status === 'active' ? 'active' : 'inactive')}</td>
+        </tr>`).join('')}
+        </table>`;
+    }
+
+    async function toggleUserRole(userId, role) {
+      const user = adminUsers.find(u => u.id === userId);
+      if (!user) return;
+      const roles = new Set(user.roles || [user.role]);
+      const removing = roles.has(role);
+      if (removing && role === 'admin' && userId === currentUserId) {
+        if (!confirm('確定要移除自己的管理員權限嗎？')) return;
+      }
+      if (removing) roles.delete(role);
+      else roles.add(role);
+      try {
+        const updated = await api(`/admin/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({roles: [...roles]}),
+        });
+        Object.assign(user, updated);
+        rerenderAdminUsersTable();
+        document.getElementById('adminStatus').textContent = `已更新 ${user.name} 的角色`;
+        if (userId === currentUserId) await refresh();
+      } catch (err) {
+        document.getElementById('adminStatus').textContent = String(err.message || err);
+      }
+    }
+
+    async function toggleUserStatus(userId, currentStatus) {
+      const user = adminUsers.find(u => u.id === userId);
+      if (!user) return;
+      const nextStatus = currentStatus === 'active' ? 'inactive' : 'active';
+      if (nextStatus === 'inactive' && userId === currentUserId) {
+        if (!confirm('確定要停用自己的帳號嗎？')) return;
+      }
+      try {
+        const updated = await api(`/admin/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({status: nextStatus}),
+        });
+        Object.assign(user, updated);
+        rerenderAdminUsersTable();
+        document.getElementById('adminStatus').textContent = `已更新 ${user.name} 的狀態`;
+        if (userId === currentUserId && nextStatus === 'inactive') await refresh();
+      } catch (err) {
+        document.getElementById('adminStatus').textContent = String(err.message || err);
+      }
+    }
+
     function renderAdminPanel(data) {
-      const users = data.users.items || [];
       const classes = data.classes.items || [];
       const settings = data.settings || {};
       return `
         <div class="admin-block">
           <h4>使用者</h4>
-          <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>角色</th><th>狀態</th></tr>
-          ${users.map(u => `<tr><td>${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td>${renderRoleTags(u.roles || [u.role])}</td><td>${renderStatusTag('user', u.status === 'active' ? 'active' : 'inactive')}</td></tr>`).join('')}
-          </table>
+          <div id="adminUsersTable" class="table-wrap"></div>
         </div>
         <div class="admin-block">
           <h4>課程</h4>
@@ -1328,13 +1440,24 @@
         </div>`;
     }
 
+    function fillAdminSettingInputs(settings) {
+      if (!settings) return;
+      document.getElementById('settingRetention').value = settings.prompt_logs?.retention_days ?? '';
+      document.getElementById('settingTtl').value = settings.student_default_ttl_hours ?? '';
+      document.getElementById('settingRegistration').value = settings.auth?.open_registration ? 'true' : 'false';
+    }
+
     async function loadAdmin() {
       const data = {
         users: await api('/admin/users'),
         classes: await api('/admin/classes'),
         settings: await api('/admin/settings'),
       };
+      adminData = data;
+      adminUsers = data.users.items || [];
       document.getElementById('admin').innerHTML = renderAdminPanel(data);
+      rerenderAdminUsersTable();
+      fillAdminSettingInputs(data.settings);
       document.getElementById('adminStatus').textContent = '已載入系統管理資料';
     }
 
@@ -1349,13 +1472,18 @@
         student_default_ttl_hours: Number(document.getElementById('settingTtl').value) || null,
         open_registration: document.getElementById('settingRegistration').value === 'true',
       };
-      const settings = await api('/admin/settings', {method:'PATCH', body: JSON.stringify(body)});
-      document.getElementById('adminStatus').textContent = '設定已儲存';
-      document.getElementById('admin').innerHTML = renderAdminPanel({
-        users: await api('/admin/users'),
-        classes: await api('/admin/classes'),
-        settings,
-      });
+      try {
+        const settings = await api('/admin/settings', {method:'PATCH', body: JSON.stringify(body)});
+        document.getElementById('adminStatus').textContent = '設定已儲存';
+        if (adminData) {
+          adminData.settings = settings;
+          document.getElementById('admin').innerHTML = renderAdminPanel(adminData);
+          rerenderAdminUsersTable();
+        }
+        fillAdminSettingInputs(settings);
+      } catch (err) {
+        document.getElementById('adminStatus').textContent = String(err.message || err);
+      }
     }
 
     loginNetwork.init();

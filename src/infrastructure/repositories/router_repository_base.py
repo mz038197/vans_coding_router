@@ -752,6 +752,47 @@ class RouterRepositoryBase(ABC):
                 "response_preview": item.get("response_preview") or "",
             }
 
+    def get_runtime_settings(self) -> dict[str, str]:
+        with self._connect() as conn:
+            rows = conn.execute(self._sql("SELECT key, value FROM runtime_settings")).fetchall()
+            return {str(row["key"]): str(row["value"]) for row in rows}
+
+    def update_runtime_settings(
+        self,
+        retention_days: int | None = None,
+        student_default_ttl_hours: int | None = None,
+        open_registration: bool | None = None,
+    ) -> dict[str, str]:
+        updates: list[tuple[str, str]] = []
+        now = dt(utc_now())
+        if retention_days is not None:
+            updates.append(("retention_days", str(retention_days)))
+        if student_default_ttl_hours is not None:
+            updates.append(("student_default_ttl_hours", str(student_default_ttl_hours)))
+        if open_registration is not None:
+            updates.append(("open_registration", "true" if open_registration else "false"))
+        if not updates:
+            return self.get_runtime_settings()
+        with self._connect() as conn:
+            for key, value in updates:
+                if self.dialect == "postgres":
+                    conn.execute(
+                        self._sql(
+                            "INSERT INTO runtime_settings(key, value, updated_at) VALUES (?, ?, ?) "
+                            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at"
+                        ),
+                        (key, value, now),
+                    )
+                else:
+                    conn.execute(
+                        self._sql(
+                            "INSERT INTO runtime_settings(key, value, updated_at) VALUES (?, ?, ?) "
+                            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+                        ),
+                        (key, value, now),
+                    )
+        return self.get_runtime_settings()
+
     def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
         current = now or utc_now()
         cutoff = current - timedelta(

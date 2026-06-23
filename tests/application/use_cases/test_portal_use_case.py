@@ -130,7 +130,7 @@ def test_admin_run_archive_requires_admin(tmp_path):
         use_case.admin_run_archive(teacher["id"])
 
 
-def test_admin_can_update_non_secret_settings_file(tmp_path):
+def test_admin_can_update_runtime_settings_in_db(tmp_path):
     config_path = tmp_path / "router.yaml"
     config_path.write_text(
         "student_default_ttl_hours: 2\n"
@@ -143,6 +143,7 @@ def test_admin_can_update_non_secret_settings_file(tmp_path):
         "  retention_days: 30\n",
         encoding="utf-8",
     )
+    original_text = config_path.read_text(encoding="utf-8")
     settings = RouterSettings(
         path=str(config_path),
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
@@ -159,13 +160,16 @@ def test_admin_can_update_non_secret_settings_file(tmp_path):
         open_registration=False,
     )
 
-    text = config_path.read_text(encoding="utf-8")
-    assert "retention_days: 14" in text
-    assert "student_default_ttl_hours: 3" in text
-    assert "open_registration: false" in text
+    assert config_path.read_text(encoding="utf-8") == original_text
+    assert repo.get_runtime_settings() == {
+        "retention_days": "14",
+        "student_default_ttl_hours": "3",
+        "open_registration": "false",
+    }
     assert summary["prompt_logs"]["retention_days"] == 14
     assert summary["student_default_ttl_hours"] == 3
     assert summary["auth"]["open_registration"] is False
+    assert use_case.settings.prompt_logs.retention_days == 14
 
 
 def test_admin_can_disable_class(tmp_path):

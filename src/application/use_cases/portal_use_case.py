@@ -2,13 +2,21 @@ from datetime import datetime
 from typing import Any
 
 from src.domain.ports.router_repository import RouterRepositoryPort
-from src.infrastructure.config import RouterSettings, settings_summary, update_non_secret_settings
+from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
+
+_VALID_ROLES = frozenset({"admin", "teacher", "student"})
+_VALID_STATUSES = frozenset({"active", "inactive"})
 
 
 class PortalUseCase:
-    def __init__(self, repo: RouterRepositoryPort, settings: RouterSettings):
+    def __init__(self, repo: RouterRepositoryPort, base_settings: RouterSettings):
         self.repo = repo
-        self.settings = settings
+        self._base_settings = base_settings
+        self.refresh_settings()
+
+    def refresh_settings(self) -> None:
+        self.settings = apply_runtime_settings(self._base_settings, self.repo.get_runtime_settings())
+        self.repo.settings = self.settings
 
     def google_login(self, email: str, name: str, google_sub: str | None = None) -> dict[str, Any]:
         existing = self.repo.get_user_by_email(email)
@@ -129,6 +137,12 @@ class PortalUseCase:
         roles: list[str] | None = None,
     ) -> dict[str, Any] | None:
         self._assert_admin(admin_id)
+        if roles is not None:
+            invalid = [item for item in roles if item not in _VALID_ROLES]
+            if invalid:
+                raise ValueError(f"invalid roles: {', '.join(invalid)}")
+        if status is not None and status not in _VALID_STATUSES:
+            raise ValueError("invalid status")
         return self.repo.update_user(user_id, role=role, status=status, roles=roles)
 
     def admin_classes(self, user_id: int) -> list[dict[str, Any]]:
@@ -151,15 +165,13 @@ class PortalUseCase:
         open_registration: bool | None = None,
     ) -> dict[str, Any]:
         self._assert_admin(user_id)
-        if not self.settings.path:
-            raise ValueError("missing config path")
-        updated = update_non_secret_settings(
-            self.settings.path,
+        self.repo.update_runtime_settings(
             retention_days=retention_days,
             student_default_ttl_hours=student_default_ttl_hours,
             open_registration=open_registration,
         )
-        return settings_summary(updated)
+        self.refresh_settings()
+        return settings_summary(self.settings)
 
     def admin_run_archive(self, user_id: int, now: datetime | None = None) -> dict[str, Any]:
         self._assert_admin(user_id)

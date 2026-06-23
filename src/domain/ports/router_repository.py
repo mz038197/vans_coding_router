@@ -129,5 +129,16 @@ class RouterRepositoryPort(Protocol):
     def get_prompt_log(self, teacher_id: int, class_id: int, log_id: int) -> dict[str, Any] | None:
         ...
 
+    def get_runtime_settings(self) -> dict[str, str]:
+        ...
+
+    def update_runtime_settings(
+        self,
+        retention_days: int | None = None,
+        student_default_ttl_hours: int | None = None,
+        open_registration: bool | None = None,
+    ) -> dict[str, str]:
+        ...
+
     def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
         ...

@@ -2,7 +2,7 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.infrastructure.config import load_router_settings
+from src.infrastructure.config import apply_runtime_settings, load_router_settings
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.lobby.paths import resolve_lobby_workspace
@@ -18,6 +18,8 @@ def build_container(
 ) -> AppContainer:
     settings = load_router_settings(config_path)
     api_key_repo = build_router_repository(settings)
+    effective_settings = apply_runtime_settings(settings, api_key_repo.get_runtime_settings())
+    api_key_repo.settings = effective_settings
     request_logger = FileRequestLogger()
     provider_gateways = {
         name: OpenAICompatibleGateway(provider, timeout=request_timeout)
@@ -49,6 +51,6 @@ def build_container(
         portal_use_case=portal_use_case,
         lobby_use_case=lobby_use_case,
         archive_repo=api_key_repo,
-        prompt_log_retention_days=settings.prompt_logs.retention_days,
-        router_settings=settings,
+        prompt_log_retention_days=effective_settings.prompt_logs.retention_days,
+        router_settings=effective_settings,
     )

@@ -29,7 +29,6 @@ async def lifespan(_: FastAPI):
         archive_task = asyncio.create_task(
             run_daily_archive_job(
                 container.archive_repo,
-                container.prompt_log_retention_days,
                 archive_stop_event,
             )
         )
