@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -38,6 +39,20 @@ class RoomConfigPatch(BaseModel):
 
 class BroadcastRequest(BaseModel):
     text: str
+
+
+async def _admin_keepalive(ws: WebSocket, stop: asyncio.Event) -> None:
+    payload = json.dumps({"type": "keepalive"}, ensure_ascii=False)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=20.0)
+            break
+        except TimeoutError:
+            pass
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            break
 
 
 def create_lobby_router(
@@ -225,6 +240,8 @@ def create_lobby_router(
         await ws.accept()
         connection_id = uuid.uuid4().hex
         lobby_use_case.hub.add_admin(room_id, connection_id, ws)
+        stop = asyncio.Event()
+        keepalive_task = asyncio.create_task(_admin_keepalive(ws, stop))
         try:
             await _send_admin_snapshot(ws, room)
             while True:
@@ -234,10 +251,17 @@ def create_lobby_router(
                 except json.JSONDecodeError:
                     continue
                 if isinstance(msg, dict) and msg.get("type") == "ping":
+                    await ws.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
                     continue
         except WebSocketDisconnect:
             pass
         finally:
+            stop.set()
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
             lobby_use_case.hub.remove_admin(room_id, connection_id)
 
     @router.websocket("/lobby/ws")

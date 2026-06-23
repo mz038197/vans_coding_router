@@ -51,6 +51,8 @@
     let reconnectTimer = null;
     let adminWsPingTimer = null;
     let adminWsClosing = false;
+    let reconnectBackoffMs = 3000;
+    let wsStatusDelayTimer = null;
     let currentUser = null;
 
     function escapeHtml(s) {
@@ -176,6 +178,13 @@
       }
     }
 
+    function clearWsStatusDelay() {
+      if (wsStatusDelayTimer) {
+        clearTimeout(wsStatusDelayTimer);
+        wsStatusDelayTimer = null;
+      }
+    }
+
     function stopAdminWsHeartbeat() {
       if (adminWsPingTimer) {
         clearInterval(adminWsPingTimer);
@@ -183,18 +192,22 @@
       }
     }
 
+    function sendAdminPing(ws) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }
+
     function startAdminWsHeartbeat(ws) {
       stopAdminWsHeartbeat();
-      adminWsPingTimer = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 25000);
+      sendAdminPing(ws);
+      adminWsPingTimer = setInterval(() => sendAdminPing(ws), 15000);
     }
 
     function closeAdminWs(intentional = true) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
+      clearWsStatusDelay();
       stopAdminWsHeartbeat();
       if (!adminWs) return;
       adminWsClosing = intentional;
@@ -219,6 +232,7 @@
     }
 
     function applyAdminEvent(ev) {
+      if (ev.type === 'pong' || ev.type === 'keepalive') return;
       if (ev.type === 'history') {
         const panel = document.getElementById('timelinePanel');
         if (panel) panel.innerHTML = (ev.entries || []).map(renderTimelineEntry).join('');
@@ -272,16 +286,19 @@
       if (startBtn) startBtn.classList.toggle('hidden', !!cfg.discussion_started);
     }
 
-    function connectAdminWs(roomId) {
+    function connectAdminWs(roomId, options = {}) {
+      const isReconnect = !!options.isReconnect;
       closeAdminWs(true);
       adminWsClosing = false;
-      setWsStatus('connecting');
+      if (!isReconnect) setWsStatus('connecting');
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${location.host}/lobby/admin/ws/${encodeURIComponent(roomId)}`);
       adminWs = ws;
       ws.onopen = () => {
         if (adminWs !== ws) return;
         wsLive = true;
+        reconnectBackoffMs = 3000;
+        clearWsStatusDelay();
         setWsStatus('live');
         startAdminWsHeartbeat(ws);
       };
@@ -294,9 +311,12 @@
           return;
         }
         if (currentRoomId === roomId) {
-          setWsStatus('reconnecting');
+          clearWsStatusDelay();
+          wsStatusDelayTimer = setTimeout(() => setWsStatus('reconnecting'), 1500);
           clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(() => connectAdminWs(roomId), 3000);
+          const delay = reconnectBackoffMs;
+          reconnectBackoffMs = Math.min(reconnectBackoffMs * 2, 30000);
+          reconnectTimer = setTimeout(() => connectAdminWs(roomId, { isReconnect: true }), delay);
         } else {
           setWsStatus('offline');
         }
@@ -315,29 +335,37 @@
       const main = document.getElementById('lobbyMain');
       main.innerHTML = `
         <div class="lobby-room-layout">
-          <div class="lobby-room-controls">
-            <div class="lobby-status-bar glass-card">
-              <div>
-                <div class="lobby-metric-label">Room</div>
-                <div class="lobby-metric-value">${escapeHtml(roomId)}</div>
-              </div>
-              <div>
-                <div class="lobby-metric-label">Members</div>
-                <div class="lobby-metric-value" id="memberCount">${(data.members || []).length}</div>
-              </div>
-              <div>
-                <div class="lobby-metric-label">Current speaker</div>
-                <div class="lobby-metric-value" id="currentSpeaker">${escapeHtml(data.current_speaker || '—')}</div>
-              </div>
-              <div>
-                <div class="lobby-metric-label">Turn</div>
-                <div class="lobby-metric-value" id="turnNo">${data.turn_no || 0}</div>
-              </div>
-              <span class="tag ${cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended')}" id="roomStatusTag">${cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting')}</span>
-              <span id="wsStatus" class="ws-off">連線中…</span>
-              <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
-              <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
+          <div class="lobby-status-bar glass-card">
+            <div>
+              <div class="lobby-metric-label">Room</div>
+              <div class="lobby-metric-value">${escapeHtml(roomId)}</div>
             </div>
+            <div>
+              <div class="lobby-metric-label">Members</div>
+              <div class="lobby-metric-value" id="memberCount">${(data.members || []).length}</div>
+            </div>
+            <div>
+              <div class="lobby-metric-label">Current speaker</div>
+              <div class="lobby-metric-value" id="currentSpeaker">${escapeHtml(data.current_speaker || '—')}</div>
+            </div>
+            <div>
+              <div class="lobby-metric-label">Turn</div>
+              <div class="lobby-metric-value" id="turnNo">${data.turn_no || 0}</div>
+            </div>
+            <span class="tag ${cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended')}" id="roomStatusTag">${cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting')}</span>
+            <span id="wsStatus" class="ws-off">連線中…</span>
+            <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
+            <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
+          </div>
+          <section class="lobby-timeline-main glass-card">
+            <h2 class="lobby-timeline-title">討論紀錄</h2>
+            <div id="timelinePanel" class="timeline-panel"></div>
+            <div class="broadcast-row">
+              <input id="broadcastText" placeholder="廣播訊息給全場…" />
+              <button type="button" onclick="broadcast()">送出</button>
+            </div>
+          </section>
+          <aside class="lobby-room-sidebar">
             <section class="glass-card lobby-member-section">
               <div class="lobby-metric-label">在線成員</div>
               <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
@@ -360,14 +388,6 @@
                 <button type="submit">儲存設定</button>
               </form>
             </details>
-          </div>
-          <aside class="lobby-timeline-aside glass-card">
-            <h2 class="lobby-timeline-title">討論紀錄</h2>
-            <div id="timelinePanel" class="timeline-panel"></div>
-            <div class="broadcast-row">
-              <input id="broadcastText" placeholder="廣播訊息給全場…" />
-              <button type="button" onclick="broadcast()">送出</button>
-            </div>
           </aside>
         </div>`;
 
