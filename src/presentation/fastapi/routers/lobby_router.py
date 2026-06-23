@@ -81,13 +81,17 @@ def create_lobby_router(
     @router.get("/lobby/api/config")
     async def lobby_config():
         base = settings.public_url.rstrip("/")
-        ws_proto = "wss" if base.startswith("https://") else "ws"
-        ws_base = base.replace("https://", "ws://").replace("http://", "ws://")
+        if base.startswith("https://"):
+            ws_url = f"wss://{base[len('https://'):]}/lobby/ws"
+        elif base.startswith("http://"):
+            ws_url = f"ws://{base[len('http://'):]}/lobby/ws"
+        else:
+            ws_url = f"ws://{base}/lobby/ws"
         return {
             "public_url": base,
-            "ws_url": f"{ws_base}/lobby/ws",
+            "ws_url": ws_url,
             "join_command_template": (
-                f"peas-agent lobby join --url {ws_proto}://{{host}}/lobby/ws "
+                "peas-agent lobby join --url {ws_url} "
                 "--room {room_id} --display-name \"姓名\""
             ),
         }
