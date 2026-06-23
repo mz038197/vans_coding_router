@@ -357,6 +357,10 @@
             <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
             <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
           </div>
+          <section class="glass-card lobby-member-section">
+            <div class="lobby-metric-label">在線成員</div>
+            <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
+          </section>
           <section class="lobby-timeline-main glass-card">
             <h2 class="lobby-timeline-title">討論紀錄</h2>
             <div id="timelinePanel" class="timeline-panel"></div>
@@ -365,30 +369,24 @@
               <button type="button" onclick="broadcast()">送出</button>
             </div>
           </section>
-          <aside class="lobby-room-sidebar">
-            <section class="glass-card lobby-member-section">
-              <div class="lobby-metric-label">在線成員</div>
-              <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
-            </section>
-            <details class="glass-card lobby-config-details">
-              <summary>房間設定</summary>
-              <form id="configForm">
-                <label>討論主題<input name="topic" value="${escapeHtml(cfg.topic)}" /></label>
-                <label>規則<textarea name="rules" rows="3">${escapeHtml(cfg.rules)}</textarea></label>
-                <div class="lobby-config-grid">
-                  <label>發言秒數<input name="turn_timeout_sec" type="number" value="${cfg.turn_timeout_sec}" /></label>
-                  <label>間隔秒數<input name="turn_gap_sec" type="number" value="${cfg.turn_gap_sec}" /></label>
-                </div>
-                <div class="lobby-config-checks">
-                  <label><input type="checkbox" name="mention_enabled" ${cfg.mention_enabled ? 'checked' : ''} /> @mention 排隊</label>
-                  <label><input type="checkbox" name="round_robin_enabled" ${cfg.round_robin_enabled ? 'checked' : ''} /> 輪流發言</label>
-                  <label><input type="checkbox" name="skip_gap_on_first_grant" ${cfg.skip_gap_on_first_grant ? 'checked' : ''} /> 首輪免等待</label>
-                  <label><input type="checkbox" name="paused" ${cfg.paused ? 'checked' : ''} /> 暫停</label>
-                </div>
-                <button type="submit">儲存設定</button>
-              </form>
-            </details>
-          </aside>
+          <details class="glass-card lobby-config-details">
+            <summary>房間設定</summary>
+            <form id="configForm">
+              <label>討論主題<input name="topic" value="${escapeHtml(cfg.topic)}" /></label>
+              <label>規則<textarea name="rules" rows="3">${escapeHtml(cfg.rules)}</textarea></label>
+              <div class="lobby-config-grid">
+                <label>發言秒數<input name="turn_timeout_sec" type="number" value="${cfg.turn_timeout_sec}" /></label>
+                <label>間隔秒數<input name="turn_gap_sec" type="number" value="${cfg.turn_gap_sec}" /></label>
+              </div>
+              <div class="lobby-config-checks">
+                <label><input type="checkbox" name="mention_enabled" ${cfg.mention_enabled ? 'checked' : ''} /> @mention 排隊</label>
+                <label><input type="checkbox" name="round_robin_enabled" ${cfg.round_robin_enabled ? 'checked' : ''} /> 輪流發言</label>
+                <label><input type="checkbox" name="skip_gap_on_first_grant" ${cfg.skip_gap_on_first_grant ? 'checked' : ''} /> 首輪免等待</label>
+                <label><input type="checkbox" name="paused" ${cfg.paused ? 'checked' : ''} /> 暫停</label>
+              </div>
+              <button type="submit">儲存設定</button>
+            </form>
+          </details>
         </div>`;
 
       document.getElementById('configForm').onsubmit = async (e) => {
