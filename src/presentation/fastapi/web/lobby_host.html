@@ -108,15 +108,38 @@
       list.innerHTML = items.map(r => `
         <li>
           <button type="button" class="lobby-room-btn ${r.room_id === currentRoomId ? 'active' : ''}"
+            data-room-id="${escapeHtml(r.room_id)}"
             onclick="selectRoom('${escapeHtml(r.room_id)}')">
             <div>${escapeHtml(r.room_id)}</div>
             <div class="lobby-room-meta">
               <span class="tag ${statusTagClass(r)}">${statusLabel(r)}</span>
-              · ${r.member_count} 人
+              · <span class="lobby-room-member-count">${r.member_count}</span> 人
               ${r.created_by_name ? ' · ' + escapeHtml(r.created_by_name) : ''}
             </div>
           </button>
         </li>`).join('');
+    }
+
+    function renderMemberList(members) {
+      if (!members || !members.length) {
+        return '<span class="hint">尚無 agent 加入</span>';
+      }
+      return members.map(m =>
+        `<span class="lobby-member-chip">${escapeHtml(m.display_name || m.agent_id || '')}</span>`
+      ).join('');
+    }
+
+    function updateMembersUI(roomId, members) {
+      const count = (members || []).length;
+      const sidebarCount = document.querySelector(
+        `.lobby-room-btn[data-room-id="${CSS.escape(String(roomId))}"] .lobby-room-member-count`
+      );
+      if (sidebarCount) sidebarCount.textContent = String(count);
+      if (roomId !== currentRoomId) return;
+      const countEl = document.getElementById('memberCount');
+      if (countEl) countEl.textContent = String(count);
+      const listEl = document.getElementById('memberList');
+      if (listEl) listEl.innerHTML = renderMemberList(members);
     }
 
     function renderEmptyMain() {
@@ -155,8 +178,7 @@
         return;
       }
       if (ev.type === 'members') {
-        const el = document.getElementById('memberCount');
-        if (el) el.textContent = String((ev.members || []).length);
+        updateMembersUI(ev.room_id, ev.members || []);
         return;
       }
       const panel = document.getElementById('timelinePanel');
@@ -247,6 +269,10 @@
           <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
           <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
         </div>
+        <section class="glass-card lobby-member-section">
+          <div class="lobby-metric-label">在線成員</div>
+          <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
+        </section>
         <details class="glass-card" style="margin:12px 0;padding:0">
           <summary style="padding:12px 16px;cursor:pointer;font-weight:600">房間設定</summary>
           <form id="configForm" style="padding:0 16px 16px;margin:0">

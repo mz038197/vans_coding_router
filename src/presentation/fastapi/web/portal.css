@@ -776,6 +776,29 @@
     .lobby-metric-label { font-size: 0.78rem; color: var(--text-muted); }
     .lobby-metric-value { font-size: 1.1rem; font-weight: 600; }
 
+    .lobby-member-section {
+      margin-bottom: 12px;
+      padding: 12px 16px;
+      border-radius: 12px;
+    }
+
+    .lobby-member-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .lobby-member-chip {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      background: rgba(15, 23, 42, 0.75);
+      font-size: 0.85rem;
+      color: var(--text-primary);
+    }
+
     .timeline-panel {
       display: flex;
       flex-direction: column;
