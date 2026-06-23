@@ -929,13 +929,18 @@
       return preview || '—';
     }
 
+    const ENDPOINT_TAGS = {
+      '/v1/chat/completions': ['chat-completions', 'tag-endpoint-chat'],
+      '/v1/responses': ['responses', 'tag-endpoint-responses'],
+      '/v1/images': ['images', 'tag-endpoint-images'],
+      '/v1/audio/speech': ['audio-speech', 'tag-endpoint-audio'],
+    };
+
     function renderLogEndpointTag(item) {
       const endpoint = (item.api_endpoint || '').trim();
-      if (endpoint === '/v1/chat/completions') {
-        return '<span class="tag tag-endpoint-chat">chat-completions</span>';
-      }
-      if (endpoint === '/v1/responses') {
-        return '<span class="tag tag-endpoint-responses">responses</span>';
+      const tag = ENDPOINT_TAGS[endpoint];
+      if (tag) {
+        return `<span class="tag ${tag[1]}">${tag[0]}</span>`;
       }
       if (!endpoint) return '<span class="tag tag-ended">—</span>';
       return `<span class="tag tag-ended">${escapeHtml(endpoint)}</span>`;

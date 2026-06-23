@@ -4,7 +4,7 @@ testpaths = ["tests"]
 
 [project]
 name = "vans-coding-router"
-version = "0.3.22"
+version = "0.3.23"
 description = "OpenAI-compatible cloud provider router for Vans Coding classes"
 readme = "README.md"
 requires-python = ">=3.13"

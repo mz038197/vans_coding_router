@@ -574,6 +574,8 @@
     .tag-personal { background: rgba(129, 140, 248, 0.15); color: #a5b4fc; }
     .tag-endpoint-chat { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
     .tag-endpoint-responses { background: rgba(192, 132, 252, 0.15); color: #d8b4fe; }
+    .tag-endpoint-images { background: rgba(244, 114, 182, 0.15); color: #f9a8d4; }
+    .tag-endpoint-audio { background: rgba(251, 191, 36, 0.15); color: #fcd34d; }
 
     .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
