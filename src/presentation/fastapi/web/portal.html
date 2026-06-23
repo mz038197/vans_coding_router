@@ -1107,12 +1107,20 @@
         return;
       }
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(s)}</td>
             <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
             <td>${sessionStatusTag(s, courseStatus)}</td>
+            <td>
+              <label class="session-image-toggle">
+                <input type="checkbox"
+                  ${sessionImageEnabled(s) ? 'checked' : ''}
+                  onchange="toggleSessionImageGen(${classId}, ${s.id}, this.checked, this)" />
+                <span>${sessionImageEnabled(s) ? '開啟' : '關閉'}</span>
+              </label>
+            </td>
             <td><code>${escapeHtml(s.invite_code)}</code></td>
             <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
             <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
@@ -1122,10 +1130,31 @@
             </td>
           </tr>
           <tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="7"><div id="redemption-body-${s.id}"></div></td>
+            <td colspan="8"><div id="redemption-body-${s.id}"></div></td>
           </tr>
         `).join('')}
       </table>`;
+    }
+
+    function sessionImageEnabled(session) {
+      const value = session.image_generation_enabled;
+      if (value === undefined || value === null) return true;
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function toggleSessionImageGen(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-image-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ image_generation_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '開啟' : '關閉';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
     }
 
     function renderRedemptionSubtable(items) {

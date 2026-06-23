@@ -131,6 +131,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(conn, "prompt_logs", "response_preview", "TEXT")
             self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
             self._ensure_column(conn, "class_sessions", "name", "TEXT")
+            self._ensure_column(
+                conn,
+                "class_sessions",
+                "image_generation_enabled",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
             self._backfill_user_roles(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

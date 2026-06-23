@@ -5,6 +5,8 @@ from src.domain.errors import (
     AdminBusinessError,
     AppError,
     AuthenticationError,
+    ImageGenerationDisabledError,
+    ImageGenerationNotSupportedError,
     InvalidModelIdError,
     ServiceUnavailableError,
     StatefulResponsesNotSupportedError,
@@ -79,6 +81,28 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             content={"detail": exc.message},
         )
+
+    @app.exception_handler(ImageGenerationNotSupportedError)
+    async def handle_image_generation_not_supported(request: Request, exc: ImageGenerationNotSupportedError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(ImageGenerationDisabledError)
+    async def handle_image_generation_disabled(request: Request, exc: ImageGenerationDisabledError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
     @app.exception_handler(StatefulResponsesNotSupportedError)
     async def handle_stateful_responses_error(request: Request, exc: StatefulResponsesNotSupportedError):

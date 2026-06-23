@@ -212,6 +212,20 @@ class FakeLLMGateway:
             b'event: response.created\ndata: {"type":"response.created"}\n\n',
             b'event: response.completed\ndata: {"type":"response.completed"}\n\n',
         ]
+        self.last_images_body: dict[str, Any] | None = None
+        self.images_response = {
+            "created": 123,
+            "data": [{"b64_json": "abc123"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+        }
+        self.images_models_response = {
+            "object": "list",
+            "data": [{"id": "flux.2-pro", "object": "model"}],
+        }
+        self.images_stream_chunks = [
+            b'data: {"type":"image_generation.completed","data":[{"b64_json":"abc"}],"usage":{"total_tokens":3}}\n\n',
+            b"data: [DONE]\n\n",
+        ]
 
     async def startup(self) -> None:
         return None
@@ -246,3 +260,15 @@ class FakeLLMGateway:
         self.last_responses_body = body
         for chunk in self.responses_stream_chunks:
             yield chunk
+
+    async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.last_images_body = body
+        return self.images_response
+
+    async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self.last_images_body = body
+        for chunk in self.images_stream_chunks:
+            yield chunk
+
+    async def images_models(self) -> dict[str, Any]:
+        return self.images_models_response

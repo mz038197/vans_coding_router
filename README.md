@@ -89,8 +89,12 @@ Supported endpoints:
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
+- `POST /v1/images` (OpenRouter image generation; model ID e.g. `openrouter@black-forest-labs/flux.2-pro`)
+- `GET /v1/images/models`
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.
+
+Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). Teacher long-lived keys are not restricted by session toggles.
 
 ## Portal Flow
 

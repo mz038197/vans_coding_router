@@ -86,7 +86,11 @@ def test_prompt_log_detail_returns_messages(tmp_path):
 
     detail = use_case.prompt_log_detail(teacher["id"], klass["id"], log_id)
 
-    assert detail == {"messages": [{"role": "user", "content": "學生問題"}]}
+    assert detail == {
+        "messages": [{"role": "user", "content": "學生問題"}],
+        "api_endpoint": "",
+        "response_preview": "",
+    }
 
 
 def test_prompt_log_detail_requires_class_owner(tmp_path):

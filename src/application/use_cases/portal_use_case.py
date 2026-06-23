@@ -66,9 +66,16 @@ class PortalUseCase:
         session_id: int,
         expires_at: str | None = None,
         name: str | None = None,
+        image_generation_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         self._assert_class_owner(teacher_id, class_id)
-        return self.repo.update_class_session(class_id, session_id, expires_at=expires_at, name=name)
+        return self.repo.update_class_session(
+            class_id,
+            session_id,
+            expires_at=expires_at,
+            name=name,
+            image_generation_enabled=image_generation_enabled,
+        )
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
         return self.repo.redeem_invite(invite_code, user_id)

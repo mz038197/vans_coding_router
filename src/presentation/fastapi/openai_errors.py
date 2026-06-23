@@ -7,7 +7,14 @@ from src.infrastructure.gateways.copilot_compat import encode_chat_stream_error
 
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 RESPONSES_PATH = "/v1/responses"
-OPENAI_COMPAT_PATHS = frozenset({CHAT_COMPLETIONS_PATH, RESPONSES_PATH})
+IMAGES_PATH = "/v1/images"
+IMAGES_MODELS_PATH = "/v1/images/models"
+OPENAI_COMPAT_PATHS = frozenset({
+    CHAT_COMPLETIONS_PATH,
+    RESPONSES_PATH,
+    IMAGES_PATH,
+    IMAGES_MODELS_PATH,
+})
 
 
 def is_chat_completions_path(path: str) -> bool:

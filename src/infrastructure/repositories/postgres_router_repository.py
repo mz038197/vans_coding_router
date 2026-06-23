@@ -173,6 +173,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
             for table in ("prompt_logs", "prompt_logs_archive"):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS api_endpoint TEXT")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")
+            conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+            )
 
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
         with self._connect() as conn:

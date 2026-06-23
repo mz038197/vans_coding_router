@@ -73,3 +73,29 @@ class ChatCompletionsRequestSchema(BaseModel):
     stop: Any | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+
+
+class ImageGenerationRequestSchema(BaseModel):
+    model: str
+    prompt: str
+    stream: bool = False
+    n: int | None = None
+    resolution: str | None = None
+    aspect_ratio: str | None = None
+    size: str | None = None
+    quality: str | None = None
+    output_format: str | None = None
+    background: str | None = None
+    output_compression: int | None = None
+    seed: int | None = None
+    input_references: list[dict[str, Any]] | None = None
+    provider: dict[str, Any] | None = None
+
+    model_config = {"extra": "allow"}
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("prompt 不可為空")
+        return v

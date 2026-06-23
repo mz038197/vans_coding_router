@@ -56,6 +56,24 @@ class InvalidModelIdError(AppError):
         )
 
 
+class ImageGenerationNotSupportedError(AppError):
+    def __init__(self, message: str = "此 provider 不支援生圖"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="image_generation_not_supported",
+        )
+
+
+class ImageGenerationDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放生圖"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="image_generation_disabled",
+        )
+
+
 class StatefulResponsesNotSupportedError(AppError):
     def __init__(
         self,

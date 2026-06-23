@@ -11,7 +11,7 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
 )
-from src.presentation.fastapi.schemas.api import ChatCompletionsRequestSchema
+from src.presentation.fastapi.schemas.api import ChatCompletionsRequestSchema, ImageGenerationRequestSchema
 
 
 def _client_ip(request: Request) -> str | None:
@@ -121,6 +121,60 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             return StreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.responses_create(body, api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    async def _images_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+        try:
+            async for chunk in api_use_case.images_create_stream(body, api_key, client_ip, auth_context):
+                yield chunk
+        except UpstreamServiceError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except ServiceUnavailableError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except Exception as e:
+            yield openai_stream_error_bytes(str(e), error_type="server_error")
+
+    @router.post("/v1/images")
+    async def images_create(req: ImageGenerationRequestSchema, request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            err = AuthenticationError()
+            return openai_error_response(
+                err.status_code,
+                err.message,
+                error_type="invalid_request_error",
+                code="invalid_api_key",
+            )
+
+        body = req.model_dump(exclude_none=True)
+        if req.stream:
+            generator = _images_stream_with_error_handling(body, api_key, client_ip, auth_context)
+            return StreamingResponse(generator, media_type="text/event-stream")
+
+        data = await api_use_case.images_create(body, api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.get("/v1/images/models")
+    async def images_models(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            err = AuthenticationError()
+            return openai_error_response(
+                err.status_code,
+                err.message,
+                error_type="invalid_request_error",
+                code="invalid_api_key",
+            )
+
+        data = await api_use_case.images_models(api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
     return router

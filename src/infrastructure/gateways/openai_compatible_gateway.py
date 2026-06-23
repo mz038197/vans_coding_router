@@ -7,7 +7,7 @@ from typing import Any, AsyncGenerator
 import httpx
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
+from src.domain.errors import ImageGenerationNotSupportedError, ServiceUnavailableError, UpstreamServiceError
 from src.infrastructure.config import ProviderSettings
 from src.infrastructure.gateways.copilot_compat import (
     OllamaThinkingCache,
@@ -20,6 +20,7 @@ from src.infrastructure.gateways.copilot_compat import (
 )
 
 _ollama_thinking_cache = OllamaThinkingCache()
+_IMAGE_API_PROVIDERS = frozenset({"openrouter"})
 
 
 class OpenAICompatibleGateway:
@@ -71,6 +72,29 @@ class OpenAICompatibleGateway:
         payload.setdefault("stream_options", {"include_usage": True})
         async for chunk in self._stream("POST", "/responses", json=payload):
             yield chunk
+
+    async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self._assert_image_provider()
+        response = await self._request("POST", "/images", json=body)
+        return self._json_or_error(response)
+
+    async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self._assert_image_provider()
+        payload = dict(body)
+        payload["stream"] = True
+        async for chunk in self._stream("POST", "/images", json=payload):
+            yield chunk
+
+    async def images_models(self) -> dict[str, Any]:
+        self._assert_image_provider()
+        response = await self._request("GET", "/images/models")
+        return self._json_or_error(response)
+
+    def _assert_image_provider(self) -> None:
+        if self.provider.name not in _IMAGE_API_PROVIDERS:
+            raise ImageGenerationNotSupportedError(
+                f"provider「{self.provider.name}」不支援 /v1/images，請使用 openrouter@..."
+            )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         await self.startup()

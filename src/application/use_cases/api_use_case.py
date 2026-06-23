@@ -3,6 +3,7 @@ from typing import Any, AsyncGenerator
 
 from src.infrastructure.logging.message_preview import (
     CHAT_COMPLETIONS_PATH,
+    IMAGES_PATH,
     RESPONSES_PATH,
     build_message_preview,
     build_response_preview,
@@ -14,7 +15,7 @@ from src.infrastructure.logging.message_preview import (
 
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import StatefulResponsesNotSupportedError
+from src.domain.errors import ImageGenerationDisabledError, StatefulResponsesNotSupportedError
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
@@ -123,6 +124,65 @@ class ApiUseCase:
             assistant_messages=tracker.assistant_messages,
             api_endpoint=RESPONSES_PATH,
         )
+
+    async def images_create(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        self._assert_image_generation_allowed(auth_context)
+        response = await self.gateway.images_create(body)
+        self._log_images_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(response),
+            response,
+            api_endpoint=IMAGES_PATH,
+        )
+        return response
+
+    async def images_create_stream(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> AsyncGenerator[bytes, None]:
+        self._assert_image_generation_allowed(auth_context)
+        tracker = _ImageSseStreamTracker()
+        async for chunk in self.gateway.images_create_stream(body):
+            tracker.feed(chunk)
+            yield chunk
+        self._log_images_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            tracker.last_response,
+            api_endpoint=IMAGES_PATH,
+        )
+
+    async def images_models(
+        self,
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        self._assert_image_generation_allowed(auth_context)
+        return await self.gateway.images_models()
+
+    def _assert_image_generation_allowed(self, auth_context: AuthContext | None) -> None:
+        if auth_context is None or auth_context.session_id is None:
+            return
+        if not hasattr(self.api_key_repo, "is_image_generation_enabled"):
+            return
+        if not self.api_key_repo.is_image_generation_enabled(auth_context.session_id):
+            raise ImageGenerationDisabledError()
 
     def _validate_responses_body(self, body: dict[str, Any]) -> None:
         previous_response_id = body.get("previous_response_id")
@@ -241,6 +301,47 @@ class ApiUseCase:
             message_preview=build_message_preview(logged_request),
             response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
+            api_endpoint=api_endpoint,
+        )
+
+    def _log_images_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        usage: dict[str, int] | None,
+        response: dict[str, Any] | None,
+        api_endpoint: str = IMAGES_PATH,
+    ) -> None:
+        model = body.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        prompt = body.get("prompt")
+        prompt_text = prompt if isinstance(prompt, str) else ""
+        messages = [{"role": "user", "content": prompt_text}] if prompt_text else []
+        image_count = _image_count_from_response(response)
+        assistant_messages = (
+            [{"role": "assistant", "content": f"[image: {image_count} generated]"}]
+            if image_count
+            else []
+        )
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            usage,
+            assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
         )
 
@@ -428,6 +529,39 @@ class _SseUsageTracker(_SseStreamTracker):
 
     def __init__(self) -> None:
         super().__init__(CHAT_COMPLETIONS_PATH)
+
+
+class _ImageSseStreamTracker:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.usage: dict[str, int] = {}
+        self.last_response: dict[str, Any] | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        self._buffer += chunk.decode("utf-8", errors="ignore")
+        while "\n\n" in self._buffer:
+            event, self._buffer = self._buffer.split("\n\n", 1)
+            if not event.strip():
+                continue
+            found = _usage_from_sse_event(event)
+            if found is not None:
+                self.usage = _merge_usage(self.usage, found)
+            payload = _payload_from_sse_event(event)
+            if payload is not None:
+                event_type = payload.get("type")
+                if event_type == "image_generation.completed" or "data" in payload:
+                    self.last_response = payload
+
+
+def _image_count_from_response(response: dict[str, Any] | None) -> int:
+    if not response:
+        return 0
+    data = response.get("data")
+    if isinstance(data, list):
+        return len(data)
+    if response.get("type") == "image_generation.completed" and response.get("b64_json"):
+        return 1
+    return 0
 
 
 def _usage_from_sse_chunk(chunk: bytes) -> dict[str, int] | None:

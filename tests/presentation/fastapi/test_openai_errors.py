@@ -1,6 +1,8 @@
 import json
 
 from src.presentation.fastapi.openai_errors import (
+    IMAGES_PATH,
+    IMAGES_MODELS_PATH,
     is_chat_completions_path,
     is_openai_compatible_path,
     is_responses_path,
@@ -15,6 +17,8 @@ def test_is_openai_compatible_path():
     assert is_responses_path("/v1/responses")
     assert is_openai_compatible_path("/v1/chat/completions")
     assert is_openai_compatible_path("/v1/responses")
+    assert is_openai_compatible_path(IMAGES_PATH)
+    assert is_openai_compatible_path(IMAGES_MODELS_PATH)
     assert not is_openai_compatible_path("/v1/models")
 
 

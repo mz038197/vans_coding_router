@@ -42,6 +42,17 @@ class FakeGateway:
         self.requests.append(str(body.get("model")))
         yield b"data: [DONE]\n\n"
 
+    async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.requests.append(str(body.get("model")))
+        return {"provider": self.name}
+
+    async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        self.requests.append(str(body.get("model")))
+        yield b"data: [DONE]\n\n"
+
+    async def images_models(self) -> dict[str, Any]:
+        return {"object": "list", "data": [{"id": "flux.2-pro"}]}
+
 
 @pytest.fixture
 def gateway() -> RoutingGateway:
@@ -130,3 +141,23 @@ async def test_routing_gateway_models_return_prefixed_ids(gateway: RoutingGatewa
     ids = {item["id"] for item in models["data"]}
     assert ids == {"openrouter@anthropic/claude-sonnet", "ollama_cloud@qwen3-coder-next:cloud"}
     assert {item["provider"] for item in models["data"]} == {"openrouter", "ollama_cloud"}
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_images_create_strips_provider_prefix(gateway: RoutingGateway):
+    openrouter = gateway.gateways["openrouter"]
+
+    response = await gateway.images_create(
+        {"model": "openrouter@black-forest-labs/flux.2-pro", "prompt": "cat"}
+    )
+
+    assert response == {"provider": "openrouter"}
+    assert openrouter.requests == ["black-forest-labs/flux.2-pro"]
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_images_models_prefix_ids(gateway: RoutingGateway):
+    models = await gateway.images_models()
+
+    assert models["data"][0]["id"] == "openrouter@flux.2-pro"
+    assert models["data"][0]["provider"] == "openrouter"

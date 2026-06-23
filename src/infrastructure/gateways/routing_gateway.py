@@ -73,6 +73,40 @@ class RoutingGateway:
         async for chunk in gateway.responses_create_stream(payload):
             yield chunk
 
+    async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        gateway, payload = self._resolve_images_body(body)
+        return await gateway.images_create(payload)
+
+    async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        gateway, payload = self._resolve_images_body(body)
+        async for chunk in gateway.images_create_stream(payload):
+            yield chunk
+
+    async def images_models(self) -> dict[str, Any]:
+        data: list[dict[str, Any]] = []
+        errors: dict[str, Any] = {}
+        for name, gateway in self.gateways.items():
+            if name not in {"openrouter"}:
+                continue
+            try:
+                models = await gateway.images_models()
+                for item in models.get("data", []):
+                    if not isinstance(item, dict):
+                        continue
+                    upstream_id = str(item.get("id", ""))
+                    if not upstream_id:
+                        continue
+                    entry = dict(item)
+                    entry["id"] = format_model_id(name, upstream_id)
+                    entry["provider"] = name
+                    data.append(entry)
+            except Exception as exc:
+                errors[name] = str(exc)
+        result: dict[str, Any] = {"object": "list", "data": data}
+        if errors:
+            result["provider_errors"] = errors
+        return result
+
     def _known_providers(self) -> set[str]:
         return set(self.gateways.keys())
 
@@ -83,6 +117,12 @@ class RoutingGateway:
         return gateway, replace(req, model=upstream_model)
 
     def _resolve_responses_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
+        provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
+        payload = dict(body)
+        payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
+        return self.gateways[provider_name], payload
+
+    def _resolve_images_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
         payload = dict(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
