@@ -9,6 +9,7 @@ from src.bootstrap import build_container
 from src.presentation.fastapi.error_handlers import register_error_handlers
 from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
 from src.presentation.fastapi.routers.api_router import create_api_router
+from src.presentation.fastapi.routers.lobby_router import create_lobby_router
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 from src.infrastructure.jobs.log_archive_job import run_daily_archive_job
 
@@ -54,6 +55,18 @@ app.add_middleware(ApiKeyMiddleware, auth_use_case=container.auth_use_case)
 app.include_router(create_api_router(container.api_use_case))
 if container.portal_use_case is not None and container.router_settings is not None:
     app.include_router(create_portal_router(container.portal_use_case, container.router_settings))
+if (
+    container.lobby_use_case is not None
+    and container.portal_use_case is not None
+    and container.router_settings is not None
+):
+    app.include_router(
+        create_lobby_router(
+            container.lobby_use_case,
+            container.portal_use_case,
+            container.router_settings,
+        )
+    )
 
 
 @app.get("/")

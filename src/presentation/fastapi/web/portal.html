@@ -9,633 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-  <style>
-    :root {
-      --bg-base: #020617;
-      --bg-glass: rgba(30, 41, 59, 0.4);
-      --bg-glass-strong: rgba(30, 41, 59, 0.7);
-      --border-glass: rgba(255, 255, 255, 0.1);
-      --text-primary: #f1f5f9;
-      --text-muted: #94a3b8;
-      --accent: #4f46e5;
-      --accent-hover: #6366f1;
-      --code-bg: #0d1117;
-      --danger: #f87171;
-      --success: #34d399;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; }
-
-    body {
-      font-family: Inter, "Noto Sans TC", system-ui, sans-serif;
-      margin: 0;
-      color: var(--text-primary);
-      background: var(--bg-base);
-      min-height: 100vh;
-    }
-
-    h1, h2, h3, h4 { margin: 0 0 0.75rem; font-weight: 700; }
-    h2 { font-size: 1.25rem; }
-    h3 { font-size: 1.05rem; color: var(--text-primary); }
-
-    .hidden { display: none !important; }
-
-    .neural-grid {
-      background-image: radial-gradient(circle at 2px 2px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
-      background-size: 40px 40px;
-    }
-
-    .glass-card {
-      background: var(--bg-glass);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border-glass);
-      border-radius: 12px;
-    }
-
-    .glass-panel {
-      background: var(--bg-glass-strong);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid var(--border-glass);
-    }
-
-    .gradient-text {
-      background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .site-nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 24px;
-      background: rgba(15, 23, 42, 0.4);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .nav-brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: inherit;
-    }
-
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: var(--accent);
-      color: white;
-      font-size: 0.95rem;
-    }
-
-    .nav-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-
-    .nav-user {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 12px;
-      font-size: 0.9rem;
-    }
-
-    .login-hero {
-      position: relative;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 96px 16px 48px;
-      overflow: hidden;
-    }
-
-    .login-orbs::before,
-    .login-orbs::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
-    }
-
-    .login-orbs::before {
-      top: 10rem;
-      left: 2.5rem;
-      width: 18rem;
-      height: 18rem;
-      background: rgba(79, 70, 229, 0.2);
-      filter: blur(120px);
-    }
-
-    .login-orbs::after {
-      bottom: 5rem;
-      right: 2.5rem;
-      width: 24rem;
-      height: 24rem;
-      background: rgba(147, 51, 234, 0.1);
-      filter: blur(150px);
-    }
-
-    .login-orbs {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-    }
-
-    .login-network-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
-      pointer-events: none;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .login-network-canvas { display: none; }
-    }
-
-    .login-card {
-      position: relative;
-      z-index: 1;
-      width: min(420px, 100%);
-      padding: 32px 28px;
-      text-align: center;
-    }
-
-    .login-card h1 {
-      font-size: 1.75rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .login-card .login-subtitle {
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
-      font-size: 0.95rem;
-    }
-
-    .page-main {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 88px 16px 32px;
-    }
-
-    section, form {
-      padding: 20px;
-      margin: 14px 0;
-    }
-
-    section.glass-card { padding: 20px; }
-
-    input, button, select {
-      font: inherit;
-      padding: 9px 12px;
-      margin: 4px;
-      border-radius: 8px;
-    }
-
-    input, select {
-      background: #0f172a;
-      color: var(--text-primary);
-      border: 1px solid #334155;
-    }
-
-    input:focus, select:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.35);
-    }
-
-    button, .btn-secondary, .oauth-btn {
-      cursor: pointer;
-      transition: background 0.15s, transform 0.15s, border-color 0.15s;
-    }
-
-    button {
-      background: var(--accent);
-      color: white;
-      border: 0;
-      font-weight: 600;
-      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
-    }
-
-    button:hover { background: var(--accent-hover); }
-
-    .btn-secondary {
-      display: inline-block;
-      background: #1e293b;
-      color: var(--text-primary);
-      border: 1px solid #334155;
-      text-decoration: none;
-      font-weight: 500;
-      box-shadow: none;
-    }
-
-    .btn-secondary:hover { background: #334155; }
-
-    .btn-sm {
-      padding: 4px 10px;
-      font-size: 12px;
-      box-shadow: none;
-    }
-
-    .btn-link {
-      background: none;
-      color: #818cf8;
-      padding: 0;
-      text-decoration: underline;
-      border: 0;
-      box-shadow: none;
-      font-weight: 500;
-    }
-
-    .btn-link:hover { color: #a5b4fc; background: none; }
-
-    .btn-danger {
-      background: transparent;
-      color: var(--danger);
-      border: 1px solid rgba(248, 113, 113, 0.4);
-      box-shadow: none;
-    }
-
-    .btn-danger:hover { background: rgba(248, 113, 113, 0.1); }
-
-    .oauth-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      background: white;
-      color: #0f172a;
-      border: 0;
-      padding: 12px 24px;
-      border-radius: 12px;
-      text-decoration: none;
-      font-weight: 700;
-      font-size: 1rem;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-    }
-
-    .oauth-btn:hover {
-      background: #eef2ff;
-      transform: translateY(-2px);
-    }
-
-    .nav-logout {
-      padding: 8px 16px;
-      font-size: 0.85rem;
-      box-shadow: none;
-    }
-
-    .table-wrap { overflow-x: auto; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: transparent;
-    }
-
-    th, td {
-      text-align: left;
-      border-bottom: 1px solid #334155;
-      padding: 10px 8px;
-      vertical-align: top;
-    }
-
-    th {
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #334155;
-    }
-
-    .tabs button {
-      background: #1e293b;
-      color: var(--text-muted);
-      box-shadow: none;
-      font-weight: 500;
-    }
-
-    .tabs button:hover {
-      background: #334155;
-      color: var(--text-primary);
-    }
-
-    .tabs button.tab-active {
-      background: rgba(79, 70, 229, 0.15);
-      color: #a5b4fc;
-      border: 1px solid rgba(79, 70, 229, 0.35);
-    }
-
-    .error {
-      color: #fca5a5;
-      background: rgba(127, 29, 29, 0.35);
-      border: 1px solid rgba(248, 113, 113, 0.35);
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin: 8px 0;
-    }
-
-    .hint {
-      color: var(--text-muted);
-      font-size: 0.92rem;
-      margin: 8px 0;
-    }
-
-    .hint-inline { margin: 0; }
-
-    .probe-panel { display: grid; gap: 12px; max-width: 640px; }
-    .probe-panel input, .probe-panel select { width: 100%; max-width: 100%; }
-    .probe-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .probe-result { margin-top: 8px; padding: 12px 14px; border-radius: 10px; font-size: 0.9rem; line-height: 1.5; }
-    .probe-result.ok { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.35); color: #a7f3d0; }
-    .probe-result.fail { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.35); color: #fecaca; }
-    .probe-result pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; }
-
-    .dev-note { color: var(--text-muted); font-size: 0.88rem; margin-top: 12px; }
-
-    pre.key-display, .code-font {
-      font-family: "JetBrains Mono", ui-monospace, monospace;
-    }
-
-    pre.key-display {
-      white-space: pre-wrap;
-      background: var(--code-bg);
-      color: #d7f5e9;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      font-size: 0.85rem;
-    }
-
-    .api-config {
-      margin-bottom: 16px;
-      padding: 0;
-    }
-
-    .api-config > summary {
-      cursor: pointer;
-      padding: 14px 18px;
-      font-weight: 600;
-      color: var(--text-muted);
-      list-style: none;
-    }
-
-    .api-config > summary::-webkit-details-marker { display: none; }
-
-    .api-config > summary::before {
-      content: "▸ ";
-      display: inline-block;
-      transition: transform 0.15s;
-    }
-
-    .api-config[open] > summary::before { transform: rotate(90deg); }
-
-    .api-config[open] > summary { color: var(--text-primary); }
-
-    .api-config pre { margin: 0 18px 16px; }
-
-    .logs-message-preview {
-      max-width: 420px;
-      max-height: 4.5em;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      line-height: 1.4;
-    }
-
-    .modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(2, 6, 23, 0.75);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      padding: 16px;
-    }
-
-    .modal.show { display: flex; }
-
-    .modal-content {
-      background: var(--bg-glass-strong);
-      border: 1px solid var(--border-glass);
-      border-radius: 12px;
-      width: min(900px, 100%);
-      max-height: 85vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .modal-header {
-      padding: 14px 16px;
-      border-bottom: 1px solid #334155;
-      font-weight: 600;
-    }
-
-    .modal-body { padding: 16px; overflow: auto; }
-
-    .modal-footer {
-      padding: 12px 16px;
-      border-top: 1px solid #334155;
-      text-align: right;
-    }
-
-    .log-detail-pre {
-      margin: 0;
-      max-height: 60vh;
-      overflow: auto;
-      font-family: "JetBrains Mono", ui-monospace, monospace;
-      font-size: 0.85rem;
-      white-space: pre-wrap;
-    }
-
-    .log-detail-meta {
-      margin-bottom: 12px;
-      color: var(--text-secondary, #94a3b8);
-      font-size: 0.9rem;
-    }
-
-    .log-detail-section {
-      margin-bottom: 14px;
-    }
-
-    .log-detail-section-head {
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: var(--text-primary);
-    }
-
-    .log-detail-block {
-      margin: 0;
-      padding: 10px 12px;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      background: rgba(15, 23, 42, 0.55);
-      font-family: "JetBrains Mono", ui-monospace, monospace;
-      font-size: 0.85rem;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-y: auto;
-    }
-
-    .log-detail-block-user {
-      max-height: 25vh;
-    }
-
-    .log-detail-block-assistant {
-      max-height: 50vh;
-    }
-
-    .log-detail-empty {
-      color: var(--text-secondary, #94a3b8);
-      font-style: italic;
-    }
-
-    .modal-footer-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      width: 100%;
-    }
-
-    details.course-expander {
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin: 10px 0;
-      background: rgba(15, 23, 42, 0.5);
-    }
-
-    details.course-expander > summary { cursor: pointer; font-weight: 600; }
-
-    .session-form {
-      margin: 12px 0;
-      padding: 14px;
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid #334155;
-      border-radius: 8px;
-    }
-
-    .session-form label { display: inline-block; margin-right: 8px; }
-
-    .input-narrow { width: 5em; }
-
-    .subtable { margin: 8px 0 0; background: rgba(15, 23, 42, 0.5); }
-
-    .key-meta {
-      margin: 8px 0;
-      padding: 12px;
-      background: rgba(15, 23, 42, 0.5);
-      border-radius: 8px;
-      border: 1px solid #334155;
-    }
-
-    .admin-block { margin-top: 16px; }
-
-    .tag {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-
-    .tag-active { background: rgba(52, 211, 153, 0.15); color: var(--success); }
-    .tag-ended { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); }
-    .tag-expired { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
-    .tag-rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
-    .tag-success { background: rgba(52, 211, 153, 0.15); color: var(--success); }
-    .tag-role-admin { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
-    .tag-role-teacher { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
-    .tag-role-student { background: rgba(45, 212, 191, 0.15); color: #5eead4; }
-    .tag-personal { background: rgba(129, 140, 248, 0.15); color: #a5b4fc; }
-    .tag-endpoint-chat { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
-    .tag-endpoint-responses { background: rgba(192, 132, 252, 0.15); color: #d8b4fe; }
-
-    .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-
-    .profile-line {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .profile-line > span:first-child { color: var(--text-muted); }
-
-    .course-toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin: 12px 0;
-    }
-
-    .course-detail-header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 12px;
-      font-weight: 600;
-    }
-
-    code.key-prefix {
-      font-family: "JetBrains Mono", ui-monospace, monospace;
-      font-size: 0.9em;
-      color: #a5b4fc;
-    }
-
-    .session-name-sub {
-      display: block;
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      font-weight: 400;
-      margin-top: 2px;
-    }
-
-    .monitor-filters label {
-      color: var(--text-muted);
-      font-size: 0.88rem;
-      margin-right: 4px;
-    }
-
-    @media (max-width: 640px) {
-      .nav-user { justify-content: flex-end; max-width: 60%; }
-      .profile-line > span:first-child { font-size: 0.82rem; }
-      .nav-title { font-size: 1rem; }
-    }
-  </style>
+  <link rel="stylesheet" href="/portal/static/portal.css" />
 </head>
 <body>
   <div id="loginShell">
@@ -680,12 +54,6 @@
       </div>
     </header>
     <main class="page-main neural-grid">
-      <details class="api-config glass-card">
-        <summary>API 連線設定（BYOK）</summary>
-        <pre id="profileConfig" class="key-display">OPENAI_BASE_URL=...
-OPENAI_API_KEY=vcr_sk_xxx</pre>
-      </details>
-
       <section id="student" class="glass-card hidden">
         <h2>課堂邀請碼</h2>
         <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
@@ -703,13 +71,29 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       </section>
 
       <section id="teacher" class="glass-card hidden">
-        <div class="tabs">
-          <button type="button" data-tab="keyTab" onclick="showTab('keyTab')">個人 API Key</button>
-          <button type="button" data-tab="classTab" onclick="showTab('classTab')">我的課程</button>
-          <button type="button" data-tab="monitorTab" onclick="showTab('monitorTab')">Prompt 監控</button>
-          <button type="button" data-tab="probeTab" onclick="showTab('probeTab')">API 測試</button>
-          <button type="button" id="adminBtn" class="hidden" data-tab="adminTab" onclick="showTab('adminTab')">系統管理</button>
-        </div>
+        <div class="teacher-layout glass-panel">
+          <nav class="app-sidebar" aria-label="老師功能">
+            <div class="sidebar-section-label">老師</div>
+            <button type="button" class="sidebar-nav-btn tab-active" data-tab="keyTab" onclick="showTab('keyTab')">
+              <i class="fas fa-key"></i> 個人 API Key
+            </button>
+            <button type="button" class="sidebar-nav-btn" data-tab="classTab" onclick="showTab('classTab')">
+              <i class="fas fa-book"></i> 我的課程
+            </button>
+            <button type="button" class="sidebar-nav-btn" data-tab="monitorTab" onclick="showTab('monitorTab')">
+              <i class="fas fa-chart-line"></i> Prompt 監控
+            </button>
+            <button type="button" class="sidebar-nav-btn" data-tab="probeTab" onclick="showTab('probeTab')">
+              <i class="fas fa-flask"></i> API 測試
+            </button>
+            <a class="sidebar-nav-btn" href="/lobby" target="_blank" rel="noopener">
+              <i class="fas fa-comments"></i> Agent Lobby
+            </a>
+            <button type="button" id="adminBtn" class="sidebar-nav-btn hidden" data-tab="adminTab" onclick="showTab('adminTab')">
+              <i class="fas fa-shield-halved"></i> 系統管理
+            </button>
+          </nav>
+          <div class="teacher-content">
         <div id="keyTab">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
           <button onclick="resetTeacherKey()">重設個人 API Key</button>
@@ -788,6 +172,8 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
           <button onclick="saveSettings()">儲存設定</button>
           <div id="adminStatus" class="hint"></div>
           <div id="admin" class="table-wrap"></div>
+        </div>
+          </div>
         </div>
       </section>
     </main>
@@ -1171,17 +557,11 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
       }
     }
 
-    function updateProfileConfig() {
-      document.getElementById('profileConfig').textContent =
-        `OPENAI_BASE_URL=${portalPublicUrl}/v1\nOPENAI_API_KEY=vcr_sk_xxx`;
-    }
-
     async function initLogin() {
       const params = new URLSearchParams(location.search);
       showLoginError(params.get('login_error'));
       const config = await api('/auth/config');
       if (config.public_url) portalPublicUrl = config.public_url;
-      updateProfileConfig();
       document.getElementById('oauthLogin').classList.toggle('hidden', !config.oauth_enabled);
       document.getElementById('devLogin').classList.toggle('hidden', config.oauth_enabled);
       if (!document.getElementById('loginShell').classList.contains('hidden')) {
@@ -1202,7 +582,7 @@ OPENAI_API_KEY=vcr_sk_xxx</pre>
     function showTab(id) {
       ['keyTab','classTab','monitorTab','probeTab','adminTab'].forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
-      document.querySelectorAll('.tabs button[data-tab]').forEach(btn => {
+      document.querySelectorAll('.sidebar-nav-btn[data-tab]').forEach(btn => {
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
       });
       if (id === 'monitorTab') syncMonitorCourseSelect();

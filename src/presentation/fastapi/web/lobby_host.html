@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Agent Lobby · Vans Coding Router</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="/portal/static/portal.css" />
+</head>
+<body class="neural-grid">
+  <header class="site-nav">
+    <a class="nav-brand" href="/portal">
+      <div class="nav-logo"><i class="fas fa-route"></i></div>
+      <span class="nav-title">Agent <span class="gradient-text">Lobby</span></span>
+    </a>
+    <div class="nav-user">
+      <span id="navWho"></span>
+      <a class="btn-ghost" href="/portal"><i class="fas fa-chevron-left"></i>回 Portal</a>
+      <button class="nav-logout" onclick="logout()">登出</button>
+    </div>
+  </header>
+
+  <div class="lobby-shell">
+    <aside class="lobby-sidebar glass-panel">
+      <div class="sidebar-section-label">聊天室</div>
+      <form id="createRoomForm" class="lobby-create-form">
+        <input id="newRoomId" placeholder="room_id" required />
+        <button type="submit">建立</button>
+      </form>
+      <ul id="roomList" class="lobby-room-list"></ul>
+      <div class="sidebar-section-label">學生 join</div>
+      <p class="hint" style="padding:0 4px">複製後在終端機執行（需安裝 peas-agent）：</p>
+      <pre id="joinCommand" class="key-display" style="font-size:0.75rem;margin:4px">—</pre>
+      <button type="button" class="btn-secondary btn-sm" onclick="copyJoin()">複製指令</button>
+    </aside>
+
+    <main class="lobby-main" id="lobbyMain">
+      <p class="hint">請選擇或建立聊天室。</p>
+    </main>
+  </div>
+
+  <script>
+    let lobbyConfig = { ws_url: '', public_url: '' };
+    let currentRoomId = null;
+    let adminWs = null;
+    let wsLive = false;
+    let reconnectTimer = null;
+    let currentUser = null;
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+        ...opts,
+      });
+      if (res.status === 401) { location.href = '/portal'; throw new Error('未登入'); }
+      if (res.status === 403) throw new Error('權限不足');
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      if (!res.ok) throw new Error((data && data.detail) || text || res.statusText);
+      return data;
+    }
+
+    async function logout() {
+      await api('/auth/logout', { method: 'POST' });
+      location.href = '/portal';
+    }
+
+    function statusLabel(room) {
+      if (room.paused) return 'Paused';
+      if (room.discussion_started) return 'Active';
+      return 'Waiting';
+    }
+
+    function statusTagClass(room) {
+      if (room.paused) return 'tag-expired';
+      if (room.discussion_started) return 'tag-active';
+      return 'tag-ended';
+    }
+
+    function joinCommandFor(roomId) {
+      const url = lobbyConfig.ws_url || 'ws://127.0.0.1:8000/lobby/ws';
+      return `peas-agent lobby join --url ${url} --room ${roomId} --display-name "姓名"`;
+    }
+
+    function copyJoin() {
+      const text = document.getElementById('joinCommand').textContent;
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    async function loadRooms() {
+      const data = await api('/lobby/api/rooms');
+      const list = document.getElementById('roomList');
+      const items = data.items || [];
+      if (!items.length) {
+        list.innerHTML = '<li class="hint" style="padding:8px">尚無聊天室</li>';
+        return;
+      }
+      list.innerHTML = items.map(r => `
+        <li>
+          <button type="button" class="lobby-room-btn ${r.room_id === currentRoomId ? 'active' : ''}"
+            onclick="selectRoom('${escapeHtml(r.room_id)}')">
+            <div>${escapeHtml(r.room_id)}</div>
+            <div class="lobby-room-meta">
+              <span class="tag ${statusTagClass(r)}">${statusLabel(r)}</span>
+              · ${r.member_count} 人
+              ${r.created_by_name ? ' · ' + escapeHtml(r.created_by_name) : ''}
+            </div>
+          </button>
+        </li>`).join('');
+    }
+
+    function renderEmptyMain() {
+      document.getElementById('lobbyMain').innerHTML = '<p class="hint">請選擇或建立聊天室。</p>';
+    }
+
+    function renderTimelineEntry(entry) {
+      const kind = entry.kind || 'message';
+      if (kind === 'turn_granted' || kind === 'turn_pending' || kind === 'turn_revoked') {
+        const label = kind === 'turn_granted' ? `Turn ${entry.turn_no || ''} → ${escapeHtml(entry.display_name || entry.next_display_name || '')}`
+          : kind === 'turn_pending' ? `即將輪到 ${escapeHtml(entry.next_display_name || '')} (${entry.gap_sec}s)`
+          : `Turn 收回 · ${escapeHtml(entry.display_name || '')}`;
+        return `<div class="timeline-entry system"><div class="timeline-meta">${label}</div></div>`;
+      }
+      if (kind !== 'message') return '';
+      const isSystem = entry.from === 'system';
+      const cls = isSystem ? 'timeline-entry system host' : 'timeline-entry';
+      const name = escapeHtml(entry.display_name || entry.from || '');
+      const text = escapeHtml(entry.text || '');
+      return `<div class="${cls}"><div class="timeline-meta"><span class="timeline-name">${name}</span>${entry.ts ? `<span>${escapeHtml(entry.ts)}</span>` : ''}</div><div>${text}</div></div>`;
+    }
+
+    function applyAdminEvent(ev) {
+      if (ev.type === 'history') {
+        const panel = document.getElementById('timelinePanel');
+        if (panel) panel.innerHTML = (ev.entries || []).map(renderTimelineEntry).join('');
+        panel.scrollTop = panel.scrollHeight;
+        return;
+      }
+      if (ev.type === 'room_config' || ev.type === 'room_config_updated') {
+        updateRoomHeader(ev);
+        return;
+      }
+      if (ev.type === 'admin_status') {
+        updateStatusBar(ev);
+        return;
+      }
+      if (ev.type === 'members') {
+        const el = document.getElementById('memberCount');
+        if (el) el.textContent = String((ev.members || []).length);
+        return;
+      }
+      const panel = document.getElementById('timelinePanel');
+      if (!panel) return;
+      if (ev.type === 'message') {
+        panel.insertAdjacentHTML('beforeend', renderTimelineEntry({ kind: 'message', ...ev }));
+        panel.scrollTop = panel.scrollHeight;
+      } else if (['turn_granted','turn_pending','turn_revoked','discussion_started'].includes(ev.type)) {
+        panel.insertAdjacentHTML('beforeend', renderTimelineEntry({ kind: ev.type, ...ev }));
+        panel.scrollTop = panel.scrollHeight;
+      }
+    }
+
+    function updateStatusBar(cfg) {
+      const speaker = document.getElementById('currentSpeaker');
+      const turn = document.getElementById('turnNo');
+      const tag = document.getElementById('roomStatusTag');
+      if (speaker) speaker.textContent = cfg.current_speaker || '—';
+      if (turn) turn.textContent = String(cfg.turn_no ?? 0);
+      if (tag && cfg.discussion_started !== undefined) {
+        const st = cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting');
+        tag.textContent = st;
+        tag.className = 'tag ' + (cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended'));
+      }
+    }
+
+    function updateRoomHeader(cfg) {
+      updateStatusBar({
+        current_speaker: document.getElementById('currentSpeaker')?.textContent,
+        turn_no: document.getElementById('turnNo')?.textContent,
+        discussion_started: cfg.discussion_started,
+        paused: cfg.paused,
+      });
+      const startBtn = document.getElementById('startBtn');
+      if (startBtn) startBtn.classList.toggle('hidden', !!cfg.discussion_started);
+    }
+
+    function connectAdminWs(roomId) {
+      if (adminWs) { adminWs.close(); adminWs = null; }
+      clearTimeout(reconnectTimer);
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      adminWs = new WebSocket(`${proto}://${location.host}/lobby/admin/ws/${encodeURIComponent(roomId)}`);
+      adminWs.onopen = () => {
+        wsLive = true;
+        const el = document.getElementById('wsStatus');
+        if (el) { el.textContent = '● Live'; el.className = 'ws-live'; }
+      };
+      adminWs.onclose = () => {
+        wsLive = false;
+        const el = document.getElementById('wsStatus');
+        if (el) { el.textContent = '○ 離線'; el.className = 'ws-off'; }
+        if (currentRoomId === roomId) {
+          reconnectTimer = setTimeout(() => connectAdminWs(roomId), 3000);
+        }
+      };
+      adminWs.onmessage = (e) => {
+        try { applyAdminEvent(JSON.parse(e.data)); } catch (_) {}
+      };
+    }
+
+    async function selectRoom(roomId) {
+      currentRoomId = roomId;
+      document.getElementById('joinCommand').textContent = joinCommandFor(roomId);
+      await loadRooms();
+      const data = await api(`/lobby/api/rooms/${encodeURIComponent(roomId)}`);
+      const cfg = data.config;
+      const main = document.getElementById('lobbyMain');
+      main.innerHTML = `
+        <div class="lobby-status-bar glass-card">
+          <div>
+            <div class="lobby-metric-label">Room</div>
+            <div class="lobby-metric-value">${escapeHtml(roomId)}</div>
+          </div>
+          <div>
+            <div class="lobby-metric-label">Members</div>
+            <div class="lobby-metric-value" id="memberCount">${(data.members || []).length}</div>
+          </div>
+          <div>
+            <div class="lobby-metric-label">Current speaker</div>
+            <div class="lobby-metric-value" id="currentSpeaker">${escapeHtml(data.current_speaker || '—')}</div>
+          </div>
+          <div>
+            <div class="lobby-metric-label">Turn</div>
+            <div class="lobby-metric-value" id="turnNo">${data.turn_no || 0}</div>
+          </div>
+          <span class="tag ${cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended')}" id="roomStatusTag">${cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting')}</span>
+          <span id="wsStatus" class="ws-off">連線中…</span>
+          <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
+          <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
+        </div>
+        <details class="glass-card" style="margin:12px 0;padding:0">
+          <summary style="padding:12px 16px;cursor:pointer;font-weight:600">房間設定</summary>
+          <form id="configForm" style="padding:0 16px 16px;margin:0">
+            <label>討論主題<input name="topic" value="${escapeHtml(cfg.topic)}" style="width:100%;margin:4px 0 12px" /></label>
+            <label>規則<textarea name="rules" rows="3" style="width:100%;margin:4px 0 12px;background:#0f172a;color:inherit;border:1px solid #334155;border-radius:8px;padding:8px">${escapeHtml(cfg.rules)}</textarea></label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <label>發言秒數<input name="turn_timeout_sec" type="number" value="${cfg.turn_timeout_sec}" /></label>
+              <label>間隔秒數<input name="turn_gap_sec" type="number" value="${cfg.turn_gap_sec}" /></label>
+            </div>
+            <div style="margin:12px 0;display:grid;gap:6px">
+              <label><input type="checkbox" name="mention_enabled" ${cfg.mention_enabled ? 'checked' : ''} /> @mention 排隊</label>
+              <label><input type="checkbox" name="round_robin_enabled" ${cfg.round_robin_enabled ? 'checked' : ''} /> 輪流發言</label>
+              <label><input type="checkbox" name="skip_gap_on_first_grant" ${cfg.skip_gap_on_first_grant ? 'checked' : ''} /> 首輪免等待</label>
+              <label><input type="checkbox" name="paused" ${cfg.paused ? 'checked' : ''} /> 暫停</label>
+            </div>
+            <button type="submit">儲存設定</button>
+          </form>
+        </details>
+        <section class="glass-card" style="padding:16px">
+          <h2 style="margin-bottom:8px">討論紀錄</h2>
+          <div id="timelinePanel" class="timeline-panel"></div>
+          <div class="broadcast-row">
+            <input id="broadcastText" placeholder="廣播訊息給全場…" />
+            <button type="button" onclick="broadcast()">送出</button>
+          </div>
+        </section>`;
+
+      document.getElementById('configForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        await api(`/lobby/api/rooms/${encodeURIComponent(roomId)}/config`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            topic: fd.get('topic') || '',
+            rules: fd.get('rules') || '',
+            turn_timeout_sec: Number(fd.get('turn_timeout_sec') || 60),
+            turn_gap_sec: Number(fd.get('turn_gap_sec') || 5),
+            mention_enabled: fd.get('mention_enabled') === 'on',
+            round_robin_enabled: fd.get('round_robin_enabled') === 'on',
+            skip_gap_on_first_grant: fd.get('skip_gap_on_first_grant') === 'on',
+            paused: fd.get('paused') === 'on',
+          }),
+        });
+      };
+
+      connectAdminWs(roomId);
+    }
+
+    async function startRoom() {
+      if (!currentRoomId) return;
+      await api(`/lobby/api/rooms/${encodeURIComponent(currentRoomId)}/start`, { method: 'POST' });
+    }
+
+    async function broadcast() {
+      const text = document.getElementById('broadcastText')?.value?.trim();
+      if (!text || !currentRoomId) return;
+      await api(`/lobby/api/rooms/${encodeURIComponent(currentRoomId)}/broadcast`, {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      });
+      document.getElementById('broadcastText').value = '';
+    }
+
+    async function deleteRoom() {
+      if (!currentRoomId || !confirm('確定刪除此聊天室？')) return;
+      await api(`/lobby/api/rooms/${encodeURIComponent(currentRoomId)}`, { method: 'DELETE' });
+      currentRoomId = null;
+      if (adminWs) { adminWs.close(); adminWs = null; }
+      renderEmptyMain();
+      document.getElementById('joinCommand').textContent = '—';
+      await loadRooms();
+    }
+
+    document.getElementById('createRoomForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const room_id = document.getElementById('newRoomId').value.trim();
+      if (!room_id) return;
+      await api('/lobby/api/rooms', { method: 'POST', body: JSON.stringify({ room_id }) });
+      document.getElementById('newRoomId').value = '';
+      await loadRooms();
+      await selectRoom(room_id);
+    };
+
+    async function init() {
+      try {
+        currentUser = await api('/auth/me');
+        document.getElementById('navWho').textContent = currentUser.name || currentUser.email || '';
+        lobbyConfig = await api('/lobby/api/config');
+        await loadRooms();
+      } catch (err) {
+        document.getElementById('lobbyMain').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

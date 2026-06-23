@@ -1,9 +1,12 @@
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
+from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.config import load_router_settings
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
+from src.infrastructure.lobby.paths import resolve_lobby_workspace
+from src.infrastructure.lobby.registry import ConnectionHub, RoomRegistry
 from src.infrastructure.logging.file_request_logger import FileRequestLogger
 from src.infrastructure.repositories.factory import build_router_repository
 from src.presentation.fastapi.dependencies import AppContainer
@@ -31,6 +34,12 @@ def build_container(
     )
     portal_use_case = PortalUseCase(api_key_repo, settings)
 
+    lobby_workspace = resolve_lobby_workspace()
+    lobby_registry = RoomRegistry(lobby_workspace)
+    lobby_registry.load_from_disk()
+    lobby_hub = ConnectionHub()
+    lobby_use_case = LobbyHostUseCase(lobby_workspace, lobby_registry, lobby_hub)
+
     return AppContainer(
         api_key_repo=api_key_repo,
         request_logger=request_logger,
@@ -38,6 +47,7 @@ def build_container(
         auth_use_case=auth_use_case,
         api_use_case=api_use_case,
         portal_use_case=portal_use_case,
+        lobby_use_case=lobby_use_case,
         archive_repo=api_key_repo,
         prompt_log_retention_days=settings.prompt_logs.retention_days,
         router_settings=settings,

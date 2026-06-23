@@ -10,8 +10,9 @@
 | 項目 | 說明 |
 |------|------|
 | 後端 | FastAPI，`app.py` 入口 |
-| 前端 | **單一檔案** [`src/presentation/fastapi/web/portal.html`](../src/presentation/fastapi/web/portal.html)（vanilla HTML/CSS/JS，無 npm） |
-| Portal 路由 | `GET /portal` → 回傳 `portal.html`（[`portal_router.py`](../src/presentation/fastapi/routers/portal_router.py)） |
+| 前端 | [`portal.html`](../src/presentation/fastapi/web/portal.html) + 共用 [`portal.css`](../src/presentation/fastapi/web/portal.css)；Lobby：[`lobby_host.html`](../src/presentation/fastapi/web/lobby_host.html) |
+| Portal 路由 | `GET /portal` → `portal.html`；`GET /lobby` → 主持頁（teacher/admin） |
+| Lobby 資料 | `%USERPROFILE%\.vans_coding_router\lobby\`（room JSON + timeline jsonl） |
 | 本機設定 | `%USERPROFILE%\.vans_coding_router\router.yaml`（**不在 git 內**） |
 | 啟動腳本 | [`scripts/run-local.ps1`](../scripts/run-local.ps1) |
 
@@ -38,7 +39,15 @@ powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
 | http://127.0.0.1:8000/ | 302 → `/portal` |
 | http://127.0.0.1:8000/portal | 登入頁或主畫面 |
 | http://127.0.0.1:8000/health | `ok: true` |
-| http://127.0.0.1:8000/auth/config | 見下方 OAuth 一節 |
+| http://127.0.0.1:8000/lobby | teacher/admin 登入後 Agent Lobby 主持頁 |
+| http://127.0.0.1:8000/portal/static/portal.css | 共用樣式 |
+
+### Agent Lobby
+
+- Portal 老師 sidebar → **Agent Lobby** → `GET /lobby`
+- 學生 join：`peas-agent lobby join --url ws://127.0.0.1:8000/lobby/ws --room ROOM --display-name "姓名"`
+- 正式環境 URL 改為 `wss://{PUBLIC_URL}/lobby/ws`（例 `wss://ai.vanscoding.com/lobby/ws`）
+- Room 資料：`%USERPROFILE%\.vans_coding_router\lobby\`
 
 ---
 
@@ -46,9 +55,10 @@ powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
 
 ### 3.1 設計方向
 
-- 視覺參考：ProtoFlow / NeuralForge **深色玻璃擬態**（slate-950、indigo、glass-card、neural-grid）
-- **單檔** `portal.html`，不引入 React / Vite / Tailwind build
-- **無左側 sidebar**；登入後用垂直 section + 老師區水平 tabs
+- 視覺：ProtoFlow / NeuralForge（slate-950、indigo、glass-card、neural-grid）
+- 共用 CSS：[`portal.css`](../src/presentation/fastapi/web/portal.css)
+- **學生**：單欄 `#student`（無 sidebar）
+- **老師/管理員**：`#teacher` 左側 sidebar；Lobby：[`lobby_host.html`](../src/presentation/fastapi/web/lobby_host.html)
 
 ### 3.2 雙 Layout Shell（同一 HTML）
 
@@ -71,15 +81,13 @@ powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
 |------|------|
 | `showLoginShell()` / `showAppShell()` | 登入前後切換 shell |
 | `refresh()` | 呼叫 `/auth/me`；成功 → app shell，失敗 → login shell |
-| `showTab(id)` | 老師區 tab；含 `.tab-active` 高亮 |
+| `showTab(id)` | sidebar panel 切換（`.sidebar-nav-btn.tab-active`） |
 | `initLogin()` | 讀 `/auth/config`，決定 OAuth 或 dev 登入 |
 
 ### 3.4 改 UI 時注意
 
-- **只改** `portal.html` 即可；後端通常不用動
-- 保留既有 `id`（`#invite`、`#teacher`、`#monitorClassId` 等），否則 JS 會斷
-- 動態 HTML 字串沿用 `.tag`、`.hint`、`.error` 等 class，改 CSS 即可
-- 不要拆成第二個 HTML；不要加 sidebar，除非使用者明確要求
+- 樣式優先改 `portal.css`；Lobby 後端見 `lobby_router.py`
+- 保留 panel `id`（`#keyTab` 等）
 
 ---
 
