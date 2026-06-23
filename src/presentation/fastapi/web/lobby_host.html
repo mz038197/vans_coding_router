@@ -49,6 +49,8 @@
     let adminWs = null;
     let wsLive = false;
     let reconnectTimer = null;
+    let adminWsPingTimer = null;
+    let adminWsClosing = false;
     let currentUser = null;
 
     function escapeHtml(s) {
@@ -146,6 +148,60 @@
       document.getElementById('lobbyMain').innerHTML = '<p class="hint">請選擇或建立聊天室。</p>';
     }
 
+    function formatLocalDateTime(iso) {
+      if (!iso) return '—';
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return iso;
+      return date.toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+    }
+
+    function setWsStatus(state) {
+      const el = document.getElementById('wsStatus');
+      if (!el) return;
+      if (state === 'live') {
+        el.textContent = '● Live';
+        el.className = 'ws-live';
+      } else if (state === 'reconnecting') {
+        el.textContent = '重連中…';
+        el.className = 'ws-reconnecting';
+      } else if (state === 'offline') {
+        el.textContent = '○ 離線';
+        el.className = 'ws-off';
+      } else {
+        el.textContent = '連線中…';
+        el.className = 'ws-off';
+      }
+    }
+
+    function stopAdminWsHeartbeat() {
+      if (adminWsPingTimer) {
+        clearInterval(adminWsPingTimer);
+        adminWsPingTimer = null;
+      }
+    }
+
+    function startAdminWsHeartbeat(ws) {
+      stopAdminWsHeartbeat();
+      adminWsPingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 25000);
+    }
+
+    function closeAdminWs(intentional = true) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      stopAdminWsHeartbeat();
+      if (!adminWs) return;
+      adminWsClosing = intentional;
+      adminWs.close();
+      adminWs = null;
+    }
+
     function renderTimelineEntry(entry) {
       const kind = entry.kind || 'message';
       if (kind === 'turn_granted' || kind === 'turn_pending' || kind === 'turn_revoked') {
@@ -159,7 +215,7 @@
       const cls = isSystem ? 'timeline-entry system host' : 'timeline-entry';
       const name = escapeHtml(entry.display_name || entry.from || '');
       const text = escapeHtml(entry.text || '');
-      return `<div class="${cls}"><div class="timeline-meta"><span class="timeline-name">${name}</span>${entry.ts ? `<span>${escapeHtml(entry.ts)}</span>` : ''}</div><div>${text}</div></div>`;
+      return `<div class="${cls}"><div class="timeline-meta"><span class="timeline-name">${name}</span>${entry.ts ? `<span>${escapeHtml(formatLocalDateTime(entry.ts))}</span>` : ''}</div><div>${text}</div></div>`;
     }
 
     function applyAdminEvent(ev) {
@@ -217,24 +273,35 @@
     }
 
     function connectAdminWs(roomId) {
-      if (adminWs) { adminWs.close(); adminWs = null; }
-      clearTimeout(reconnectTimer);
+      closeAdminWs(true);
+      adminWsClosing = false;
+      setWsStatus('connecting');
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      adminWs = new WebSocket(`${proto}://${location.host}/lobby/admin/ws/${encodeURIComponent(roomId)}`);
-      adminWs.onopen = () => {
+      const ws = new WebSocket(`${proto}://${location.host}/lobby/admin/ws/${encodeURIComponent(roomId)}`);
+      adminWs = ws;
+      ws.onopen = () => {
+        if (adminWs !== ws) return;
         wsLive = true;
-        const el = document.getElementById('wsStatus');
-        if (el) { el.textContent = '● Live'; el.className = 'ws-live'; }
+        setWsStatus('live');
+        startAdminWsHeartbeat(ws);
       };
-      adminWs.onclose = () => {
+      ws.onclose = () => {
+        if (adminWs === ws) adminWs = null;
+        stopAdminWsHeartbeat();
         wsLive = false;
-        const el = document.getElementById('wsStatus');
-        if (el) { el.textContent = '○ 離線'; el.className = 'ws-off'; }
+        if (adminWsClosing) {
+          adminWsClosing = false;
+          return;
+        }
         if (currentRoomId === roomId) {
+          setWsStatus('reconnecting');
+          clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(() => connectAdminWs(roomId), 3000);
+        } else {
+          setWsStatus('offline');
         }
       };
-      adminWs.onmessage = (e) => {
+      ws.onmessage = (e) => {
         try { applyAdminEvent(JSON.parse(e.data)); } catch (_) {}
       };
     }
@@ -247,58 +314,62 @@
       const cfg = data.config;
       const main = document.getElementById('lobbyMain');
       main.innerHTML = `
-        <div class="lobby-status-bar glass-card">
-          <div>
-            <div class="lobby-metric-label">Room</div>
-            <div class="lobby-metric-value">${escapeHtml(roomId)}</div>
-          </div>
-          <div>
-            <div class="lobby-metric-label">Members</div>
-            <div class="lobby-metric-value" id="memberCount">${(data.members || []).length}</div>
-          </div>
-          <div>
-            <div class="lobby-metric-label">Current speaker</div>
-            <div class="lobby-metric-value" id="currentSpeaker">${escapeHtml(data.current_speaker || '—')}</div>
-          </div>
-          <div>
-            <div class="lobby-metric-label">Turn</div>
-            <div class="lobby-metric-value" id="turnNo">${data.turn_no || 0}</div>
-          </div>
-          <span class="tag ${cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended')}" id="roomStatusTag">${cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting')}</span>
-          <span id="wsStatus" class="ws-off">連線中…</span>
-          <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
-          <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
-        </div>
-        <section class="glass-card lobby-member-section">
-          <div class="lobby-metric-label">在線成員</div>
-          <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
-        </section>
-        <details class="glass-card" style="margin:12px 0;padding:0">
-          <summary style="padding:12px 16px;cursor:pointer;font-weight:600">房間設定</summary>
-          <form id="configForm" style="padding:0 16px 16px;margin:0">
-            <label>討論主題<input name="topic" value="${escapeHtml(cfg.topic)}" style="width:100%;margin:4px 0 12px" /></label>
-            <label>規則<textarea name="rules" rows="3" style="width:100%;margin:4px 0 12px;background:#0f172a;color:inherit;border:1px solid #334155;border-radius:8px;padding:8px">${escapeHtml(cfg.rules)}</textarea></label>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <label>發言秒數<input name="turn_timeout_sec" type="number" value="${cfg.turn_timeout_sec}" /></label>
-              <label>間隔秒數<input name="turn_gap_sec" type="number" value="${cfg.turn_gap_sec}" /></label>
+        <div class="lobby-room-layout">
+          <div class="lobby-room-controls">
+            <div class="lobby-status-bar glass-card">
+              <div>
+                <div class="lobby-metric-label">Room</div>
+                <div class="lobby-metric-value">${escapeHtml(roomId)}</div>
+              </div>
+              <div>
+                <div class="lobby-metric-label">Members</div>
+                <div class="lobby-metric-value" id="memberCount">${(data.members || []).length}</div>
+              </div>
+              <div>
+                <div class="lobby-metric-label">Current speaker</div>
+                <div class="lobby-metric-value" id="currentSpeaker">${escapeHtml(data.current_speaker || '—')}</div>
+              </div>
+              <div>
+                <div class="lobby-metric-label">Turn</div>
+                <div class="lobby-metric-value" id="turnNo">${data.turn_no || 0}</div>
+              </div>
+              <span class="tag ${cfg.paused ? 'tag-expired' : (cfg.discussion_started ? 'tag-active' : 'tag-ended')}" id="roomStatusTag">${cfg.paused ? 'Paused' : (cfg.discussion_started ? 'Active' : 'Waiting')}</span>
+              <span id="wsStatus" class="ws-off">連線中…</span>
+              <button type="button" id="startBtn" class="${cfg.discussion_started ? 'hidden' : ''}" onclick="startRoom()">開始討論</button>
+              <button type="button" class="btn-danger" onclick="deleteRoom()">刪除</button>
             </div>
-            <div style="margin:12px 0;display:grid;gap:6px">
-              <label><input type="checkbox" name="mention_enabled" ${cfg.mention_enabled ? 'checked' : ''} /> @mention 排隊</label>
-              <label><input type="checkbox" name="round_robin_enabled" ${cfg.round_robin_enabled ? 'checked' : ''} /> 輪流發言</label>
-              <label><input type="checkbox" name="skip_gap_on_first_grant" ${cfg.skip_gap_on_first_grant ? 'checked' : ''} /> 首輪免等待</label>
-              <label><input type="checkbox" name="paused" ${cfg.paused ? 'checked' : ''} /> 暫停</label>
-            </div>
-            <button type="submit">儲存設定</button>
-          </form>
-        </details>
-        <section class="glass-card" style="padding:16px">
-          <h2 style="margin-bottom:8px">討論紀錄</h2>
-          <div id="timelinePanel" class="timeline-panel"></div>
-          <div class="broadcast-row">
-            <input id="broadcastText" placeholder="廣播訊息給全場…" />
-            <button type="button" onclick="broadcast()">送出</button>
+            <section class="glass-card lobby-member-section">
+              <div class="lobby-metric-label">在線成員</div>
+              <div id="memberList" class="lobby-member-list">${renderMemberList(data.members || [])}</div>
+            </section>
+            <details class="glass-card lobby-config-details">
+              <summary>房間設定</summary>
+              <form id="configForm">
+                <label>討論主題<input name="topic" value="${escapeHtml(cfg.topic)}" /></label>
+                <label>規則<textarea name="rules" rows="3">${escapeHtml(cfg.rules)}</textarea></label>
+                <div class="lobby-config-grid">
+                  <label>發言秒數<input name="turn_timeout_sec" type="number" value="${cfg.turn_timeout_sec}" /></label>
+                  <label>間隔秒數<input name="turn_gap_sec" type="number" value="${cfg.turn_gap_sec}" /></label>
+                </div>
+                <div class="lobby-config-checks">
+                  <label><input type="checkbox" name="mention_enabled" ${cfg.mention_enabled ? 'checked' : ''} /> @mention 排隊</label>
+                  <label><input type="checkbox" name="round_robin_enabled" ${cfg.round_robin_enabled ? 'checked' : ''} /> 輪流發言</label>
+                  <label><input type="checkbox" name="skip_gap_on_first_grant" ${cfg.skip_gap_on_first_grant ? 'checked' : ''} /> 首輪免等待</label>
+                  <label><input type="checkbox" name="paused" ${cfg.paused ? 'checked' : ''} /> 暫停</label>
+                </div>
+                <button type="submit">儲存設定</button>
+              </form>
+            </details>
           </div>
-        </section>`;
+          <aside class="lobby-timeline-aside glass-card">
+            <h2 class="lobby-timeline-title">討論紀錄</h2>
+            <div id="timelinePanel" class="timeline-panel"></div>
+            <div class="broadcast-row">
+              <input id="broadcastText" placeholder="廣播訊息給全場…" />
+              <button type="button" onclick="broadcast()">送出</button>
+            </div>
+          </aside>
+        </div>`;
 
       document.getElementById('configForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -340,7 +411,7 @@
       if (!currentRoomId || !confirm('確定刪除此聊天室？')) return;
       await api(`/lobby/api/rooms/${encodeURIComponent(currentRoomId)}`, { method: 'DELETE' });
       currentRoomId = null;
-      if (adminWs) { adminWs.close(); adminWs = null; }
+      closeAdminWs(true);
       renderEmptyMain();
       document.getElementById('joinCommand').textContent = '—';
       await loadRooms();

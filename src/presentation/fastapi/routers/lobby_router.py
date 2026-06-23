@@ -228,7 +228,13 @@ def create_lobby_router(
         try:
             await _send_admin_snapshot(ws, room)
             while True:
-                await ws.receive_text()
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(msg, dict) and msg.get("type") == "ping":
+                    continue
         except WebSocketDisconnect:
             pass
         finally:
