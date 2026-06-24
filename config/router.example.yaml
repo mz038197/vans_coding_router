@@ -13,7 +13,7 @@ auth:
 database:
   path: "~/.vans_coding_router/router.db"
   archive_dir: "~/.vans_coding_router/archive"
-  # Render PostgreSQL can be supplied via DATABASE_URL.
+  # PostgreSQL via DATABASE_URL (Neon in production).
   url: ""
 
 prompt_logs:

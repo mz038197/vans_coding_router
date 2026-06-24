@@ -4,11 +4,9 @@ FastAPI router for Vans Coding classes. Students sign in with Google, redeem a c
 
 The router does not run or manage local Ollama. It forwards OpenAI-compatible requests to configured providers such as Ollama Cloud and OpenRouter.
 
-**Full deployment runbook (Render, OAuth, DNS, troubleshooting):** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md)
+**Deployment (Fly.io + Neon):** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md)
 
-**Fly.io + Neon (recommended for VS Code / no WAF):** [`guide/FLY_DEPLOYMENT.md`](guide/FLY_DEPLOYMENT.md)
-
-**Local dev + Portal UI + Google OAuth (agent runbook):** [`guide/LOCAL_DEV.md`](guide/LOCAL_DEV.md)
+**Local dev + Portal UI:** [`guide/LOCAL_DEV.md`](guide/LOCAL_DEV.md)
 
 ## Quick Start
 
@@ -25,7 +23,7 @@ If Google OAuth is not configured, the portal allows dev login through `POST /au
 
 Default config path: `~/.vans_coding_router/router.yaml`
 
-Settings load from YAML first, then environment variables override matching fields. On Render, use the Secret File for structured config and Environment for secrets — do not duplicate the same value in both places with different values.
+Settings load from YAML first, then environment variables override matching fields. On Fly.io, non-secret config lives in `config/router.prod.yaml` inside the image; secrets go in Fly secrets / `fly.secrets.env`.
 
 | Setting | Secret File (`router.yaml`) | Environment | Effective source |
 |---------|----------------------------|-------------|------------------|
@@ -45,7 +43,7 @@ PUBLIC_URL=https://ai.vanscoding.com
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=xxx
 SESSION_SECRET=<strong-random-secret>
-DATABASE_URL=<render-postgres-url>
+DATABASE_URL=<neon-postgres-url>
 OLLAMA_CLOUD_API_KEY=xxx
 OPENROUTER_API_KEY=xxx
 OPENAI_API_KEY=xxx
@@ -116,20 +114,18 @@ Image generation for student session keys follows each class session's **生圖*
 - Teachers can patch a session expiry; issued session API keys are updated to the same expiry.
 - Usage is recorded after upstream responses and surfaced per class/student/session.
 
-## Render Deployment
+## Production Deployment
 
-Use Render Web Service + Render PostgreSQL.
+**Fly.io + Neon PostgreSQL.** Push to `master` triggers GitHub Actions deploy.
 
-**Step-by-step checklist:** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md) (Blueprint, Secret File, Environment, Google OAuth, DNS, verification, troubleshooting).
-
-Render commands:
+**Checklist:** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md) (Neon, Fly secrets, DNS, OAuth, troubleshooting).
 
 ```bash
 uv sync --frozen
-uv run uvicorn app:app --host 0.0.0.0 --port $PORT
+uv run uvicorn app:app --host 0.0.0.0 --port 8080
 ```
 
-Note: **local dev defaults to SQLite** (`~/.vans_coding_router/router.db`). When `DATABASE_URL` is set (automatically on Render), the app uses **PostgreSQL** as the source of truth. Optional local Postgres verification:
+Note: **local dev defaults to SQLite** (`~/.vans_coding_router/router.db`). When `DATABASE_URL` is set (production on Neon), the app uses **PostgreSQL**. Optional local Postgres verification:
 
 ```powershell
 docker compose up -d

@@ -1,7 +1,7 @@
 # 本機開發與 Portal 指引（Agent Runbook）
 
 > **給 Cursor / AI Agent 用**：下次要在本機跑 Portal、改 UI、或設定 Google 登入，照這份文件做。  
-> 正式部署見 [`DEPLOYMENT.md`](DEPLOYMENT.md)（含 **Stg 環境**）；OAuth 摘要見 [`OAUTH_AND_RENDER.md`](OAUTH_AND_RENDER.md)。
+> 正式部署見 [`DEPLOYMENT.md`](DEPLOYMENT.md)；OAuth 摘要見 [`OAUTH.md`](OAUTH.md)。
 
 ---
 
@@ -123,7 +123,7 @@ auth:
 憑證來源（擇一）：
 
 1. 使用者本機已有 `client_secret_*.json`（Google Cloud 下載的 OAuth 用戶端 JSON）
-2. 從 Render 環境變數複製 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`（需使用者提供）
+2. 從 Fly secrets / production 環境複製 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`（需使用者提供）
 
 範本：`%USERPROFILE%\.vans_coding_router\secrets.env.example`（可選，見下節取捨）
 
@@ -166,7 +166,7 @@ curl -s http://127.0.0.1:8000/auth/config
 
 ### 4.5 環境變數 vs YAML（本機取捨）
 
-| 方式 | Render 正式環境 | 本機 |
+| 方式 | Fly 正式環境 | 本機 |
 |------|-----------------|------|
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` 環境變數 | **推薦** | 可用，但見下方陷阱 |
 | 寫入 `router.yaml` | **不要**（Secret 進 YAML） | **推薦**（檔案在 home，不在 git） |

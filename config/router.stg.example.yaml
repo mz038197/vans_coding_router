@@ -1,4 +1,4 @@
-public_url: "https://vans-coding-router-stg.onrender.com"
+public_url: "http://127.0.0.1:8000"
 student_default_ttl_hours: 2
 
 auth:
@@ -11,10 +11,10 @@ auth:
   open_registration: true
 
 database:
-  # Stg 不設 DATABASE_URL → 使用 SQLite。路徑在 Render ephemeral FS，deploy 後清空。
+  # 本機 stg 用 SQLite；不設 DATABASE_URL
   url: ""
-  path: "/tmp/vans_coding_router_stg.db"
-  archive_dir: "/tmp/vans_coding_router_archive"
+  path: "~/.vans_coding_router/router.stg.db"
+  archive_dir: "~/.vans_coding_router/archive_stg"
 
 prompt_logs:
   retention_days: 30
@@ -32,7 +32,7 @@ providers:
     api_key_env: "OPENROUTER_API_KEY"
     enabled: true
     extra_headers:
-      HTTP-Referer: "https://vans-coding-router-stg.onrender.com"
+      HTTP-Referer: "http://127.0.0.1:8000"
       X-Title: "Vans Coding Router (Stg)"
 
   openai:

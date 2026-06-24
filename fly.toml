@@ -1,4 +1,4 @@
-# Fly.io production deploy. See guide/FLY_DEPLOYMENT.md
+# Fly.io production deploy. See guide/DEPLOYMENT.md
 app = 'vans-coding-router'
 primary_region = 'sin'
 

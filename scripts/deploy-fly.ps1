@@ -6,7 +6,7 @@
   Prerequisites:
   1. flyctl: winget install Fly-io.flyctl
   2. fly auth login
-  3. DATABASE_URL (Render External URL or Neon) — see guide/FLY_DEPLOYMENT.md
+  3. DATABASE_URL (Neon) — see guide/DEPLOYMENT.md
   4. Secrets in $HOME\.vans_coding_router\fly.secrets.env (copy from fly.secrets.env.example)
 #>
 param(
@@ -90,7 +90,7 @@ function Ensure-SecretsFile {
         Write-Host "Created $SecretsFile — fill in values, then re-run." -ForegroundColor Yellow
         exit 1
     }
-    Write-Host "Missing $SecretsFile — see guide/FLY_DEPLOYMENT.md" -ForegroundColor Yellow
+    Write-Host "Missing $SecretsFile — see guide/DEPLOYMENT.md" -ForegroundColor Yellow
     exit 1
 }
 
