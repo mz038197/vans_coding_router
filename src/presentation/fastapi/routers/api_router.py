@@ -3,9 +3,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.application.dto.chat_dto import ChatCompletionInputDto
 from src.application.use_cases.api_use_case import ApiUseCase
-from src.domain.errors import AuthenticationError, ServiceUnavailableError, UpstreamServiceError
+from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
+from src.presentation.fastapi.auth_responses import openai_auth_error_response
 from src.presentation.fastapi.openai_errors import (
     openai_error_response,
     openai_stream_chat_error_bytes,
@@ -23,8 +25,16 @@ def _client_ip(request: Request) -> str | None:
 def _extract_api_key(request: Request) -> str | None:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    return request.headers.get("X-API-Key")
+        value = normalize_api_key(auth_header[7:])
+        return value or None
+    value = normalize_api_key(request.headers.get("X-API-Key"))
+    return value or None
+
+
+def _upstream_error_message(exc: UpstreamServiceError) -> str:
+    if exc.status_code in (401, 403):
+        return "Upstream provider authentication failed. Contact your teacher or administrator."
+    return exc.message
 
 
 def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
@@ -38,13 +48,26 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
     async def list_models():
         return await api_use_case.models()
 
+    @router.get("/v1/auth/check")
+    async def auth_check(request: Request):
+        api_key = _extract_api_key(request) or ""
+        auth_context = getattr(request.state, "auth_context", None)
+        if auth_context is not None:
+            return {
+                "valid": True,
+                "key_prefix": auth_context.key_prefix,
+                "session_id": auth_context.session_id,
+                "class_id": auth_context.class_id,
+            }
+        return openai_auth_error_response(api_key, api_use_case.api_key_repo)
+
     async def _stream_with_error_handling(domain_req, api_key, client_ip, auth_context):
         """包含錯誤處理的流式生成器"""
         try:
             async for chunk in api_use_case.chat_stream(domain_req, api_key, client_ip, auth_context):
                 yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
+            yield openai_stream_chat_error_bytes(_upstream_error_message(e), model=domain_req.model)
         except ServiceUnavailableError as e:
             yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except Exception as e:
@@ -55,7 +78,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             async for chunk in api_use_case.responses_create_stream(body, api_key, client_ip, auth_context):
                 yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
@@ -69,13 +92,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if getattr(request.state, "invalid_api_key", False):
             api_use_case.log_invalid_auth(api_key or "", client_ip)
-            err = AuthenticationError()
-            return openai_error_response(
-                err.status_code,
-                err.message,
-                error_type="invalid_request_error",
-                code="invalid_api_key",
-            )
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         input_dto = ChatCompletionInputDto(
             model=req.model,
@@ -104,13 +121,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if getattr(request.state, "invalid_api_key", False):
             api_use_case.log_invalid_auth(api_key or "", client_ip)
-            err = AuthenticationError()
-            return openai_error_response(
-                err.status_code,
-                err.message,
-                error_type="invalid_request_error",
-                code="invalid_api_key",
-            )
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         body: dict[str, Any] = await request.json()
         auth_context = getattr(request.state, "auth_context", None)
@@ -128,7 +139,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             async for chunk in api_use_case.images_create_stream(body, api_key, client_ip, auth_context):
                 yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
@@ -142,13 +153,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if getattr(request.state, "invalid_api_key", False):
             api_use_case.log_invalid_auth(api_key or "", client_ip)
-            err = AuthenticationError()
-            return openai_error_response(
-                err.status_code,
-                err.message,
-                error_type="invalid_request_error",
-                code="invalid_api_key",
-            )
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         body = req.model_dump(exclude_none=True)
         if req.stream:
@@ -166,13 +171,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if getattr(request.state, "invalid_api_key", False):
             api_use_case.log_invalid_auth(api_key or "", client_ip)
-            err = AuthenticationError()
-            return openai_error_response(
-                err.status_code,
-                err.message,
-                error_type="invalid_request_error",
-                code="invalid_api_key",
-            )
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         data = await api_use_case.images_models(api_key, client_ip, auth_context)
         return JSONResponse(content=data)
@@ -197,7 +196,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             async for chunk in api_use_case.audio_speech_stream(body, api_key, client_ip, auth_context):
                 yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
@@ -211,13 +210,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if getattr(request.state, "invalid_api_key", False):
             api_use_case.log_invalid_auth(api_key or "", client_ip)
-            err = AuthenticationError()
-            return openai_error_response(
-                err.status_code,
-                err.message,
-                error_type="invalid_request_error",
-                code="invalid_api_key",
-            )
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         body = req.model_dump(exclude_none=True)
         api_use_case.validate_audio_speech_request(body, auth_context)

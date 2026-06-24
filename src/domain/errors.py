@@ -20,11 +20,35 @@ class AppError(Exception):
 
 
 class AuthenticationError(AppError):
-    def __init__(self, message: str = "無效的 API 金鑰"):
+    def __init__(self, message: str = "無效的 API 金鑰", *, code: str = "AUTH_INVALID_API_KEY"):
         super().__init__(
             message=message,
             status_code=401,
-            code="AUTH_INVALID_API_KEY",
+            code=code,
+        )
+
+
+class ApiKeyExpiredError(AppError):
+    def __init__(self, message: str = "API 金鑰已過期，請至 Portal 重新取得邀請碼"):
+        super().__init__(
+            message=message,
+            status_code=401,
+            code="api_key_expired",
+        )
+
+
+class WrongCredentialTypeError(AppError):
+    def __init__(
+        self,
+        message: str = (
+            "請使用 Vans Coding Router 的 vcr_sk_ API 金鑰。"
+            "在 VS Code 執行 Chat: Manage Language Models → VSRouter → Update API Key"
+        ),
+    ):
+        super().__init__(
+            message=message,
+            status_code=401,
+            code="wrong_credential_type",
         )
 
 

@@ -26,6 +26,9 @@ $TemplateJson = @'
         "id": "ollama_cloud@minimax-m3:cloud",
         "name": "minimax-m3",
         "url": "https://ai.vanscoding.com/v1",
+        "requestHeaders": {
+          "Authorization": "Bearer ${apiKey}"
+        },
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -42,6 +45,9 @@ $TemplateJson = @'
         "id": "ollama_cloud@kimi-k2.7-code:cloud",
         "name": "kimi-k2.7-code",
         "url": "https://ai.vanscoding.com/v1",
+        "requestHeaders": {
+          "Authorization": "Bearer ${apiKey}"
+        },
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -58,6 +64,9 @@ $TemplateJson = @'
         "id": "ollama_cloud@qwen3.5:cloud",
         "name": "qwen3.5:cloud",
         "url": "https://ai.vanscoding.com/v1",
+        "requestHeaders": {
+          "Authorization": "Bearer ${apiKey}"
+        },
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -74,6 +83,9 @@ $TemplateJson = @'
         "id": "ollama_cloud@nemotron-3-super:cloud",
         "name": "nemotron-3-super",
         "url": "https://ai.vanscoding.com/v1",
+        "requestHeaders": {
+          "Authorization": "Bearer ${apiKey}"
+        },
         "supportsReasoningEffort": [
           "none",
           "low",

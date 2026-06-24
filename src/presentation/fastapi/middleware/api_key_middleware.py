@@ -1,10 +1,9 @@
 from fastapi import Request
-from src.presentation.fastapi.openai_errors import openai_error_response
+from src.presentation.fastapi.auth_responses import openai_auth_error_response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.application.use_cases.auth_use_case import AuthUseCase
-from src.domain.errors import AuthenticationError
-
+from src.infrastructure.auth.client_api_key import normalize_api_key
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, auth_use_case: AuthUseCase):
@@ -16,9 +15,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             api_key = None
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
-                api_key = auth_header[7:]
+                api_key = normalize_api_key(auth_header[7:])
             else:
-                api_key = request.headers.get("X-API-Key")
+                api_key = normalize_api_key(request.headers.get("X-API-Key"))
 
             auth_context = self.auth_use_case.verify_context(api_key or "")
             is_valid = auth_context is not None
@@ -26,12 +25,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 request.state.invalid_api_key = True
                 request.state.api_key = api_key or ""
                 if request.url.path not in ("/v1/chat/completions", "/v1/responses"):
-                    return openai_error_response(
-                        401,
-                        AuthenticationError().message,
-                        error_type="invalid_request_error",
-                        code="invalid_api_key",
-                    )
+                    return openai_auth_error_response(api_key or "", self.auth_use_case.api_key_repo)
             else:
                 request.state.auth_context = auth_context
 

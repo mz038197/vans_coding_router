@@ -427,13 +427,22 @@ class ApiUseCase:
         )
 
     def log_invalid_auth(self, api_key: str, client_ip: str | None = None) -> None:
+        from src.infrastructure.auth.client_api_key import normalize_api_key
+        from src.presentation.fastapi.auth_errors import resolve_auth_error
+
+        api_key = normalize_api_key(api_key)
         teacher_name: str | None = None
         is_valid = False
         if self.api_key_repo.is_enabled():
-            is_valid, teacher_name = self.api_key_repo.verify_api_key(api_key)
+            auth_err = resolve_auth_error(api_key, self.api_key_repo)
+            if auth_err is None:
+                context = self.api_key_repo.verify_api_key_context(api_key)
+                is_valid = context is not None
+                if context is not None:
+                    teacher_name = context.teacher_name
         self.logger.log_validation_result(
             teacher_name=teacher_name,
-            api_key=api_key or "未提供",
+            api_key=(api_key[:14] + "...") if len(api_key) > 14 else (api_key or "未提供"),
             model="N/A",
             messages=[],
             is_valid=is_valid,

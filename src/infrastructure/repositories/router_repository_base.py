@@ -276,9 +276,12 @@ class RouterRepositoryBase(ABC):
         context = self.verify_api_key_context(api_key)
         return (context is not None, context.teacher_name if context else None)
 
-    def verify_api_key_context(self, api_key: str) -> AuthContext | None:
+    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+        from src.infrastructure.auth.client_api_key import normalize_api_key
+
+        api_key = normalize_api_key(api_key)
         if not api_key:
-            return None
+            return None, "missing"
         now = utc_now()
         with self._connect() as conn:
             row = conn.execute(
@@ -296,38 +299,49 @@ class RouterRepositoryBase(ABC):
                 ),
                 (self._hash_key(api_key),),
             ).fetchone()
-            if not row or not bool(row["enabled"]) or row["user_status"] != "active":
-                return None
+            if not row:
+                return None, "invalid"
+            if not bool(row["enabled"]):
+                return None, "disabled"
+            if row["user_status"] != "active":
+                return None, "disabled"
             expires_at = parse_dt(row["expires_at"])
             session_expires_at = parse_dt(row["session_expires_at"])
             class_ends_at = parse_dt(row["class_ends_at"])
             if expires_at and now >= expires_at:
-                return None
+                return None, "expired"
             if row["session_id"] and (
                 row["session_status"] != "active" or (session_expires_at and now >= session_expires_at)
             ):
-                return None
+                return None, "expired"
             if row["session_id"] and (
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
             ):
-                return None
+                return None, "expired"
             conn.execute(
                 self._sql("UPDATE api_keys SET last_used_at = ? WHERE id = ?"),
                 (dt(now), row["id"]),
             )
             roles = self._roles_for_user(conn, int(row["user_id"]))
-            return AuthContext(
-                user_id=row["user_id"],
-                email=row["email"],
-                name=row["name"],
-                role=self._primary_role(roles),
-                roles=roles,
-                is_admin="admin" in roles,
-                api_key_id=row["id"],
-                session_id=row["session_id"],
-                class_id=row["class_id"],
-                key_prefix=row["key_prefix"],
+            return (
+                AuthContext(
+                    user_id=row["user_id"],
+                    email=row["email"],
+                    name=row["name"],
+                    role=self._primary_role(roles),
+                    roles=roles,
+                    is_admin="admin" in roles,
+                    api_key_id=row["id"],
+                    session_id=row["session_id"],
+                    class_id=row["class_id"],
+                    key_prefix=row["key_prefix"],
+                ),
+                None,
             )
+
+    def verify_api_key_context(self, api_key: str) -> AuthContext | None:
+        context, _ = self.verify_api_key_with_reason(api_key)
+        return context
 
     def issue_long_lived_key(self, user_id: int) -> str:
         raw = "vcr_sk_" + secrets.token_hex(32)
@@ -346,22 +360,34 @@ class RouterRepositoryBase(ABC):
     def issue_session_key(self, user_id: int, session_id: int) -> str:
         raw = self._make_key("session", session_id, user_id)
         now = dt(utc_now())
+        key_hash = self._hash_key(raw)
+        enabled = True if self.dialect == "postgres" else 1
         with self._connect() as conn:
             session = conn.execute(
                 self._sql("SELECT expires_at FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
+            if session is None:
+                raise ValueError("session not found")
             existing = conn.execute(
                 self._sql("SELECT id FROM api_keys WHERE user_id = ? AND session_id = ?"),
                 (user_id, session_id),
             ).fetchone()
-            if not existing:
+            if existing:
+                conn.execute(
+                    self._sql(
+                        "UPDATE api_keys SET key_hash = ?, key_prefix = ?, expires_at = ?, enabled = ? "
+                        "WHERE id = ?"
+                    ),
+                    (key_hash, raw[:14], session["expires_at"], enabled, existing["id"]),
+                )
+            else:
                 conn.execute(
                     self._sql(
                         "INSERT INTO api_keys(user_id, session_id, key_hash, key_prefix, expires_at, created_at) "
                         "VALUES (?, ?, ?, ?, ?, ?)"
                     ),
-                    (user_id, session_id, self._hash_key(raw), raw[:14], session["expires_at"], now),
+                    (user_id, session_id, key_hash, raw[:14], session["expires_at"], now),
                 )
         return raw
 

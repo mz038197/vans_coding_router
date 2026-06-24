@@ -128,6 +128,51 @@ def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(
     assert archived_2026[0][0] == "recent ended"
 
 
+def test_session_key_hash_updates_when_session_secret_rotates(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="secret-a"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    klass = repo.create_class(
+        teacher["id"],
+        "AI",
+        (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        2,
+    )
+    session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
+    repo.redeem_invite(session["invite_code"], student["id"])
+
+    repo.settings = RouterSettings(
+        auth=AuthSettings(session_secret="secret-b"),
+        database=settings.database,
+    )
+    rotated = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    context = repo.verify_api_key_context(rotated)
+    assert context is not None
+    assert context.user_id == student["id"]
+
+
+def test_verify_api_key_strips_surrounding_whitespace(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="test-secret"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+
+    assert repo.verify_api_key_context(f"  {key}  ") is not None
+    assert repo.verify_api_key_context(f"{key}\n") is not None
+
+
 def test_create_session_with_session_at_sets_expires_at(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),

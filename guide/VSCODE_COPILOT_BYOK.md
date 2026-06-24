@@ -62,6 +62,17 @@ Recommended for VS Code Copilot Agent / Edit workflows:
 | `thinking` | Yes | Enables reasoning UI |
 | `reasoningEffortFormat` | Yes | Set `"responses"` |
 | `zeroDataRetentionEnabled` | Strongly recommended | Omits `previous_response_id` (router rejects it) |
+| `requestHeaders` | **Required for stable BYOK auth** | Set `Authorization: Bearer ${apiKey}` so VS Code does not fall back to the Copilot token (which triggers `token expired or invalid: 403`) |
+
+Each bundled model includes:
+
+```json
+"requestHeaders": {
+  "Authorization": "Bearer ${apiKey}"
+}
+```
+
+Re-run `install-vscode-models.cmd` (or the Portal download) to patch this onto existing `chatLanguageModels.json` entries without overwriting your API key.
 
 Copilot may still send some sub-requests to `/v1/chat/completions` (Edit / Inline Fix). The router normalizes those streams so Copilot does not fail with `Response contained no choices`.
 
@@ -123,6 +134,19 @@ After running the script:
 1. **Developer: Reload Window**
 2. **Chat: Manage Language Models** → set API Key to your `vcr_sk_...`
 3. Pick a **VSRouter** model in Copilot (avoid **Auto**)
+
+## Troubleshooting: `token expired or invalid: 403`
+
+VS Code shows this message for several auth failures. Common causes when using VSRouter:
+
+| Cause | Fix |
+|-------|-----|
+| API key not set in VS Code | **Chat: Manage Language Models** → **VSRouter** → **Update API Key** → paste `vcr_sk_...` from Portal |
+| VS Code sent Copilot token instead of `vcr_sk_` | Ensure each model has `requestHeaders.Authorization: Bearer ${apiKey}` (re-run install script) |
+| Session invite key expired | Portal → rejoin class with invite code → update API key in VS Code |
+| Upstream provider auth failed | Contact teacher; router returns **502** (not 403) after this fix |
+
+After updating config or API key: **Developer: Reload Window**.
 
 Optional parameter: `-Edition Stable|Insiders|Both` (default `Both`).
 

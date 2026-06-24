@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.vscode.model_defaults import patch_model_from_template
+
 VANS_TEMPLATE_PATH = Path(__file__).resolve().parents[3] / "config" / "chatLanguageModels.vans.json"
 
 
@@ -47,6 +49,10 @@ def merge_chat_language_models(
                 continue
             model_id = template_model.get("id")
             if model_id and model_id in model_ids:
+                for existing_model in existing_models:
+                    if isinstance(existing_model, dict) and existing_model.get("id") == model_id:
+                        patch_model_from_template(existing_model, template_model)
+                        break
                 continue
             existing_models.append(copy.deepcopy(template_model))
             if model_id:

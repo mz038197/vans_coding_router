@@ -16,7 +16,10 @@ def dt(value: datetime | None) -> str | None:
 def parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
-    return datetime.fromisoformat(value)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def prompt_log_messages(messages_json: str | None, raw_prompt: str | None) -> list[dict[str, Any]]:
