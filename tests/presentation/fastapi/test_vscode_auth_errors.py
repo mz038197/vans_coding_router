@@ -7,6 +7,7 @@ def test_classify_client_api_key():
     assert classify_client_api_key("") == "missing"
     assert classify_client_api_key("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc.def") == "copilot_token"
     assert classify_client_api_key("valid-key") is None
+    assert classify_client_api_key("${apiKey}") == "unresolved_placeholder"
     assert classify_client_api_key("vcr_sk_abc123") is None
 
 

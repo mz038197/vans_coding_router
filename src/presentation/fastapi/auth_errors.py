@@ -8,6 +8,8 @@ def resolve_auth_error(api_key: str, api_key_repo: ApiKeyRepositoryPort) -> AppE
     format_reason = classify_client_api_key(api_key)
     if format_reason == "copilot_token":
         return WrongCredentialTypeError()
+    if format_reason == "unresolved_placeholder":
+        return UnresolvedApiKeyPlaceholderError()
     if format_reason in {"missing"}:
         return AuthenticationError()
 

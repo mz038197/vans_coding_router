@@ -29,6 +29,8 @@ $TemplateJson = @'
         "requestHeaders": {
           "Authorization": "Bearer ${apiKey}"
         },
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -48,6 +50,8 @@ $TemplateJson = @'
         "requestHeaders": {
           "Authorization": "Bearer ${apiKey}"
         },
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -67,6 +71,8 @@ $TemplateJson = @'
         "requestHeaders": {
           "Authorization": "Bearer ${apiKey}"
         },
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",
@@ -86,6 +92,8 @@ $TemplateJson = @'
         "requestHeaders": {
           "Authorization": "Bearer ${apiKey}"
         },
+        "thinking": true,
+        "reasoningEffortFormat": "responses",
         "supportsReasoningEffort": [
           "none",
           "low",

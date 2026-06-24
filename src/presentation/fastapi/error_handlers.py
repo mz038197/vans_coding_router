@@ -14,6 +14,7 @@ from src.domain.errors import (
     TtsDisabledError,
     TtsNotSupportedError,
     UpstreamServiceError,
+    UnresolvedApiKeyPlaceholderError,
     WrongCredentialTypeError,
 )
 from src.presentation.fastapi.openai_errors import (
@@ -52,6 +53,17 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(WrongCredentialTypeError)
     async def handle_wrong_credential_type_error(request: Request, exc: WrongCredentialTypeError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(UnresolvedApiKeyPlaceholderError)
+    async def handle_unresolved_api_key_placeholder(request: Request, exc: UnresolvedApiKeyPlaceholderError):
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 exc.status_code,

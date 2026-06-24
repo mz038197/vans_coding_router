@@ -52,6 +52,22 @@ class WrongCredentialTypeError(AppError):
         )
 
 
+class UnresolvedApiKeyPlaceholderError(AppError):
+    def __init__(
+        self,
+        message: str = (
+            "VS Code 未解析 API 金鑰（收到 ${apiKey} 占位符）。"
+            "請到 Chat: Manage Language Models → VSRouter → Update API Key 重新設定，"
+            "然后 Developer: Reload Window"
+        ),
+    ):
+        super().__init__(
+            message=message,
+            status_code=401,
+            code="unresolved_api_key_placeholder",
+        )
+
+
 class UpstreamServiceError(AppError):
     def __init__(self, *, status_code: int, backend: str, body: Any):
         super().__init__(

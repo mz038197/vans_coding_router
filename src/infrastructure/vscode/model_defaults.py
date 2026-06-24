@@ -8,6 +8,8 @@ VSRouter_REQUEST_HEADERS: dict[str, str] = {
 
 MODEL_PATCH_KEYS: tuple[str, ...] = (
     "requestHeaders",
+    "thinking",
+    "reasoningEffortFormat",
     "zeroDataRetentionEnabled",
     "supportsReasoningEffort",
     "toolCalling",

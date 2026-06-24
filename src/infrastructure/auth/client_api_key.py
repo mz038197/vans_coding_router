@@ -14,6 +14,8 @@ def classify_client_api_key(api_key: str) -> str | None:
     api_key = normalize_api_key(api_key)
     if not api_key:
         return "missing"
+    if api_key in ("${apiKey}", "${input:chat.lm.secret}") or api_key.startswith("${"):
+        return "unresolved_placeholder"
     if api_key.startswith("eyJ") and api_key.count(".") >= 2:
         return "copilot_token"
     return None
