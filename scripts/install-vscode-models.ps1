@@ -39,6 +39,22 @@ $TemplateJson = @'
         "maxOutputTokens": 16000
       },
       {
+        "id": "ollama_cloud@kimi-k2.7-code:cloud",
+        "name": "kimi-k2.7-code",
+        "url": "https://ai.vanscoding.com/v1",
+        "supportsReasoningEffort": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "zeroDataRetentionEnabled": true,
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      },
+      {
         "id": "ollama_cloud@qwen3.5:cloud",
         "name": "qwen3.5:cloud",
         "url": "https://ai.vanscoding.com/v1",
