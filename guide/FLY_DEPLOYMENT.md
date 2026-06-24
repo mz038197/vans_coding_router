@@ -159,6 +159,48 @@ fly ssh console --app vans-coding-router
 
 ---
 
+## 7b. Push 自動 deploy（GitHub Actions，推薦）
+
+Fly Dashboard 的「Connect GitHub」在 **CLI 建立的 app** 上常常找不到或要新 Launch UI。  
+官方推薦改用 **GitHub Actions**（repo 已含 `.github/workflows/fly-deploy.yml`）。
+
+### 一次性設定
+
+**1. 產生 Fly deploy token（本機）：**
+
+```powershell
+flyctl tokens create deploy -x 999999h --app vans-coding-router
+```
+
+複製整段輸出（含開頭 `FlyV1 ` 和空格）。
+
+**2. 加到 GitHub repo secret：**
+
+GitHub → `mz038197/vans_coding_router` → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+| Name | Value |
+|------|-------|
+| `FLY_API_TOKEN` | 上一步複製的 token |
+
+**3. Push workflow 檔（若尚未 push）：**
+
+```powershell
+git add .github/workflows/fly-deploy.yml
+git commit -m "ci: add Fly deploy on push to master"
+git push origin master
+```
+
+之後每次 `git push origin master` → GitHub **Actions** tab 會跑 `Fly Deploy` → 自動 `flyctl deploy`。
+
+Secrets（`DATABASE_URL` 等）仍在 Fly，**不要**放 GitHub。
+
+### Dashboard 路徑（若仍想用 Fly 內建 CD）
+
+部分帳號：**App → Deployments → Settings → Auto deploy**。  
+若沒有這選項，用上面 GitHub Actions 即可。
+
+---
+
 ## 8. 與 Render 差異
 
 | | Render | Fly.io |
