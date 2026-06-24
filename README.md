@@ -6,6 +6,8 @@ The router does not run or manage local Ollama. It forwards OpenAI-compatible re
 
 **Full deployment runbook (Render, OAuth, DNS, troubleshooting):** [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md)
 
+**Fly.io + Neon (recommended for VS Code / no WAF):** [`guide/FLY_DEPLOYMENT.md`](guide/FLY_DEPLOYMENT.md)
+
 **Local dev + Portal UI + Google OAuth (agent runbook):** [`guide/LOCAL_DEV.md`](guide/LOCAL_DEV.md)
 
 ## Quick Start

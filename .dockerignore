@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+venv
+__pycache__
+.pytest_cache
+.coverage
+htmlcov
+*.md
+!README.md
+.env
+.env.*
+terminals
+mcps
+agent-transcripts
+agent-tools

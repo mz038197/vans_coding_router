@@ -1,0 +1,45 @@
+public_url: "https://ai.vanscoding.com"
+student_default_ttl_hours: 2
+
+auth:
+  teacher_domain: ""
+  admin_emails:
+    - "mz038197@gmail.com"
+  google_client_id: ""
+  google_client_secret: ""
+  open_registration: true
+
+database:
+  path: "/tmp/router.db"
+  archive_dir: "/tmp/archive"
+  url: ""
+
+prompt_logs:
+  retention_days: 30
+
+providers:
+  ollama_cloud:
+    type: openai_compatible
+    base_url: "https://ollama.com/v1"
+    api_key_env: "OLLAMA_CLOUD_API_KEY"
+    enabled: true
+
+  openrouter:
+    type: openai_compatible
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    enabled: true
+    extra_headers:
+      HTTP-Referer: "https://ai.vanscoding.com"
+      X-Title: "Vans Coding Router"
+
+  openai:
+    type: openai_compatible
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    enabled: true
+    capabilities:
+      - audio_speech
+
+routing:
+  default_provider: ollama_cloud
