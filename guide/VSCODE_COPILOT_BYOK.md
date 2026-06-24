@@ -137,7 +137,24 @@ After running the script:
 
 ## Troubleshooting: `token expired or invalid: 403`
 
-VS Code shows this message for several auth failures. Common causes when using VSRouter:
+VS Code maps **any HTTP 403** to this message, even when the router never saw the request.
+
+**Check the Copilot log first** (`Help` → `Toggle Developer Tools` → `Output` → **GitHub Copilot Chat**, or `%APPDATA%\Code\logs\...\GitHub Copilot Chat.log`):
+
+| Log body | Real cause |
+|----------|------------|
+| JSON like `invalid_api_key` / `wrong_credential_type` | Router auth — fix API key or `requestHeaders` below |
+| HTML with `403 - Forbidden` and **web application firewall (WAF)** | **Render/Cloudflare edge** blocked VS Code’s Electron request before it reached the router |
+
+When the log shows the WAF HTML page, curl/Python tests against the same URL can still return **200** — that is expected. The router and API key are fine; VS Code’s fetch fingerprint or Agent payload triggers the edge firewall.
+
+**WAF workaround (production on Render):**
+
+1. Open [Render Dashboard](https://dashboard.render.com) → **vans-coding-router** → **Networking** → confirm **Inbound IP Restrictions** includes `0.0.0.0/0` (allow all).
+2. Reproduce once in VS Code, then copy the **Request ID** from the WAF HTML in the Copilot log (e.g. `a10ca6f9cadda9af`) and open a Render support ticket: ask to allow BYOK API traffic to `/v1/*` from VS Code/Electron clients.
+3. Until Render adjusts the edge rules: run the router locally (`uv run uvicorn app:app`) and point `chatLanguageModels.json` model URLs to `http://127.0.0.1:8000/v1`, or use Cursor/other clients that are not blocked.
+
+Common router-side causes (JSON 401/502, not WAF HTML):
 
 | Cause | Fix |
 |-------|-----|
