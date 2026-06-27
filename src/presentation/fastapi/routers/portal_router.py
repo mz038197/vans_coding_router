@@ -77,12 +77,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     def portal_call(fn):
         try:
             return fn()
+        except HTTPException:
+            raise
         except PermissionError:
             raise HTTPException(status_code=403, detail="權限不足") from None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except OSError as exc:
             raise HTTPException(status_code=503, detail="設定檔不可寫入") from exc
+        except Exception:
+            logger.exception("Portal request failed")
+            raise HTTPException(status_code=500, detail="伺服器錯誤，請稍後再試") from None
 
     def current_user_id(session_user_id: str | None) -> int:
         if not session_user_id:

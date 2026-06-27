@@ -31,7 +31,12 @@ class PostgresRouterRepository(RouterRepositoryBase):
     @contextmanager
     def _connect(self) -> Iterator[Any]:
         with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
-            yield conn
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -179,6 +184,7 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS tts_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
+            conn.commit()
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runtime_settings (

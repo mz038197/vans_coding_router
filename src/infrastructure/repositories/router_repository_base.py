@@ -43,6 +43,11 @@ class RouterRepositoryBase(ABC):
     def _disabled_enabled_value(self) -> int | bool:
         return False if self.dialect == "postgres" else 0
 
+    def _bool_storage_value(self, enabled: bool) -> int | bool:
+        if self.dialect == "postgres":
+            return enabled
+        return 1 if enabled else 0
+
     def _executemany(self, conn: Any, query: str, params: list[tuple[Any, ...]]) -> None:
         sql = self._sql(query)
         if not params:
@@ -552,12 +557,12 @@ class RouterRepositoryBase(ABC):
             if image_generation_enabled is not None:
                 conn.execute(
                     self._sql("UPDATE class_sessions SET image_generation_enabled = ? WHERE id = ?"),
-                    (1 if image_generation_enabled else 0, session_id),
+                    (self._bool_storage_value(image_generation_enabled), session_id),
                 )
             if tts_enabled is not None:
                 conn.execute(
                     self._sql("UPDATE class_sessions SET tts_enabled = ? WHERE id = ?"),
-                    (1 if tts_enabled else 0, session_id),
+                    (self._bool_storage_value(tts_enabled), session_id),
                 )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),

@@ -515,19 +515,23 @@
 
     async function api(url, options = {}) {
       const r = await fetch(url, {headers: {'content-type': 'application/json'}, ...options});
+      const text = await r.text();
       if (!r.ok) {
-        const text = await r.text();
-        try {
-          const payload = JSON.parse(text);
-          const detail = payload.detail;
-          if (typeof detail === 'string') throw new Error(detail);
-          if (detail && typeof detail === 'object' && detail.message) throw new Error(detail.message);
-        } catch (err) {
-          if (err instanceof Error && err.message !== text) throw err;
+        let message = text || r.statusText;
+        if (text) {
+          try {
+            const payload = JSON.parse(text);
+            const detail = payload.detail;
+            if (typeof detail === 'string') message = detail;
+            else if (detail && typeof detail === 'object' && detail.message) message = detail.message;
+          } catch {
+            // keep plain-text message (e.g. Internal Server Error)
+          }
         }
-        throw new Error(text || r.statusText);
+        throw new Error(message);
       }
-      return r.json();
+      if (!text) return null;
+      return JSON.parse(text);
     }
 
     function escapeHtml(value) {
