@@ -121,3 +121,54 @@ async def test_chat_stream_filters_empty_choices_from_upstream(ollama_gateway):
     assert '"choices":[]' not in body.replace(" ", "")
     assert '"total_tokens":12' in body.replace(" ", "")
     assert "OK" in body
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_omits_max_tokens_when_unset(ollama_gateway):
+    gateway, mock_client = ollama_gateway
+
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+    }
+    mock_client.request = AsyncMock(return_value=response)
+
+    with patch.dict("os.environ", {"OLLAMA_CLOUD_API_KEY": "test-key"}):
+        req = ChatCompletionRequest(
+            model="minimax-m3:cloud",
+            messages=[ChatMessage(role="user", content="hi")],
+            stream=False,
+        )
+        await gateway.chat_completions_nonstream(req)
+
+    forwarded = mock_client.request.call_args.kwargs["json"]
+    assert "max_tokens" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_forwards_resolved_max_tokens(ollama_gateway):
+    gateway, mock_client = ollama_gateway
+
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+    }
+    mock_client.request = AsyncMock(return_value=response)
+
+    with patch.dict("os.environ", {"OLLAMA_CLOUD_API_KEY": "test-key"}):
+        req = ChatCompletionRequest(
+            model="minimax-m3:cloud",
+            messages=[ChatMessage(role="user", content="hi")],
+            stream=False,
+            max_tokens=256,
+        )
+        await gateway.chat_completions_nonstream(req)
+
+    forwarded = mock_client.request.call_args.kwargs["json"]
+    assert forwarded["max_tokens"] == 256

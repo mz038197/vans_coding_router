@@ -13,6 +13,7 @@ class FakeGateway:
         self.name = name
         self.provider = ProviderSettings(name=name, capabilities=capabilities)
         self.requests: list[str] = []
+        self.last_chat_req: ChatCompletionRequest | None = None
 
     async def startup(self) -> None:
         return None
@@ -30,10 +31,12 @@ class FakeGateway:
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
         self.requests.append(req.model)
+        self.last_chat_req = req
         return {"provider": self.name}
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
         self.requests.append(req.model)
+        self.last_chat_req = req
         yield b"data: [DONE]\n\n"
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:

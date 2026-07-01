@@ -13,6 +13,7 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
 )
+from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
 from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
 
 
@@ -99,7 +100,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             messages=[m.model_dump() for m in req.messages],
             stream=req.stream,
             temperature=req.temperature,
-            max_tokens=req.max_tokens,
+            max_tokens=resolve_chat_output_token_limit(req.max_tokens, req.max_completion_tokens),
             user=req.user,
             stop=req.stop,
             tools=req.tools,

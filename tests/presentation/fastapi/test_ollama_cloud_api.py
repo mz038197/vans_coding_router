@@ -1,6 +1,6 @@
 from api_test_utils import build_test_client
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
-from tests.infrastructure.test_routing_gateway import FakeGateway
+from infrastructure.test_routing_gateway import FakeGateway
 
 
 def _routing_client(fake_repo, fake_logger):
@@ -33,6 +33,39 @@ def test_chat_completions_resolves_ollama_model(fake_repo, fake_logger):
     )
     assert response.status_code == 200
     assert ollama.requests == ["minimax-m3:cloud"]
+
+
+def test_chat_completions_resolves_max_completion_tokens(fake_repo, fake_logger):
+    client, ollama, _ = _routing_client(fake_repo, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "ollama_cloud@minimax-m3:cloud",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": False,
+            "max_completion_tokens": 256,
+        },
+    )
+    assert response.status_code == 200
+    assert ollama.last_chat_req is not None
+    assert ollama.last_chat_req.max_tokens == 256
+
+
+def test_chat_completions_omits_default_max_tokens(fake_repo, fake_logger):
+    client, ollama, _ = _routing_client(fake_repo, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "ollama_cloud@minimax-m3:cloud",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": False,
+        },
+    )
+    assert response.status_code == 200
+    assert ollama.last_chat_req is not None
+    assert ollama.last_chat_req.max_tokens is None
 
 
 def test_responses_resolves_ollama_model(fake_repo, fake_logger):

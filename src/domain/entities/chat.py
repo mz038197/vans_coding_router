@@ -19,7 +19,7 @@ class ChatCompletionRequest:
     messages: list[ChatMessage]
     stream: bool = False
     temperature: float | None = 0.7
-    max_tokens: int | None = 200000
+    max_tokens: int | None = None
     user: str | None = None
     stop: object | None = None
     tools: list[dict[str, Any]] | None = None
