@@ -1133,7 +1133,7 @@
         return;
       }
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>語音</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>語音</th><th>Prompt 記錄</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(s)}</td>
@@ -1153,6 +1153,14 @@
                   ${sessionTtsEnabled(s) ? 'checked' : ''}
                   onchange="toggleSessionTts(${classId}, ${s.id}, this.checked, this)" />
                 <span>${sessionTtsEnabled(s) ? '開啟' : '關閉'}</span>
+              </label>
+            </td>
+            <td>
+              <label class="session-prompt-toggle" title="關閉後不記錄 prompt 與 token 用量">
+                <input type="checkbox"
+                  ${sessionPromptLoggingEnabled(s) ? 'checked' : ''}
+                  onchange="toggleSessionPromptLogging(${classId}, ${s.id}, this.checked, this)" />
+                <span>${sessionPromptLoggingEnabled(s) ? '開啟' : '關閉'}</span>
               </label>
             </td>
             <td><code>${escapeHtml(s.invite_code)}</code></td>
@@ -1204,6 +1212,27 @@
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
           body: JSON.stringify({ tts_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '開啟' : '關閉';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    function sessionPromptLoggingEnabled(session) {
+      const value = session.prompt_logging_enabled;
+      if (value === undefined || value === null) return true;
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function toggleSessionPromptLogging(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-prompt-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ prompt_logging_enabled: enabled }),
         });
         if (label) label.textContent = enabled ? '開啟' : '關閉';
       } catch (err) {

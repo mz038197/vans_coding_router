@@ -326,6 +326,11 @@ class ApiUseCase:
     ) -> None:
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
+        if auth_context and auth_context.session_id and hasattr(
+            self.api_key_repo, "is_prompt_logging_enabled"
+        ):
+            if not self.api_key_repo.is_prompt_logging_enabled(auth_context.session_id):
+                return
         logged_request = messages_for_log(messages)
         logged_assistant = truncate_assistant_messages(messages_for_log(assistant_messages or []))
         logged_messages = logged_request + logged_assistant

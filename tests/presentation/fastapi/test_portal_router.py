@@ -484,6 +484,37 @@ def test_session_tts_toggle(tmp_path):
     assert repo.is_tts_enabled(session_id) is True
 
 
+def test_session_prompt_logging_toggle(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = {"session_user_id": str(teacher["id"])}
+
+    create = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    )
+    session_id = create.json()["id"]
+    assert repo.is_prompt_logging_enabled(session_id) is True
+
+    disable = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"prompt_logging_enabled": False},
+    )
+    assert disable.status_code == 200
+    assert repo.is_prompt_logging_enabled(session_id) is False
+
+    enable = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"prompt_logging_enabled": True},
+    )
+    assert enable.status_code == 200
+    assert repo.is_prompt_logging_enabled(session_id) is True
+
+
 def test_install_vscode_models_download_requires_login(tmp_path):
     client, _, _ = _client(tmp_path)
     response = client.get("/portal/download/install-vscode-models.ps1")

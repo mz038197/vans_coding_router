@@ -3,16 +3,21 @@ import json
 import pytest
 
 from src.application.use_cases.api_use_case import ApiUseCase
+from src.domain.entities.auth import AuthContext
 from fakes import FakeApiKeyRepository, FakeLLMGateway, FakeRequestLogger
 
 
 class CapturingPromptRepo(FakeApiKeyRepository):
-    def __init__(self):
+    def __init__(self, *, prompt_logging_enabled: bool = True):
         super().__init__(force_enabled=False)
         self.prompts: list[dict] = []
+        self.prompt_logging_enabled = prompt_logging_enabled
 
     def log_prompt(self, **kwargs) -> None:
         self.prompts.append(kwargs)
+
+    def is_prompt_logging_enabled(self, session_id: int) -> bool:
+        return self.prompt_logging_enabled
 
 
 @pytest.mark.asyncio
@@ -42,6 +47,28 @@ async def test_responses_create_persists_assistant_reply_and_endpoint():
     prompt = repo.prompts[0]
     assert prompt["api_endpoint"] == "/v1/responses"
     assert prompt["response_preview"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_chat_nonstream_skips_prompt_log_when_session_logging_disabled(sample_chat_request):
+    repo = CapturingPromptRepo(prompt_logging_enabled=False)
+    gateway = FakeLLMGateway()
+    gateway.nonstream_response = {
+        **gateway.nonstream_response,
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+    }
+    use_case = ApiUseCase(gateway=gateway, api_key_repo=repo, logger=FakeRequestLogger())
+    auth = AuthContext(
+        user_id=1,
+        email="student@school.edu",
+        name="Student",
+        session_id=42,
+        class_id=7,
+    )
+
+    await use_case.chat_nonstream(sample_chat_request, "valid-key", auth_context=auth)
+
+    assert repo.prompts == []
 
 
 @pytest.mark.asyncio

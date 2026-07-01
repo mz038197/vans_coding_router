@@ -82,6 +82,7 @@ class RouterRepositoryPort(Protocol):
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        prompt_logging_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         ...
 
@@ -89,6 +90,9 @@ class RouterRepositoryPort(Protocol):
         ...
 
     def is_tts_enabled(self, session_id: int) -> bool:
+        ...
+
+    def is_prompt_logging_enabled(self, session_id: int) -> bool:
         ...
 
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:

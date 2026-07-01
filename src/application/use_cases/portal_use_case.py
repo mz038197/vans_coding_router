@@ -76,6 +76,7 @@ class PortalUseCase:
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        prompt_logging_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         self._assert_class_owner(teacher_id, class_id)
         return self.repo.update_class_session(
@@ -85,6 +86,7 @@ class PortalUseCase:
             name=name,
             image_generation_enabled=image_generation_enabled,
             tts_enabled=tts_enabled,
+            prompt_logging_enabled=prompt_logging_enabled,
         )
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:

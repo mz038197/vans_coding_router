@@ -527,8 +527,15 @@ class RouterRepositoryBase(ABC):
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        prompt_logging_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
-        if expires_at is None and name is None and image_generation_enabled is None and tts_enabled is None:
+        if (
+            expires_at is None
+            and name is None
+            and image_generation_enabled is None
+            and tts_enabled is None
+            and prompt_logging_enabled is None
+        ):
             raise ValueError("nothing to update")
         with self._connect() as conn:
             row = conn.execute(
@@ -564,6 +571,11 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET tts_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(tts_enabled), session_id),
                 )
+            if prompt_logging_enabled is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
+                    (self._bool_storage_value(prompt_logging_enabled), session_id),
+                )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
@@ -592,6 +604,21 @@ class RouterRepositoryBase(ABC):
             if not row:
                 return False
             value = row["tts_enabled"]
+            if isinstance(value, bool):
+                return value
+            return bool(int(value or 0))
+
+    def is_prompt_logging_enabled(self, session_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT prompt_logging_enabled FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return True
+            value = row["prompt_logging_enabled"]
+            if value is None:
+                return True
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))
