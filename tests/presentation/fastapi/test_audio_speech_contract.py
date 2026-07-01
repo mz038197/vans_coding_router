@@ -14,7 +14,7 @@ from src.presentation.fastapi.error_handlers import register_error_handlers
 from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
 from src.presentation.fastapi.routers.api_router import create_api_router
 from fakes import FakeLLMGateway, FakeRequestLogger
-from tests.infrastructure.test_routing_gateway import FakeGateway
+from infrastructure.test_routing_gateway import FakeGateway
 
 
 def _routing_client(fake_repo, fake_logger):
