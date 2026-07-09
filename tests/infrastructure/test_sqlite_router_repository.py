@@ -285,13 +285,52 @@ def test_end_session_invalidates_key_and_blocks_redeem(tmp_path):
 
     ended = repo.update_class_session(klass["id"], session["id"], status="ended")
     assert ended["status"] == "ended"
+    assert parse_dt_iso(ended["expires_at"]) <= datetime.now(UTC)
     assert repo.verify_api_key_context(redeemed["api_key"]) is None
     with pytest.raises(ValueError):
         repo.redeem_invite(session["invite_code"], student["id"])
 
-    reopened = repo.update_class_session(klass["id"], session["id"], status="active")
+    with pytest.raises(ValueError, match="到期時間"):
+        repo.update_class_session(klass["id"], session["id"], status="active")
+
+    future = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+    reopened = repo.update_class_session(klass["id"], session["id"], expires_at=future)
     assert reopened["status"] == "active"
+    assert parse_dt_iso(reopened["expires_at"]) > datetime.now(UTC)
     assert repo.verify_api_key_context(redeemed["api_key"]) is not None
+
+
+def test_backfill_aligns_ended_session_future_expires(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="test-secret"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    db_path = str(tmp_path / "router.db")
+    repo = SqliteRouterRepository(db_path, settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Legacy Ended")
+    redeemed = repo.redeem_invite(session["invite_code"], student["id"])
+    future = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE class_sessions SET status = 'ended', expires_at = ? WHERE id = ?",
+            (future, session["id"]),
+        )
+        conn.execute(
+            "UPDATE api_keys SET expires_at = ? WHERE session_id = ?",
+            (future, session["id"]),
+        )
+        conn.commit()
+
+    repo2 = SqliteRouterRepository(db_path, settings)
+    rows = repo2.list_class_sessions(klass["id"])
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ended"
+    assert parse_dt_iso(rows[0]["expires_at"]) <= datetime.now(UTC)
+    assert repo2.verify_api_key_context(redeemed["api_key"]) is None
 
 
 def test_update_session_expires_at_syncs_api_keys(tmp_path):

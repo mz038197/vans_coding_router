@@ -127,6 +127,31 @@ class RouterRepositoryBase(ABC):
             for role in roles:
                 self._insert_or_ignore_user_role(conn, int(row["id"]), role, now or "")
 
+    def _backfill_ended_session_expires(self, conn: Any) -> None:
+        """Align legacy status=ended rows so expires_at is the lifecycle truth."""
+        now = utc_now()
+        now_s = dt(now)
+        rows = conn.execute(
+            self._sql("SELECT id, expires_at FROM class_sessions WHERE status = 'ended'")
+        ).fetchall()
+        for row in rows:
+            expires = parse_dt(row["expires_at"])
+            if expires is None:
+                continue
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=UTC)
+            if expires <= now:
+                continue
+            session_id = int(row["id"])
+            conn.execute(
+                self._sql("UPDATE class_sessions SET expires_at = ? WHERE id = ?"),
+                (now_s, session_id),
+            )
+            conn.execute(
+                self._sql("UPDATE api_keys SET expires_at = ? WHERE session_id = ?"),
+                (now_s, session_id),
+            )
+
     def is_enabled(self) -> bool:
         return True
 
@@ -315,9 +340,8 @@ class RouterRepositoryBase(ABC):
             class_ends_at = parse_dt(row["class_ends_at"])
             if expires_at and now >= expires_at:
                 return None, "expired"
-            if row["session_id"] and (
-                row["session_status"] != "active" or (session_expires_at and now >= session_expires_at)
-            ):
+            # Session lifecycle is expires_at (status is a derived/legacy field).
+            if row["session_id"] and session_expires_at and now >= session_expires_at:
                 return None, "expired"
             if row["session_id"] and (
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
@@ -519,6 +543,31 @@ class RouterRepositoryBase(ABC):
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
+        current = now or utc_now()
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        return "active" if expires > current else "ended"
+
+    def _apply_session_expires(
+        self,
+        conn: Any,
+        session_id: int,
+        expires: datetime,
+    ) -> None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        expires_value = dt(expires)
+        derived_status = self._session_status_for_expires(expires)
+        conn.execute(
+            self._sql("UPDATE class_sessions SET expires_at = ?, status = ? WHERE id = ?"),
+            (expires_value, derived_status, session_id),
+        )
+        conn.execute(
+            self._sql("UPDATE api_keys SET expires_at = ? WHERE session_id = ?"),
+            (expires_value, session_id),
+        )
+
     def update_class_session(
         self,
         class_id: int,
@@ -541,6 +590,11 @@ class RouterRepositoryBase(ABC):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
             raise ValueError("invalid session status")
+        # Lifecycle truth is expires_at. status=ended => expire now; status=active alone is invalid.
+        if status == "active" and expires_at is None:
+            raise ValueError("重新開啟課堂請設定未來的到期時間")
+        if status == "ended" and expires_at is None:
+            expires_at = dt(utc_now())
         with self._connect() as conn:
             row = conn.execute(
                 self._sql("SELECT id FROM class_sessions WHERE id = ? AND class_id = ?"),
@@ -560,17 +614,7 @@ class RouterRepositoryBase(ABC):
                 parsed = parse_dt(expires_at)
                 if parsed is None:
                     raise ValueError("invalid expires_at")
-                if parsed.tzinfo is None:
-                    parsed = parsed.replace(tzinfo=UTC)
-                expires_value = dt(parsed)
-                conn.execute(
-                    self._sql("UPDATE class_sessions SET expires_at = ? WHERE id = ?"),
-                    (expires_value, session_id),
-                )
-                conn.execute(
-                    self._sql("UPDATE api_keys SET expires_at = ? WHERE session_id = ?"),
-                    (expires_value, session_id),
-                )
+                self._apply_session_expires(conn, session_id, parsed)
             if image_generation_enabled is not None:
                 conn.execute(
                     self._sql("UPDATE class_sessions SET image_generation_enabled = ? WHERE id = ?"),
@@ -585,11 +629,6 @@ class RouterRepositoryBase(ABC):
                 conn.execute(
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(prompt_logging_enabled), session_id),
-                )
-            if status is not None:
-                conn.execute(
-                    self._sql("UPDATE class_sessions SET status = ? WHERE id = ?"),
-                    (status, session_id),
                 )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
@@ -650,9 +689,10 @@ class RouterRepositoryBase(ABC):
                 ),
                 (invite_code.strip().upper(),),
             ).fetchone()
-            if not session or session["status"] != "active" or session["class_status"] != "active":
+            if not session or session["class_status"] != "active":
                 raise ValueError("invalid invite")
-            if utc_now() >= parse_dt(session["expires_at"]):
+            expires = parse_dt(session["expires_at"])
+            if expires is None or utc_now() >= expires:
                 raise ValueError("expired invite")
             now = dt(utc_now())
             self._insert_or_ignore_redemption(conn, int(session["id"]), user_id, now or "")

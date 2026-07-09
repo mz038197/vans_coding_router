@@ -175,6 +175,7 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 """
             )
             self._backfill_user_roles(conn)
+            self._backfill_ended_session_expires(conn)
             for table in ("prompt_logs", "prompt_logs_archive"):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS api_endpoint TEXT")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")

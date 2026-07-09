@@ -577,18 +577,14 @@ def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
     )
     assert end.status_code == 200
     assert end.json()["status"] == "ended"
+    assert end.json()["expires_at"]
 
-    reopen = client.patch(
+    reopen_without_expires = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
         cookies=admin_cookies,
         json={"status": "active"},
     )
-    assert reopen.status_code == 200
-    assert reopen.json()["status"] == "active"
-
-    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=admin_cookies)
-    assert listing.status_code == 200
-    assert listing.json()["items"][0]["status"] == "active"
+    assert reopen_without_expires.status_code == 400
 
     expires = "2026-12-31T15:00:00+00:00"
     patch_expires = client.patch(
@@ -598,6 +594,11 @@ def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
     )
     assert patch_expires.status_code == 200
     assert patch_expires.json()["expires_at"].startswith("2026-12-31T15:00:00")
+    assert patch_expires.json()["status"] == "active"
+
+    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=admin_cookies)
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["status"] == "active"
 
     forbidden = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",

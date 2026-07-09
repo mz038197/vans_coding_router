@@ -155,6 +155,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 "INTEGER NOT NULL DEFAULT 1",
             )
             self._backfill_user_roles(conn)
+            self._backfill_ended_session_expires(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}

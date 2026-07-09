@@ -424,11 +424,9 @@
       return '（未命名）';
     }
 
-    function sessionStatusTag(session, courseStatus) {
-      if (courseStatus === 'ended') return renderStatusTag('course', 'ended');
-      if (session.status === 'ended') return renderStatusTag('key', 'ended');
-      if (isSessionExpired(session.expires_at)) return renderStatusTag('key', 'expired');
-      return renderStatusTag('key', 'active');
+    function isSessionActive(session, courseStatus) {
+      if (courseStatus === 'ended') return false;
+      return !isSessionExpired(session.expires_at);
     }
 
     function isoToDatetimeLocalValue(iso) {
@@ -439,39 +437,60 @@
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
 
-    function sessionActionButtons(classId, session, options = {}) {
-      const allowOwnerActions = options.allowOwnerActions !== false;
-      const ended = session.status === 'ended';
-      const courseEnded = options.courseStatus === 'ended';
-      const buttons = [];
-      if (allowOwnerActions) {
-        buttons.push(`<button type="button" class="btn-secondary btn-sm copy-invite-btn" data-code="${escapeHtml(session.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>`);
-        buttons.push(`<button type="button" class="btn-secondary btn-sm" data-name="${escapeHtml((session.name || '').trim())}" onclick="editSessionName(${classId}, ${session.id}, this)">編輯名稱</button>`);
+    function iconBtn(iconClass, title, onclick) {
+      return `<button type="button" class="icon-btn" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" onclick="${onclick}"><i class="${iconClass}"></i></button>`;
+    }
+
+    function sessionStatusCell(classId, session, courseStatus) {
+      const active = isSessionActive(session, courseStatus);
+      const label = active ? '進行中' : '已結束';
+      const cls = active ? 'tag-active' : 'tag-ended';
+      if (courseStatus === 'ended') {
+        return `<span class="tag ${cls}">${label}</span>`;
       }
-      buttons.push(`<button type="button" class="btn-secondary btn-sm" onclick="editSessionExpiresAt(${classId}, ${session.id}, '${escapeHtml(session.expires_at || '')}')">編輯到期時間</button>`);
-      if (!courseEnded) {
-        if (ended) {
-          buttons.push(`<button type="button" class="btn-secondary btn-sm" onclick="setSessionStatus(${classId}, ${session.id}, 'active')">重新開啟</button>`);
-        } else {
-          buttons.push(`<button type="button" class="btn-danger btn-sm" onclick="setSessionStatus(${classId}, ${session.id}, 'ended')">結束課堂</button>`);
-        }
+      if (active) {
+        return `<button type="button" class="tag tag-clickable ${cls}" title="結束課堂" onclick="endSessionNow(${classId}, ${session.id})">${label}</button>`;
       }
-      return buttons.join(' ');
+      return `<button type="button" class="tag tag-clickable ${cls}" title="設定到期時間以重新開啟" onclick="beginEditSessionExpires(${classId}, ${session.id}, '${escapeHtml(session.expires_at || '')}')">${label}</button>`;
     }
 
     function keyStatusTag(key) {
       if (!key.session_id) return renderStatusTag('key', 'valid');
-      if (isSessionExpired(key.expires_at)) return renderStatusTag('key', 'expired');
+      if (isSessionExpired(key.expires_at)) return renderStatusTag('key', 'ended');
       return renderStatusTag('key', 'active');
     }
 
-    function sessionNameCell(session) {
+    function sessionNameCell(classId, session, allowOwnerActions) {
+      const rawName = (session.name || '').trim();
       const label = escapeHtml(sessionDisplayName(session));
       const when = session.session_at || session.created_at;
       const sub = when
         ? `<span class="session-name-sub">${escapeHtml(formatLocalDateTime(when))}</span>`
         : '';
-      return `${label}${sub}`;
+      const edit = allowOwnerActions
+        ? iconBtn('fas fa-pen', '編輯名稱', `beginEditSessionName(${classId}, ${session.id}, this)`)
+        : '';
+      return `<div class="cell-with-action" data-session-id="${session.id}" data-name="${escapeHtml(rawName)}">
+        <div class="cell-main"><span class="session-name-label">${label}</span>${sub}</div>
+        ${edit}
+      </div>`;
+    }
+
+    function sessionInviteCell(session, allowOwnerActions) {
+      const code = escapeHtml(session.invite_code || '');
+      const copy = allowOwnerActions
+        ? `<button type="button" class="icon-btn copy-invite-btn" title="複製邀請碼" aria-label="複製邀請碼" data-code="${code}" onclick="copyInviteCode(this)"><i class="fas fa-copy"></i></button>`
+        : '';
+      return `<div class="cell-with-action"><code>${code}</code>${copy}</div>`;
+    }
+
+    function sessionExpiresCell(classId, session) {
+      const display = escapeHtml(formatLocalDateTime(session.expires_at));
+      const iso = escapeHtml(session.expires_at || '');
+      return `<div class="cell-with-action" id="expires-cell-${session.id}" data-expires="${iso}">
+        <span class="expires-label">${display}</span>
+        ${iconBtn('fas fa-pen', '編輯到期時間', `beginEditSessionExpires(${classId}, ${session.id}, '${iso}')`)}
+      </div>`;
     }
 
     function filterCourses(classes, status, query) {
@@ -601,6 +620,23 @@
         const original = buttonEl.textContent;
         buttonEl.textContent = '已複製';
         setTimeout(() => { buttonEl.textContent = original; }, 1500);
+      } catch (err) {
+        window.prompt('請手動複製：', value);
+      }
+    }
+
+    async function copyInviteCode(buttonEl) {
+      const value = buttonEl?.dataset?.code || '';
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const icon = buttonEl.querySelector('i');
+        if (icon) {
+          icon.className = 'fas fa-check';
+          setTimeout(() => { icon.className = 'fas fa-copy'; }, 1500);
+        } else {
+          buttonEl.title = '已複製';
+        }
       } catch (err) {
         window.prompt('請手動複製：', value);
       }
@@ -1163,13 +1199,14 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
+      const colCount = 5 + (allowOwnerActions ? 3 : 0) + (showRedemptions ? 1 : 0);
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}<th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}</tr>
         ${sessions.map(s => `
           <tr>
-            <td>${sessionNameCell(s)}</td>
+            <td>${sessionNameCell(classId, s, allowOwnerActions)}</td>
             <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
-            <td>${sessionStatusTag(s, courseStatus)}</td>
+            <td>${sessionStatusCell(classId, s, courseStatus)}</td>
             ${allowOwnerActions ? `
             <td>
               <label class="session-image-toggle">
@@ -1195,13 +1232,12 @@
                 <span>${sessionPromptLoggingEnabled(s) ? '開啟' : '關閉'}</span>
               </label>
             </td>` : ''}
-            <td><code>${escapeHtml(s.invite_code)}</code></td>
-            <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
+            <td>${sessionInviteCell(s, allowOwnerActions)}</td>
+            <td>${sessionExpiresCell(classId, s)}</td>
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
-            <td>${sessionActionButtons(classId, s, { allowOwnerActions, courseStatus })}</td>
           </tr>
           ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="10"><div id="redemption-body-${s.id}"></div></td>
+            <td colspan="${colCount}"><div id="redemption-body-${s.id}"></div></td>
           </tr>` : ''}
         `).join('')}
       </table>`;
@@ -1319,53 +1355,113 @@
       await loadClassSessions(classId);
     }
 
-    async function editSessionName(classId, sessionId, buttonEl) {
-      const current = (buttonEl?.dataset?.name || '').trim();
-      const label = window.prompt('請輸入課堂名稱', current);
-      if (label === null) return;
-      const name = label.trim();
-      if (!name) {
-        alert('請輸入課堂名稱');
-        return;
-      }
-      await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({name}),
+    function beginEditSessionName(classId, sessionId, buttonEl) {
+      const cell = buttonEl?.closest('.cell-with-action');
+      if (!cell || cell.querySelector('input.inline-edit')) return;
+      const current = (cell.dataset.name || '').trim();
+      const main = cell.querySelector('.cell-main');
+      const original = main.innerHTML;
+      main.innerHTML = `<input type="text" class="inline-edit" value="${escapeHtml(current)}" maxlength="80" />`;
+      const input = main.querySelector('input');
+      let finished = false;
+      const restore = () => {
+        if (finished) return;
+        finished = true;
+        main.innerHTML = original;
+      };
+      const save = async () => {
+        if (finished) return;
+        const name = (input.value || '').trim();
+        if (!name) {
+          alert('請輸入課堂名稱');
+          input.focus();
+          return;
+        }
+        if (name === current) {
+          restore();
+          return;
+        }
+        finished = true;
+        input.disabled = true;
+        try {
+          await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name }),
+          });
+          await reloadSessionViews(classId);
+        } catch (err) {
+          finished = false;
+          input.disabled = false;
+          alert(err.message || String(err));
+          input.focus();
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); restore(); }
       });
-      await reloadSessionViews(classId);
+      input.addEventListener('blur', () => { setTimeout(save, 0); });
+      input.focus();
+      input.select();
     }
 
-    async function editSessionExpiresAt(classId, sessionId, currentIso) {
-      const current = isoToDatetimeLocalValue(currentIso);
-      const label = window.prompt('請輸入新的到期時間（本地時間，格式 YYYY-MM-DDTHH:MM）', current);
-      if (label === null) return;
-      const expiresAt = datetimeLocalToUtcIso(label.trim());
-      if (!expiresAt) {
-        alert('到期時間格式無效');
-        return;
-      }
-      await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ expires_at: expiresAt }),
+    function beginEditSessionExpires(classId, sessionId, currentIso) {
+      const cell = document.getElementById(`expires-cell-${sessionId}`);
+      if (!cell || cell.querySelector('input.inline-edit')) return;
+      const current = isoToDatetimeLocalValue(currentIso || cell.dataset.expires || '');
+      const original = cell.innerHTML;
+      cell.innerHTML = `<input type="datetime-local" class="inline-edit inline-edit-datetime" value="${escapeHtml(current)}" />`;
+      const input = cell.querySelector('input');
+      let finished = false;
+      const restore = () => {
+        if (finished) return;
+        finished = true;
+        cell.innerHTML = original;
+      };
+      const save = async () => {
+        if (finished) return;
+        const expiresAt = datetimeLocalToUtcIso((input.value || '').trim());
+        if (!expiresAt) {
+          alert('到期時間格式無效');
+          input.focus();
+          return;
+        }
+        const prevIso = currentIso || cell.dataset.expires || '';
+        if (isoToDatetimeLocalValue(prevIso) === input.value) {
+          restore();
+          return;
+        }
+        finished = true;
+        input.disabled = true;
+        try {
+          await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ expires_at: expiresAt }),
+          });
+          await reloadSessionViews(classId);
+        } catch (err) {
+          finished = false;
+          input.disabled = false;
+          alert(err.message || String(err));
+          input.focus();
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); restore(); }
       });
-      await reloadSessionViews(classId);
+      input.addEventListener('blur', () => { setTimeout(save, 0); });
+      input.focus();
     }
 
-    async function setSessionStatus(classId, sessionId, status) {
-      if (status === 'ended') {
-        const ok = window.confirm(
-          '確定要結束此課堂嗎？\n\n結束後該堂已領取的 API Key 會立刻失效，也無法再領取邀請碼。之後可再重新開啟（不會自動延長到期時間）。'
-        );
-        if (!ok) return;
-      } else if (status === 'active') {
-        const ok = window.confirm(
-          '確定要重新開啟此課堂嗎？\n\n若到期時間已過，key 仍會無效，需另外編輯到期時間。'
-        );
-        if (!ok) return;
-      }
+    async function endSessionNow(classId, sessionId) {
+      const ok = window.confirm(
+        '確定要結束此課堂嗎？\n\n結束後該堂已領取的 API Key 會立刻失效，也無法再領取邀請碼。之後可把到期時間設到未來以重新開啟。'
+      );
+      if (!ok) return;
       await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: 'ended' }),
       });
       await reloadSessionViews(classId);
     }
