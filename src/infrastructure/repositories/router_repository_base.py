@@ -528,6 +528,7 @@ class RouterRepositoryBase(ABC):
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        status: str | None = None,
     ) -> dict[str, Any] | None:
         if (
             expires_at is None
@@ -535,8 +536,11 @@ class RouterRepositoryBase(ABC):
             and image_generation_enabled is None
             and tts_enabled is None
             and prompt_logging_enabled is None
+            and status is None
         ):
             raise ValueError("nothing to update")
+        if status is not None and status not in {"active", "ended"}:
+            raise ValueError("invalid session status")
         with self._connect() as conn:
             row = conn.execute(
                 self._sql("SELECT id FROM class_sessions WHERE id = ? AND class_id = ?"),
@@ -553,13 +557,19 @@ class RouterRepositoryBase(ABC):
                     (cleaned_name, session_id),
                 )
             if expires_at is not None:
+                parsed = parse_dt(expires_at)
+                if parsed is None:
+                    raise ValueError("invalid expires_at")
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                expires_value = dt(parsed)
                 conn.execute(
                     self._sql("UPDATE class_sessions SET expires_at = ? WHERE id = ?"),
-                    (expires_at, session_id),
+                    (expires_value, session_id),
                 )
                 conn.execute(
                     self._sql("UPDATE api_keys SET expires_at = ? WHERE session_id = ?"),
-                    (expires_at, session_id),
+                    (expires_value, session_id),
                 )
             if image_generation_enabled is not None:
                 conn.execute(
@@ -575,6 +585,11 @@ class RouterRepositoryBase(ABC):
                 conn.execute(
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(prompt_logging_enabled), session_id),
+                )
+            if status is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET status = ? WHERE id = ?"),
+                    (status, session_id),
                 )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),

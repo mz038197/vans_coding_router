@@ -267,3 +267,53 @@ def test_redeem_same_invite_returns_same_key(tmp_path):
     second = repo.redeem_invite(session["invite_code"], student["id"])
     assert first["api_key"] == second["api_key"]
     assert repo.verify_api_key_context(first["api_key"]) is not None
+
+
+def test_end_session_invalidates_key_and_blocks_redeem(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="test-secret"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
+    redeemed = repo.redeem_invite(session["invite_code"], student["id"])
+    assert repo.verify_api_key_context(redeemed["api_key"]) is not None
+
+    ended = repo.update_class_session(klass["id"], session["id"], status="ended")
+    assert ended["status"] == "ended"
+    assert repo.verify_api_key_context(redeemed["api_key"]) is None
+    with pytest.raises(ValueError):
+        repo.redeem_invite(session["invite_code"], student["id"])
+
+    reopened = repo.update_class_session(klass["id"], session["id"], status="active")
+    assert reopened["status"] == "active"
+    assert repo.verify_api_key_context(redeemed["api_key"]) is not None
+
+
+def test_update_session_expires_at_syncs_api_keys(tmp_path):
+    settings = RouterSettings(
+        auth=AuthSettings(session_secret="test-secret"),
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
+    redeemed = repo.redeem_invite(session["invite_code"], student["id"])
+    new_expires = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
+    updated = repo.update_class_session(klass["id"], session["id"], expires_at=new_expires)
+    assert updated is not None
+    keys = repo.get_active_keys(student["id"])
+    session_key = next(k for k in keys if k["session_id"] == session["id"])
+    assert parse_dt_iso(session_key["expires_at"]) == parse_dt_iso(updated["expires_at"])
+    assert repo.verify_api_key_context(redeemed["api_key"]) is not None
+
+
+def parse_dt_iso(value: str):
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)

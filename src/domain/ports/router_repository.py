@@ -83,6 +83,7 @@ class RouterRepositoryPort(Protocol):
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        status: str | None = None,
     ) -> dict[str, Any] | None:
         ...
 
