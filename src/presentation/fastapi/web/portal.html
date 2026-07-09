@@ -391,7 +391,7 @@
         course: { active: ['active', '進行中'], ended: ['ended', '已結束'] },
         user: { active: ['active', '有效'], inactive: ['ended', '停用'] },
         prompt: { ok: ['active', '成功'], rejected: ['rejected', '拒絕'] },
-        key: { valid: ['active', '有效'], active: ['active', '進行中'], expired: ['expired', '已過期'] },
+        key: { valid: ['active', '有效'], active: ['active', '進行中'], expired: ['expired', '已過期'], ended: ['ended', '已結束'] },
       };
       const entry = map[kind]?.[value];
       if (!entry) return escapeHtml(value || '—');
@@ -426,8 +426,37 @@
 
     function sessionStatusTag(session, courseStatus) {
       if (courseStatus === 'ended') return renderStatusTag('course', 'ended');
+      if (session.status === 'ended') return renderStatusTag('key', 'ended');
       if (isSessionExpired(session.expires_at)) return renderStatusTag('key', 'expired');
       return renderStatusTag('key', 'active');
+    }
+
+    function isoToDatetimeLocalValue(iso) {
+      if (!iso) return '';
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function sessionActionButtons(classId, session, options = {}) {
+      const allowOwnerActions = options.allowOwnerActions !== false;
+      const ended = session.status === 'ended';
+      const courseEnded = options.courseStatus === 'ended';
+      const buttons = [];
+      if (allowOwnerActions) {
+        buttons.push(`<button type="button" class="btn-secondary btn-sm copy-invite-btn" data-code="${escapeHtml(session.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>`);
+        buttons.push(`<button type="button" class="btn-secondary btn-sm" data-name="${escapeHtml((session.name || '').trim())}" onclick="editSessionName(${classId}, ${session.id}, this)">編輯名稱</button>`);
+      }
+      buttons.push(`<button type="button" class="btn-secondary btn-sm" onclick="editSessionExpiresAt(${classId}, ${session.id}, '${escapeHtml(session.expires_at || '')}')">編輯到期時間</button>`);
+      if (!courseEnded) {
+        if (ended) {
+          buttons.push(`<button type="button" class="btn-secondary btn-sm" onclick="setSessionStatus(${classId}, ${session.id}, 'active')">重新開啟</button>`);
+        } else {
+          buttons.push(`<button type="button" class="btn-danger btn-sm" onclick="setSessionStatus(${classId}, ${session.id}, 'ended')">結束課堂</button>`);
+        }
+      }
+      return buttons.join(' ');
     }
 
     function keyStatusTag(key) {
@@ -1123,22 +1152,25 @@
       renderSessionTable(classId, payload.items || []);
     }
 
-    function renderSessionTable(classId, sessions) {
+    function renderSessionTable(classId, sessions, options = {}) {
       const course = teacherClasses.find(c => c.id === classId);
-      const courseStatus = course?.status || 'active';
-      const box = document.getElementById('sessions-panel');
+      const courseStatus = options.courseStatus || course?.status || 'active';
+      const box = options.host || document.getElementById('sessions-panel');
+      const allowOwnerActions = options.allowOwnerActions !== false;
+      const showRedemptions = options.showRedemptions !== false;
       if (!box) return;
       if (!sessions.length) {
-        box.innerHTML = '<p class="hint">尚無課堂，請新增課堂。</p>';
+        box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th><th>生圖</th><th>語音</th><th>Prompt 記錄</th><th>邀請碼</th><th>key 到期</th><th>已領取</th><th>操作</th></tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}<th>操作</th></tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(s)}</td>
             <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
             <td>${sessionStatusTag(s, courseStatus)}</td>
+            ${allowOwnerActions ? `
             <td>
               <label class="session-image-toggle">
                 <input type="checkbox"
@@ -1162,18 +1194,15 @@
                   onchange="toggleSessionPromptLogging(${classId}, ${s.id}, this.checked, this)" />
                 <span>${sessionPromptLoggingEnabled(s) ? '開啟' : '關閉'}</span>
               </label>
-            </td>
+            </td>` : ''}
             <td><code>${escapeHtml(s.invite_code)}</code></td>
             <td>${escapeHtml(formatLocalDateTime(s.expires_at))}</td>
-            <td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>
-            <td>
-              <button type="button" class="btn-secondary btn-sm copy-invite-btn" data-code="${escapeHtml(s.invite_code)}" onclick="copyText(this, this.dataset.code)">複製</button>
-              <button type="button" class="btn-secondary btn-sm" data-name="${escapeHtml((s.name || '').trim())}" onclick="editSessionName(${classId}, ${s.id}, this)">編輯名稱</button>
-            </td>
+            ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
+            <td>${sessionActionButtons(classId, s, { allowOwnerActions, courseStatus })}</td>
           </tr>
-          <tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="9"><div id="redemption-body-${s.id}"></div></td>
-          </tr>
+          ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
+            <td colspan="10"><div id="redemption-body-${s.id}"></div></td>
+          </tr>` : ''}
         `).join('')}
       </table>`;
     }
@@ -1303,8 +1332,89 @@
         method: 'PATCH',
         body: JSON.stringify({name}),
       });
-      await loadClassSessions(classId);
-      await refresh();
+      await reloadSessionViews(classId);
+    }
+
+    async function editSessionExpiresAt(classId, sessionId, currentIso) {
+      const current = isoToDatetimeLocalValue(currentIso);
+      const label = window.prompt('請輸入新的到期時間（本地時間，格式 YYYY-MM-DDTHH:MM）', current);
+      if (label === null) return;
+      const expiresAt = datetimeLocalToUtcIso(label.trim());
+      if (!expiresAt) {
+        alert('到期時間格式無效');
+        return;
+      }
+      await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ expires_at: expiresAt }),
+      });
+      await reloadSessionViews(classId);
+    }
+
+    async function setSessionStatus(classId, sessionId, status) {
+      if (status === 'ended') {
+        const ok = window.confirm(
+          '確定要結束此課堂嗎？\n\n結束後該堂已領取的 API Key 會立刻失效，也無法再領取邀請碼。之後可再重新開啟（不會自動延長到期時間）。'
+        );
+        if (!ok) return;
+      } else if (status === 'active') {
+        const ok = window.confirm(
+          '確定要重新開啟此課堂嗎？\n\n若到期時間已過，key 仍會無效，需另外編輯到期時間。'
+        );
+        if (!ok) return;
+      }
+      await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      await reloadSessionViews(classId);
+    }
+
+    async function reloadSessionViews(classId) {
+      const teacherPanel = document.getElementById('sessions-panel');
+      if (teacherPanel && selectedCourseId && String(selectedCourseId) === String(classId)) {
+        await loadClassSessions(classId);
+      }
+      const adminHost = document.getElementById(`admin-sessions-${classId}`);
+      if (adminHost && !adminHost.classList.contains('hidden')) {
+        await loadAdminClassSessions(classId);
+      }
+      if (typeof refresh === 'function') {
+        try { await refresh(); } catch (_) { /* ignore */ }
+      }
+    }
+
+    async function loadAdminClassSessions(classId) {
+      const host = document.getElementById(`admin-sessions-${classId}`);
+      if (!host) return;
+      host.classList.remove('hidden');
+      host.innerHTML = '<p class="hint">載入中…</p>';
+      try {
+        const payload = await api(`/teacher/classes/${classId}/sessions`);
+        const course = (adminData?.classes?.items || []).find(c => c.id === classId);
+        renderSessionTable(classId, payload.items || [], {
+          host,
+          allowOwnerActions: false,
+          showRedemptions: false,
+          courseStatus: course?.status || 'active',
+        });
+      } catch (err) {
+        host.innerHTML = `<p class="hint">${escapeHtml(String(err.message || err))}</p>`;
+      }
+    }
+
+    function toggleAdminClassSessions(classId, buttonEl) {
+      const host = document.getElementById(`admin-sessions-${classId}`);
+      if (!host) return;
+      if (!host.classList.contains('hidden') && host.dataset.loaded === '1') {
+        host.classList.add('hidden');
+        if (buttonEl) buttonEl.textContent = '課堂';
+        return;
+      }
+      if (buttonEl) buttonEl.textContent = '收合';
+      loadAdminClassSessions(classId).then(() => {
+        host.dataset.loaded = '1';
+      });
     }
 
     async function disableClass(id) {
@@ -1496,8 +1606,20 @@
         </div>
         <div class="admin-block">
           <h4>課程</h4>
-          <table><tr><th>ID</th><th>名稱</th><th>老師</th><th>狀態</th><th>成員</th></tr>
-          ${classes.map(c => `<tr><td>${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.teacher_name || c.teacher_email || '-')}</td><td>${renderStatusTag('course', c.status)}</td><td>${c.member_count ?? 0}</td></tr>`).join('')}
+          <table><tr><th>ID</th><th>名稱</th><th>老師</th><th>狀態</th><th>成員</th><th>操作</th></tr>
+          ${classes.map(c => `
+            <tr>
+              <td>${c.id}</td>
+              <td>${escapeHtml(c.name)}</td>
+              <td>${escapeHtml(c.teacher_name || c.teacher_email || '-')}</td>
+              <td>${renderStatusTag('course', c.status)}</td>
+              <td>${c.member_count ?? 0}</td>
+              <td><button type="button" class="btn-secondary btn-sm" onclick="toggleAdminClassSessions(${c.id}, this)">課堂</button></td>
+            </tr>
+            <tr>
+              <td colspan="6"><div id="admin-sessions-${c.id}" class="hidden" data-loaded="0"></div></td>
+            </tr>
+          `).join('')}
           </table>
         </div>
         <div class="admin-block">
