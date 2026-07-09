@@ -557,3 +557,51 @@ def test_install_vscode_models_cmd_download(tmp_path):
     assert response.status_code == 200
     assert "install-vscode-models.cmd" in response.headers["content-disposition"]
     assert "ExecutionPolicy Bypass" in response.text
+
+
+def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    admin = repo.upsert_google_user("admin@school.edu", "Admin")
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    teacher_cookies = {"session_user_id": str(teacher["id"])}
+    admin_cookies = {"session_user_id": str(admin["id"])}
+    other_cookies = {"session_user_id": str(other["id"])}
+
+    end = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=teacher_cookies,
+        json={"status": "ended"},
+    )
+    assert end.status_code == 200
+    assert end.json()["status"] == "ended"
+
+    reopen = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=admin_cookies,
+        json={"status": "active"},
+    )
+    assert reopen.status_code == 200
+    assert reopen.json()["status"] == "active"
+
+    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=admin_cookies)
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["status"] == "active"
+
+    expires = "2026-12-31T15:00:00+00:00"
+    patch_expires = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=admin_cookies,
+        json={"expires_at": expires},
+    )
+    assert patch_expires.status_code == 200
+    assert patch_expires.json()["expires_at"].startswith("2026-12-31T15:00:00")
+
+    forbidden = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=other_cookies,
+        json={"status": "ended"},
+    )
+    assert forbidden.status_code == 403

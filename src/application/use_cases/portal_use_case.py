@@ -6,6 +6,7 @@ from src.infrastructure.config import RouterSettings, apply_runtime_settings, se
 
 _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
+_VALID_SESSION_STATUSES = frozenset({"active", "ended"})
 
 
 class PortalUseCase:
@@ -63,13 +64,13 @@ class PortalUseCase:
             session_at=session_at,
         )
 
-    def list_sessions(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
-        self._assert_class_owner(teacher_id, class_id)
+    def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
+        self._assert_class_owner_or_admin(user_id, class_id)
         return self.repo.list_class_sessions(class_id)
 
     def update_session(
         self,
-        teacher_id: int,
+        user_id: int,
         class_id: int,
         session_id: int,
         expires_at: str | None = None,
@@ -77,8 +78,13 @@ class PortalUseCase:
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        status: str | None = None,
     ) -> dict[str, Any] | None:
-        self._assert_class_owner(teacher_id, class_id)
+        # Class owner or admin may update any session fields (privileged and non-privileged).
+        # Admins must be allowed for non-privileged-only updates too, so permission stays consistent.
+        self._assert_class_owner_or_admin(user_id, class_id)
+        if status is not None and status not in _VALID_SESSION_STATUSES:
+            raise ValueError("invalid session status")
         return self.repo.update_class_session(
             class_id,
             session_id,
@@ -87,6 +93,7 @@ class PortalUseCase:
             image_generation_enabled=image_generation_enabled,
             tts_enabled=tts_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            status=status,
         )
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
@@ -196,6 +203,17 @@ class PortalUseCase:
         klass = self.repo.get_class(class_id)
         if not klass or klass["teacher_id"] != teacher_id:
             raise PermissionError("class not owned by teacher")
+
+    def _assert_class_owner_or_admin(self, user_id: int, class_id: int) -> None:
+        user = self.repo.get_user(user_id)
+        if not user:
+            raise PermissionError("teacher only")
+        if self._has_role(user, "admin"):
+            klass = self.repo.get_class(class_id)
+            if not klass:
+                raise PermissionError("class not found")
+            return
+        self._assert_class_owner(user_id, class_id)
 
     def _has_role(self, user: dict[str, Any], role: str) -> bool:
         return role in set(user.get("roles") or [user.get("role")])

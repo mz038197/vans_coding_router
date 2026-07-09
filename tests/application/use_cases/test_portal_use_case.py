@@ -186,3 +186,90 @@ def test_admin_can_disable_class(tmp_path):
 
     assert updated is not None
     assert updated["status"] == "ended"
+
+
+def test_admin_can_end_and_reopen_other_teacher_session(tmp_path):
+    settings = RouterSettings(database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")))
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    use_case = PortalUseCase(repo, settings)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
+
+    ended = use_case.update_session(admin["id"], klass["id"], session["id"], status="ended")
+    assert ended["status"] == "ended"
+    listed = use_case.list_sessions(admin["id"], klass["id"])
+    assert listed[0]["status"] == "ended"
+
+    reopened = use_case.update_session(admin["id"], klass["id"], session["id"], status="active")
+    assert reopened["status"] == "active"
+
+
+def test_admin_can_update_privileged_and_owner_only_fields_together(tmp_path):
+    settings = RouterSettings(database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")))
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    use_case = PortalUseCase(repo, settings)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
+
+    updated = use_case.update_session(
+        admin["id"],
+        klass["id"],
+        session["id"],
+        status="ended",
+        name="Admin renamed",
+    )
+
+    assert updated is not None
+    assert updated["status"] == "ended"
+    assert updated["name"] == "Admin renamed"
+
+
+def test_admin_can_update_non_privileged_fields_on_other_teacher_session(tmp_path):
+    settings = RouterSettings(database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")))
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    use_case = PortalUseCase(repo, settings)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
+
+    updated = use_case.update_session(
+        admin["id"],
+        klass["id"],
+        session["id"],
+        name="Admin renamed only",
+        image_generation_enabled=True,
+        tts_enabled=False,
+        prompt_logging_enabled=True,
+    )
+
+    assert updated is not None
+    assert updated["name"] == "Admin renamed only"
+    assert updated["image_generation_enabled"]
+    assert not updated["tts_enabled"]
+    assert updated["prompt_logging_enabled"]
+
+
+def test_other_teacher_cannot_end_session(tmp_path):
+    settings = RouterSettings(database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")))
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    use_case = PortalUseCase(repo, settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    other = repo.upsert_google_user("other@example.com", "Other")
+    repo.update_user(teacher["id"], role="teacher")
+    repo.update_user(other["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
+
+    with pytest.raises(PermissionError):
+        use_case.update_session(other["id"], klass["id"], session["id"], status="ended")
