@@ -171,13 +171,15 @@ class PortalUseCase:
     def admin_update_settings(
         self,
         user_id: int,
-        retention_days: int | None = None,
+        archive_after_days: int | None = None,
+        delete_after_days: int | None = None,
         student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, Any]:
         self._assert_admin(user_id)
         self.repo.update_runtime_settings(
-            retention_days=retention_days,
+            archive_after_days=archive_after_days,
+            delete_after_days=delete_after_days,
             student_default_ttl_hours=student_default_ttl_hours,
             open_registration=open_registration,
         )
@@ -186,7 +188,19 @@ class PortalUseCase:
 
     def admin_run_archive(self, user_id: int, now: datetime | None = None) -> dict[str, Any]:
         self._assert_admin(user_id)
-        return self.repo.archive_prompt_logs(now=now, retention_days=self.settings.prompt_logs.retention_days)
+        archived = self.repo.archive_prompt_logs(
+            now=now,
+            archive_after_days=self.settings.prompt_logs.archive_after_days,
+        )
+        purged = self.repo.purge_archived_prompt_logs(
+            now=now,
+            delete_after_days=self.settings.prompt_logs.delete_after_days,
+        )
+        return {"archived": archived.get("archived", 0), "deleted": purged.get("deleted", 0)}
+
+    def admin_clear_archive(self, user_id: int) -> dict[str, Any]:
+        self._assert_admin(user_id)
+        return self.repo.clear_all_archived_prompt_logs()
 
     def _assert_teacher(self, user_id: int) -> None:
         user = self.repo.get_user(user_id)

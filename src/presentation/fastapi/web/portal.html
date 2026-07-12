@@ -162,8 +162,10 @@
         <div id="adminTab" class="hidden">
           <button onclick="loadAdmin()">載入系統管理資料</button>
           <button class="btn-secondary" onclick="runArchive()">執行封存</button>
+          <button class="btn-danger" onclick="clearArchive()">刪除 archive</button>
           <h3>系統設定</h3>
-          <input id="settingRetention" type="number" placeholder="Prompt log 保留天數" />
+          <input id="settingArchiveAfter" type="number" placeholder="歸檔天數（移到 archive）" />
+          <input id="settingDeleteAfter" type="number" placeholder="刪除天數（從 archive 刪除）" />
           <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
           <select id="settingRegistration">
             <option value="true">開放注册</option>
@@ -1720,14 +1722,15 @@
         </div>
         <div class="admin-block">
           <h4>系統設定</h4>
-          <table><tr><th>Prompt 保留天數</th><th>學生預設 TTL</th><th>開放注册</th></tr>
-          <tr><td>${settings.prompt_logs?.retention_days ?? '-'}</td><td>${settings.student_default_ttl_hours ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
+          <table><tr><th>歸檔天數</th><th>刪除天數</th><th>學生預設 TTL</th><th>開放注册</th></tr>
+          <tr><td>${settings.prompt_logs?.archive_after_days ?? '-'}</td><td>${settings.prompt_logs?.delete_after_days ?? '-'}</td><td>${settings.student_default_ttl_hours ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
         </div>`;
     }
 
     function fillAdminSettingInputs(settings) {
       if (!settings) return;
-      document.getElementById('settingRetention').value = settings.prompt_logs?.retention_days ?? '';
+      document.getElementById('settingArchiveAfter').value = settings.prompt_logs?.archive_after_days ?? '';
+      document.getElementById('settingDeleteAfter').value = settings.prompt_logs?.delete_after_days ?? '';
       document.getElementById('settingTtl').value = settings.student_default_ttl_hours ?? '';
       document.getElementById('settingRegistration').value = settings.auth?.open_registration ? 'true' : 'false';
     }
@@ -1748,12 +1751,19 @@
 
     async function runArchive() {
       const result = await api('/admin/archive/run', {method:'POST'});
-      document.getElementById('adminStatus').textContent = `封存完成：${result.archived} 筆`;
+      document.getElementById('adminStatus').textContent = `封存完成：歸檔 ${result.archived} 筆，刪除 ${result.deleted ?? 0} 筆`;
+    }
+
+    async function clearArchive() {
+      if (!confirm('確定要永久刪除全部 archive 的 prompt 資料？此操作無法復原。')) return;
+      const result = await api('/admin/archive/clear', {method:'POST'});
+      document.getElementById('adminStatus').textContent = `已刪除 archive：${result.deleted} 筆`;
     }
 
     async function saveSettings() {
       const body = {
-        retention_days: Number(document.getElementById('settingRetention').value) || null,
+        archive_after_days: Number(document.getElementById('settingArchiveAfter').value) || null,
+        delete_after_days: Number(document.getElementById('settingDeleteAfter').value) || null,
         student_default_ttl_hours: Number(document.getElementById('settingTtl').value) || null,
         open_registration: document.getElementById('settingRegistration').value === 'true',
       };

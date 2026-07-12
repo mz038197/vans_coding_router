@@ -61,7 +61,8 @@ class ClassPatchRequest(BaseModel):
 
 
 class SettingsPatchRequest(BaseModel):
-    retention_days: int | None = None
+    archive_after_days: int | None = None
+    delete_after_days: int | None = None
     student_default_ttl_hours: int | None = None
     open_registration: bool | None = None
 
@@ -364,7 +365,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return portal_call(
             lambda: portal_use_case.admin_update_settings(
                 current_user_id(session_user_id),
-                retention_days=data.retention_days,
+                archive_after_days=data.archive_after_days,
+                delete_after_days=data.delete_after_days,
                 student_default_ttl_hours=data.student_default_ttl_hours,
                 open_registration=data.open_registration,
             )
@@ -373,5 +375,9 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.post("/admin/archive/run")
     async def admin_archive_run(session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: portal_use_case.admin_run_archive(current_user_id(session_user_id)))
+
+    @router.post("/admin/archive/clear")
+    async def admin_archive_clear(session_user_id: str | None = Cookie(default=None)):
+        return portal_call(lambda: portal_use_case.admin_clear_archive(current_user_id(session_user_id)))
 
     return router
