@@ -232,3 +232,17 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     row.get("response_preview") or "",
                 ),
             )
+
+    def _purge_archived_before(self, cutoff: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                self._sql("DELETE FROM prompt_logs_archive WHERE created_at < ?"),
+                (cutoff,),
+            )
+            return int(cur.rowcount or 0)
+
+    def _clear_all_archived(self) -> int:
+        with self._connect() as conn:
+            count = conn.execute(self._sql("SELECT COUNT(*) AS n FROM prompt_logs_archive")).fetchone()["n"]
+            conn.execute(self._sql("DELETE FROM prompt_logs_archive"))
+            return int(count)

@@ -221,6 +221,56 @@ class SqliteRouterRepository(RouterRepositoryBase):
             )
             conn.commit()
 
+    def _purge_archived_before(self, cutoff: str) -> int:
+        archive_dir = Path(self.settings.database.archive_dir).expanduser()
+        if not archive_dir.exists():
+            return 0
+        deleted = 0
+        for archive_path in sorted(archive_dir.glob("archive_*.db")):
+            with sqlite3.connect(archive_path) as conn:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_logs_archive'"
+                    ).fetchall()
+                }
+                if not tables:
+                    continue
+                cur = conn.execute(
+                    "DELETE FROM prompt_logs_archive WHERE created_at < ?",
+                    (cutoff,),
+                )
+                file_deleted = int(cur.rowcount or 0)
+                deleted += file_deleted
+                conn.commit()
+            if file_deleted > 0:
+                with sqlite3.connect(archive_path, isolation_level=None) as conn:
+                    conn.execute("VACUUM")
+        return deleted
+
+    def _clear_all_archived(self) -> int:
+        archive_dir = Path(self.settings.database.archive_dir).expanduser()
+        if not archive_dir.exists():
+            return 0
+        deleted = 0
+        for archive_path in sorted(archive_dir.glob("archive_*.db")):
+            with sqlite3.connect(archive_path) as conn:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_logs_archive'"
+                    ).fetchall()
+                }
+                if not tables:
+                    continue
+                count = conn.execute("SELECT COUNT(*) FROM prompt_logs_archive").fetchone()[0]
+                conn.execute("DELETE FROM prompt_logs_archive")
+                conn.commit()
+                deleted += int(count)
+            with sqlite3.connect(archive_path, isolation_level=None) as conn:
+                conn.execute("VACUUM")
+        return deleted
+
     def _after_archive(self, archived_count: int) -> None:
         if archived_count <= 0:
             return

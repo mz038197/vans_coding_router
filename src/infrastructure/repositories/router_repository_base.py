@@ -891,14 +891,17 @@ class RouterRepositoryBase(ABC):
 
     def update_runtime_settings(
         self,
-        retention_days: int | None = None,
+        archive_after_days: int | None = None,
+        delete_after_days: int | None = None,
         student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, str]:
         updates: list[tuple[str, str]] = []
         now = dt(utc_now())
-        if retention_days is not None:
-            updates.append(("retention_days", str(retention_days)))
+        if archive_after_days is not None:
+            updates.append(("archive_after_days", str(archive_after_days)))
+        if delete_after_days is not None:
+            updates.append(("delete_after_days", str(delete_after_days)))
         if student_default_ttl_hours is not None:
             updates.append(("student_default_ttl_hours", str(student_default_ttl_hours)))
         if open_registration is not None:
@@ -925,10 +928,12 @@ class RouterRepositoryBase(ABC):
                     )
         return self.get_runtime_settings()
 
-    def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
+    def archive_prompt_logs(self, now: datetime | None = None, archive_after_days: int | None = None) -> dict[str, Any]:
         current = now or utc_now()
         cutoff = current - timedelta(
-            days=retention_days if retention_days is not None else self.settings.prompt_logs.retention_days
+            days=archive_after_days
+            if archive_after_days is not None
+            else self.settings.prompt_logs.archive_after_days
         )
         with self._connect() as conn:
             rows = conn.execute(
@@ -953,6 +958,27 @@ class RouterRepositoryBase(ABC):
                 )
         self._after_archive(len(rows))
         return {"archived": len(rows)}
+
+    def purge_archived_prompt_logs(
+        self, now: datetime | None = None, delete_after_days: int | None = None
+    ) -> dict[str, Any]:
+        current = now or utc_now()
+        cutoff = current - timedelta(
+            days=delete_after_days
+            if delete_after_days is not None
+            else self.settings.prompt_logs.delete_after_days
+        )
+        deleted = self._purge_archived_before(dt(cutoff))
+        return {"deleted": deleted}
+
+    def clear_all_archived_prompt_logs(self) -> dict[str, Any]:
+        return {"deleted": self._clear_all_archived()}
+
+    def _purge_archived_before(self, cutoff: str) -> int:
+        raise NotImplementedError
+
+    def _clear_all_archived(self) -> int:
+        raise NotImplementedError
 
     def _after_archive(self, archived_count: int) -> None:
         return

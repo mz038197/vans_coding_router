@@ -143,11 +143,20 @@ class RouterRepositoryPort(Protocol):
 
     def update_runtime_settings(
         self,
-        retention_days: int | None = None,
+        archive_after_days: int | None = None,
+        delete_after_days: int | None = None,
         student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, str]:
         ...
 
-    def archive_prompt_logs(self, now: datetime | None = None, retention_days: int | None = None) -> dict[str, Any]:
+    def archive_prompt_logs(self, now: datetime | None = None, archive_after_days: int | None = None) -> dict[str, Any]:
+        ...
+
+    def purge_archived_prompt_logs(
+        self, now: datetime | None = None, delete_after_days: int | None = None
+    ) -> dict[str, Any]:
+        ...
+
+    def clear_all_archived_prompt_logs(self) -> dict[str, Any]:
         ...
