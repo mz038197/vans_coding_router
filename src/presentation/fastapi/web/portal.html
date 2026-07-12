@@ -204,6 +204,7 @@
     let adminUsers = [];
     let adminData = null;
     let adminUserSearchQuery = '';
+    let adminPromptUsage = {};
     let teacherClasses = [];
     let monitorSessions = [];
     let portalPublicUrl = 'https://ai.vanscoding.com';
@@ -1637,16 +1638,50 @@
       if (!host) return;
       const users = filteredAdminUsers();
       host.innerHTML = `
-        <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>註冊時間</th><th>角色</th><th>狀態</th></tr>
-        ${users.map(u => `<tr>
+        <table><tr><th>ID</th><th>姓名</th><th>Email</th><th>註冊時間</th><th>角色</th><th>狀態</th><th>Prompt</th><th>操作</th></tr>
+        ${users.map(u => {
+          const usage = adminPromptUsage[u.id] || {live_count: 0, archive_count: 0, total_count: 0};
+          const total = usage.total_count ?? ((usage.live_count || 0) + (usage.archive_count || 0));
+          const detail = `live ${usage.live_count || 0} / archive ${usage.archive_count || 0}`;
+          return `<tr>
           <td>${u.id}</td>
           <td>${escapeHtml(u.name)}</td>
           <td>${escapeHtml(u.email)}</td>
           <td>${formatLocalDateTime(u.created_at)}</td>
           <td><span class="tag-row">${renderAdminUserRoleTags(u.id, u.roles || [u.role])}</span></td>
           <td>${renderAdminUserStatusTag(u.id, u.status === 'active' ? 'active' : 'inactive')}</td>
-        </tr>`).join('')}
+          <td title="${escapeHtml(detail)}">${total}</td>
+          <td><button type="button" class="btn-danger btn-sm" ${total <= 0 ? 'disabled' : ''} onclick="deleteUserPromptLogs(${u.id})">刪除 prompt</button></td>
+        </tr>`;
+        }).join('')}
         </table>`;
+    }
+
+    async function deleteUserPromptLogs(userId) {
+      const user = adminUsers.find(u => u.id === userId);
+      if (!user) return;
+      const usage = adminPromptUsage[userId] || {live_count: 0, archive_count: 0, total_count: 0};
+      const total = usage.total_count ?? ((usage.live_count || 0) + (usage.archive_count || 0));
+      if (total <= 0) {
+        document.getElementById('adminStatus').textContent = `${user.email} 沒有可刪除的 prompt`;
+        return;
+      }
+      const ok = confirm(
+        `確定永久刪除 ${user.email} 的 ${total} 筆 prompt log（live ${usage.live_count || 0} + archive ${usage.archive_count || 0}）？\n其他人不受影響。此操作無法復原。`
+      );
+      if (!ok) return;
+      try {
+        const result = await api('/admin/prompt-logs/delete', {
+          method: 'POST',
+          body: JSON.stringify({user_ids: [userId]}),
+        });
+        adminPromptUsage[userId] = {live_count: 0, archive_count: 0, total_count: 0};
+        rerenderAdminUsersTable();
+        document.getElementById('adminStatus').textContent =
+          `已刪除 ${user.email}：live ${result.deleted_live ?? 0}、archive ${result.deleted_archive ?? 0}`;
+      } catch (err) {
+        document.getElementById('adminStatus').textContent = String(err.message || err);
+      }
     }
 
     async function toggleUserRole(userId, role) {
@@ -1740,9 +1775,14 @@
         users: await api('/admin/users'),
         classes: await api('/admin/classes'),
         settings: await api('/admin/settings'),
+        promptUsage: await api('/admin/prompt-logs/usage'),
       };
       adminData = data;
       adminUsers = data.users.items || [];
+      adminPromptUsage = {};
+      for (const item of (data.promptUsage.items || [])) {
+        adminPromptUsage[item.user_id] = item;
+      }
       document.getElementById('admin').innerHTML = renderAdminPanel(data);
       rerenderAdminUsersTable();
       fillAdminSettingInputs(data.settings);

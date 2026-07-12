@@ -67,6 +67,10 @@ class SettingsPatchRequest(BaseModel):
     open_registration: bool | None = None
 
 
+class PromptLogDeleteRequest(BaseModel):
+    user_ids: list[int]
+
+
 def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSettings) -> APIRouter:
     router = APIRouter(tags=["Portal"])
     oauth = GoogleOAuthService(
@@ -379,5 +383,23 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.post("/admin/archive/clear")
     async def admin_archive_clear(session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: portal_use_case.admin_clear_archive(current_user_id(session_user_id)))
+
+    @router.get("/admin/prompt-logs/usage")
+    async def admin_prompt_log_usage(session_user_id: str | None = Cookie(default=None)):
+        return portal_call(
+            lambda: {"items": portal_use_case.admin_prompt_log_usage(current_user_id(session_user_id))}
+        )
+
+    @router.post("/admin/prompt-logs/delete")
+    async def admin_delete_prompt_logs(
+        data: PromptLogDeleteRequest,
+        session_user_id: str | None = Cookie(default=None),
+    ):
+        return portal_call(
+            lambda: portal_use_case.admin_delete_user_prompt_logs(
+                current_user_id(session_user_id),
+                data.user_ids,
+            )
+        )
 
     return router

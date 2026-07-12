@@ -202,6 +202,17 @@ class PortalUseCase:
         self._assert_admin(user_id)
         return self.repo.clear_all_archived_prompt_logs()
 
+    def admin_prompt_log_usage(self, user_id: int) -> list[dict[str, Any]]:
+        self._assert_admin(user_id)
+        return self.repo.prompt_log_usage_by_user()
+
+    def admin_delete_user_prompt_logs(self, user_id: int, target_user_ids: list[int]) -> dict[str, Any]:
+        self._assert_admin(user_id)
+        ids = [int(value) for value in target_user_ids]
+        if not ids:
+            raise ValueError("user_ids required")
+        return self.repo.delete_prompt_logs_for_users(ids)
+
     def _assert_teacher(self, user_id: int) -> None:
         user = self.repo.get_user(user_id)
         if not user or not (self._has_role(user, "teacher") or self._has_role(user, "admin")):
