@@ -20,5 +20,6 @@ class AppContainer:
     portal_use_case: PortalUseCase | None = None
     lobby_use_case: LobbyHostUseCase | None = None
     archive_repo: Any | None = None
-    prompt_log_retention_days: int = 30
+    prompt_log_archive_after_days: int = 15
+    prompt_log_delete_after_days: int = 30
     router_settings: Any | None = None

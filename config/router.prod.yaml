@@ -15,7 +15,8 @@ database:
   url: ""
 
 prompt_logs:
-  retention_days: 30
+  archive_after_days: 15
+  delete_after_days: 30
 
 providers:
   ollama_cloud:

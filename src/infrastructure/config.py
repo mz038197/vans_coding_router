@@ -25,7 +25,8 @@ class DatabaseSettings:
 
 @dataclass(frozen=True)
 class PromptLogSettings:
-    retention_days: int = 30
+    archive_after_days: int = 15
+    delete_after_days: int = 30
 
 
 CAPABILITY_AUDIO_SPEECH = "audio_speech"
@@ -79,6 +80,18 @@ class RouterSettings:
     routing: RoutingSettings = field(default_factory=RoutingSettings)
 
 
+def _parse_prompt_log_settings(raw: dict[str, Any] | None) -> PromptLogSettings:
+    data = raw or {}
+    if "archive_after_days" in data:
+        archive_after_days = int(data["archive_after_days"])
+    elif "retention_days" in data:
+        archive_after_days = int(data["retention_days"])
+    else:
+        archive_after_days = 15
+    delete_after_days = int(data["delete_after_days"]) if "delete_after_days" in data else 30
+    return PromptLogSettings(archive_after_days=archive_after_days, delete_after_days=delete_after_days)
+
+
 def load_router_settings(path: str | None = None) -> RouterSettings:
     config_path = Path(path).expanduser() if path else Path("~/.vans_coding_router/router.yaml").expanduser()
     if not config_path.exists():
@@ -108,7 +121,7 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
             archive_dir=str(database.get("archive_dir", "~/.vans_coding_router/archive")),
             url=str(database.get("url", "")),
         ),
-        prompt_logs=PromptLogSettings(retention_days=int(prompt_logs.get("retention_days", 30))),
+        prompt_logs=_parse_prompt_log_settings(prompt_logs),
         providers=providers,
         routing=RoutingSettings(
             default_provider=str(routing.get("default_provider", "")),
@@ -169,11 +182,16 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
 def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> RouterSettings:
     if not overrides:
         return base
-    retention_days = base.prompt_logs.retention_days
+    archive_after_days = base.prompt_logs.archive_after_days
+    delete_after_days = base.prompt_logs.delete_after_days
     student_default_ttl_hours = base.student_default_ttl_hours
     open_registration = base.auth.open_registration
-    if "retention_days" in overrides:
-        retention_days = int(overrides["retention_days"])
+    if "archive_after_days" in overrides:
+        archive_after_days = int(overrides["archive_after_days"])
+    elif "retention_days" in overrides:
+        archive_after_days = int(overrides["retention_days"])
+    if "delete_after_days" in overrides:
+        delete_after_days = int(overrides["delete_after_days"])
     if "student_default_ttl_hours" in overrides:
         student_default_ttl_hours = int(overrides["student_default_ttl_hours"])
     if "open_registration" in overrides:
@@ -184,7 +202,11 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         student_default_ttl_hours=student_default_ttl_hours,
         auth=replace(base.auth, open_registration=open_registration),
         database=base.database,
-        prompt_logs=replace(base.prompt_logs, retention_days=retention_days),
+        prompt_logs=replace(
+            base.prompt_logs,
+            archive_after_days=archive_after_days,
+            delete_after_days=delete_after_days,
+        ),
         providers=base.providers,
         routing=base.routing,
     )
@@ -207,7 +229,10 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
             "open_registration": settings.auth.open_registration,
         },
         "student_default_ttl_hours": settings.student_default_ttl_hours,
-        "prompt_logs": {"retention_days": settings.prompt_logs.retention_days},
+        "prompt_logs": {
+            "archive_after_days": settings.prompt_logs.archive_after_days,
+            "delete_after_days": settings.prompt_logs.delete_after_days,
+        },
         "providers": {
             name: {
                 "type": provider.type,
@@ -226,7 +251,8 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
 
 def update_non_secret_settings(
     path: str,
-    retention_days: int | None = None,
+    archive_after_days: int | None = None,
+    delete_after_days: int | None = None,
     student_default_ttl_hours: int | None = None,
     open_registration: bool | None = None,
 ) -> RouterSettings:
@@ -235,8 +261,13 @@ def update_non_secret_settings(
     data = data or {}
     if student_default_ttl_hours is not None:
         data["student_default_ttl_hours"] = student_default_ttl_hours
-    if retention_days is not None:
-        data.setdefault("prompt_logs", {})["retention_days"] = retention_days
+    if archive_after_days is not None or delete_after_days is not None:
+        prompt_logs = data.setdefault("prompt_logs", {})
+        if archive_after_days is not None:
+            prompt_logs["archive_after_days"] = archive_after_days
+            prompt_logs.pop("retention_days", None)
+        if delete_after_days is not None:
+            prompt_logs["delete_after_days"] = delete_after_days
     if open_registration is not None:
         data.setdefault("auth", {})["open_registration"] = open_registration
     config_path.parent.mkdir(parents=True, exist_ok=True)

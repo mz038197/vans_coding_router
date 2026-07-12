@@ -51,6 +51,7 @@ def build_container(
         portal_use_case=portal_use_case,
         lobby_use_case=lobby_use_case,
         archive_repo=api_key_repo,
-        prompt_log_retention_days=effective_settings.prompt_logs.retention_days,
+        prompt_log_archive_after_days=effective_settings.prompt_logs.archive_after_days,
+        prompt_log_delete_after_days=effective_settings.prompt_logs.delete_after_days,
         router_settings=effective_settings,
     )
