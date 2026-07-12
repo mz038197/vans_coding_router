@@ -240,6 +240,58 @@ def test_admin_clear_archive_endpoint(tmp_path):
     assert response.json()["deleted"] == 1
 
 
+def test_admin_prompt_log_usage_and_delete_by_user(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    user_a = repo.upsert_google_user("a@example.com", "A")
+    user_b = repo.upsert_google_user("b@example.com", "B")
+    klass = repo.create_class(teacher["id"], "Class", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    key_a = repo.redeem_invite(session["invite_code"], user_a["id"])["api_key"]
+    key_b = repo.redeem_invite(session["invite_code"], user_b["id"])["api_key"]
+    ctx_a = repo.verify_api_key_context(key_a)
+    ctx_b = repo.verify_api_key_context(key_b)
+    assert ctx_a is not None and ctx_b is not None
+    repo.log_prompt(ctx_a, "a log", "a log", "fake-model", "ok", None)
+    repo.log_prompt(ctx_b, "b log", "b log", "fake-model", "ok", None)
+
+    forbidden = client.get(
+        "/admin/prompt-logs/usage",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    assert forbidden.status_code == 403
+
+    usage_response = client.get(
+        "/admin/prompt-logs/usage",
+        cookies={"session_user_id": str(admin["id"])},
+    )
+    assert usage_response.status_code == 200
+    usage = {item["user_id"]: item for item in usage_response.json()["items"]}
+    assert usage[user_a["id"]]["live_count"] == 1
+    assert usage[user_b["id"]]["live_count"] == 1
+
+    empty = client.post(
+        "/admin/prompt-logs/delete",
+        cookies={"session_user_id": str(admin["id"])},
+        json={"user_ids": []},
+    )
+    assert empty.status_code == 400
+
+    delete_response = client.post(
+        "/admin/prompt-logs/delete",
+        cookies={"session_user_id": str(admin["id"])},
+        json={"user_ids": [user_a["id"]]},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0}
+
+    remaining = repo.list_prompt_logs(teacher["id"], klass["id"])
+    assert [row["raw_prompt"] for row in remaining] == ["b log"]
+
+
 def test_admin_update_user_roles_endpoint(tmp_path):
     client, repo, _ = _client(tmp_path)
     admin = repo.upsert_google_user("admin@example.com", "Admin")

@@ -180,6 +180,59 @@ def test_clear_all_archived_prompt_logs(tmp_path):
     assert count == 0
 
 
+def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    user_a = repo.upsert_google_user("a@example.com", "A")
+    user_b = repo.upsert_google_user("b@example.com", "B")
+    klass = repo.create_class(teacher["id"], "Class", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    key_a = repo.redeem_invite(session["invite_code"], user_a["id"])["api_key"]
+    key_b = repo.redeem_invite(session["invite_code"], user_b["id"])["api_key"]
+    ctx_a = repo.verify_api_key_context(key_a)
+    ctx_b = repo.verify_api_key_context(key_b)
+    assert ctx_a is not None and ctx_b is not None
+    repo.log_prompt(ctx_a, "a-live", "a-live", "fake-model", "ok", None)
+    repo.log_prompt(ctx_b, "b-live", "b-live", "fake-model", "ok", None)
+    repo.set_class_status(klass["id"], "ended")
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))["archived"] == 2
+
+    # new class for fresh live logs after archive
+    live_class = repo.create_class(teacher["id"], "Live", None, 2)
+    live_session = repo.create_class_session(live_class["id"], teacher["id"], "Live Session")
+    key_a2 = repo.redeem_invite(live_session["invite_code"], user_a["id"])["api_key"]
+    key_b2 = repo.redeem_invite(live_session["invite_code"], user_b["id"])["api_key"]
+    ctx_a2 = repo.verify_api_key_context(key_a2)
+    ctx_b2 = repo.verify_api_key_context(key_b2)
+    assert ctx_a2 is not None and ctx_b2 is not None
+    repo.log_prompt(ctx_a2, "a-again", "a-again", "fake-model", "ok", None)
+    repo.log_prompt(ctx_b2, "b-again", "b-again", "fake-model", "ok", None)
+
+    usage = {item["user_id"]: item for item in repo.prompt_log_usage_by_user()}
+    assert usage[user_a["id"]]["live_count"] == 1
+    assert usage[user_a["id"]]["archive_count"] == 1
+    assert usage[user_b["id"]]["live_count"] == 1
+    assert usage[user_b["id"]]["archive_count"] == 1
+
+    assert repo.delete_prompt_logs_for_users([]) == {"deleted_live": 0, "deleted_archive": 0}
+    result = repo.delete_prompt_logs_for_users([user_a["id"]])
+    assert result == {"deleted_live": 1, "deleted_archive": 1}
+
+    remaining = repo.list_prompt_logs(teacher["id"], live_class["id"])
+    assert [row["raw_prompt"] for row in remaining] == ["b-again"]
+    with sqlite3.connect(tmp_path / "archive" / "archive_2026.db") as conn:
+        archived = [row[0] for row in conn.execute("SELECT raw_prompt FROM prompt_logs_archive").fetchall()]
+    assert archived == ["b-live"]
+    usage_after = {item["user_id"]: item for item in repo.prompt_log_usage_by_user()}
+    assert usage_after[user_a["id"]]["total_count"] == 0
+    assert usage_after[user_b["id"]]["total_count"] == 2
+
+
 def test_session_key_hash_updates_when_session_secret_rotates(tmp_path):
     settings = RouterSettings(
         auth=AuthSettings(session_secret="secret-a"),
