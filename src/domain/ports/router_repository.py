@@ -160,3 +160,9 @@ class RouterRepositoryPort(Protocol):
 
     def clear_all_archived_prompt_logs(self) -> dict[str, Any]:
         ...
+
+    def prompt_log_usage_by_user(self) -> list[dict[str, Any]]:
+        ...
+
+    def delete_prompt_logs_for_users(self, user_ids: list[int]) -> dict[str, Any]:
+        ...

@@ -974,6 +974,71 @@ class RouterRepositoryBase(ABC):
     def clear_all_archived_prompt_logs(self) -> dict[str, Any]:
         return {"deleted": self._clear_all_archived()}
 
+    def prompt_log_usage_by_user(self) -> list[dict[str, Any]]:
+        archive_counts = self._archived_counts_by_user()
+        with self._connect() as conn:
+            rows = conn.execute(
+                self._sql(
+                    """
+                    SELECT
+                        u.id AS user_id,
+                        u.email,
+                        u.name,
+                        COALESCE(live.cnt, 0) AS live_count
+                    FROM users u
+                    LEFT JOIN (
+                        SELECT user_id, COUNT(*) AS cnt
+                        FROM prompt_logs
+                        WHERE user_id IS NOT NULL
+                        GROUP BY user_id
+                    ) live ON live.user_id = u.id
+                    ORDER BY u.id
+                    """
+                )
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            user_id = int(item["user_id"])
+            live_count = int(item["live_count"] or 0)
+            archive_count = int(archive_counts.get(user_id, 0))
+            items.append(
+                {
+                    "user_id": user_id,
+                    "email": item["email"],
+                    "name": item["name"],
+                    "live_count": live_count,
+                    "archive_count": archive_count,
+                    "total_count": live_count + archive_count,
+                }
+            )
+        return items
+
+    def delete_prompt_logs_for_users(self, user_ids: list[int]) -> dict[str, Any]:
+        ids = sorted({int(user_id) for user_id in user_ids})
+        if not ids:
+            return {"deleted_live": 0, "deleted_archive": 0}
+        placeholders = ", ".join("?" for _ in ids)
+        with self._connect() as conn:
+            cur = conn.execute(
+                self._sql(f"DELETE FROM prompt_logs WHERE user_id IN ({placeholders})"),
+                tuple(ids),
+            )
+            deleted_live = int(cur.rowcount or 0)
+        deleted_archive = self._delete_archived_for_users(ids)
+        if deleted_live > 0:
+            self._after_user_prompt_delete(deleted_live)
+        return {"deleted_live": deleted_live, "deleted_archive": deleted_archive}
+
+    def _archived_counts_by_user(self) -> dict[int, int]:
+        raise NotImplementedError
+
+    def _delete_archived_for_users(self, user_ids: list[int]) -> int:
+        raise NotImplementedError
+
+    def _after_user_prompt_delete(self, deleted_live: int) -> None:
+        return
+
     def _purge_archived_before(self, cutoff: str) -> int:
         raise NotImplementedError
 

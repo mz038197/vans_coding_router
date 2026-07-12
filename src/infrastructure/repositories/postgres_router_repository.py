@@ -246,3 +246,28 @@ class PostgresRouterRepository(RouterRepositoryBase):
             count = conn.execute(self._sql("SELECT COUNT(*) AS n FROM prompt_logs_archive")).fetchone()["n"]
             conn.execute(self._sql("DELETE FROM prompt_logs_archive"))
             return int(count)
+
+    def _archived_counts_by_user(self) -> dict[int, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                self._sql(
+                    """
+                    SELECT user_id, COUNT(*) AS cnt
+                    FROM prompt_logs_archive
+                    WHERE user_id IS NOT NULL
+                    GROUP BY user_id
+                    """
+                )
+            ).fetchall()
+        return {int(row["user_id"]): int(row["cnt"]) for row in rows}
+
+    def _delete_archived_for_users(self, user_ids: list[int]) -> int:
+        if not user_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in user_ids)
+        with self._connect() as conn:
+            cur = conn.execute(
+                self._sql(f"DELETE FROM prompt_logs_archive WHERE user_id IN ({placeholders})"),
+                tuple(user_ids),
+            )
+            return int(cur.rowcount or 0)

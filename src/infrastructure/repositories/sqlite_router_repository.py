@@ -276,3 +276,67 @@ class SqliteRouterRepository(RouterRepositoryBase):
             return
         with sqlite3.connect(self.db_path, isolation_level=None) as conn:
             conn.execute("VACUUM")
+
+    def _archived_counts_by_user(self) -> dict[int, int]:
+        archive_dir = Path(self.settings.database.archive_dir).expanduser()
+        if not archive_dir.exists():
+            return {}
+        counts: dict[int, int] = {}
+        for archive_path in sorted(archive_dir.glob("archive_*.db")):
+            with sqlite3.connect(archive_path) as conn:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_logs_archive'"
+                    ).fetchall()
+                }
+                if not tables:
+                    continue
+                rows = conn.execute(
+                    """
+                    SELECT user_id, COUNT(*) AS cnt
+                    FROM prompt_logs_archive
+                    WHERE user_id IS NOT NULL
+                    GROUP BY user_id
+                    """
+                ).fetchall()
+                for user_id, cnt in rows:
+                    key = int(user_id)
+                    counts[key] = counts.get(key, 0) + int(cnt)
+        return counts
+
+    def _delete_archived_for_users(self, user_ids: list[int]) -> int:
+        if not user_ids:
+            return 0
+        archive_dir = Path(self.settings.database.archive_dir).expanduser()
+        if not archive_dir.exists():
+            return 0
+        placeholders = ", ".join("?" for _ in user_ids)
+        deleted = 0
+        for archive_path in sorted(archive_dir.glob("archive_*.db")):
+            with sqlite3.connect(archive_path) as conn:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_logs_archive'"
+                    ).fetchall()
+                }
+                if not tables:
+                    continue
+                cur = conn.execute(
+                    f"DELETE FROM prompt_logs_archive WHERE user_id IN ({placeholders})",
+                    tuple(user_ids),
+                )
+                file_deleted = int(cur.rowcount or 0)
+                deleted += file_deleted
+                conn.commit()
+            if file_deleted > 0:
+                with sqlite3.connect(archive_path, isolation_level=None) as conn:
+                    conn.execute("VACUUM")
+        return deleted
+
+    def _after_user_prompt_delete(self, deleted_live: int) -> None:
+        if deleted_live <= 0:
+            return
+        with sqlite3.connect(self.db_path, isolation_level=None) as conn:
+            conn.execute("VACUUM")
