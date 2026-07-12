@@ -186,7 +186,7 @@ def test_admin_archive_run_endpoint(tmp_path):
     response = client.post("/admin/archive/run", cookies={"session_user_id": str(admin["id"])})
 
     assert response.status_code == 200
-    assert response.json() == {"archived": 0}
+    assert response.json() == {"archived": 0, "deleted": 0}
 
 
 def test_admin_update_settings_endpoint(tmp_path):
@@ -197,15 +197,47 @@ def test_admin_update_settings_endpoint(tmp_path):
     response = client.patch(
         "/admin/settings",
         cookies={"session_user_id": str(admin["id"])},
-        json={"retention_days": 10, "student_default_ttl_hours": 4, "open_registration": False},
+        json={
+            "archive_after_days": 10,
+            "delete_after_days": 20,
+            "student_default_ttl_hours": 4,
+            "open_registration": False,
+        },
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["prompt_logs"]["retention_days"] == 10
+    assert payload["prompt_logs"]["archive_after_days"] == 10
+    assert payload["prompt_logs"]["delete_after_days"] == 20
     assert payload["student_default_ttl_hours"] == 4
     assert payload["auth"]["open_registration"] is False
-    assert repo.get_runtime_settings()["retention_days"] == "10"
+    assert repo.get_runtime_settings()["archive_after_days"] == "10"
+    assert repo.get_runtime_settings()["delete_after_days"] == "20"
+
+
+def test_admin_clear_archive_endpoint(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    session = repo.create_class_session(ended["id"], teacher["id"], "Session")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    context = repo.verify_api_key_context(key)
+    assert context is not None
+    repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
+    repo.set_class_status(ended["id"], "ended")
+    repo.archive_prompt_logs()
+
+    response = client.post(
+        "/admin/archive/clear",
+        cookies={"session_user_id": str(admin["id"])},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
 
 
 def test_admin_update_user_roles_endpoint(tmp_path):

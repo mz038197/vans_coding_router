@@ -79,7 +79,7 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     assert context is not None
     repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
 
-    result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), retention_days=30)
+    result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)
     assert result["archived"] == 1
     assert repo.list_prompt_logs(teacher["id"], ended["id"]) == []
 
@@ -89,3 +89,8 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
             ("ended log",),
         ).fetchall()
     assert len(archived) == 1
+
+    cleared = repo.clear_all_archived_prompt_logs()
+    assert cleared["deleted"] == 1
+    with repo._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM prompt_logs_archive").fetchone()["n"] == 0

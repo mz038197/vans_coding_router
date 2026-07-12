@@ -76,7 +76,7 @@ def test_prompt_logs_can_be_filtered_by_time_range(tmp_path):
 def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
-        prompt_logs=PromptLogSettings(retention_days=30),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
     )
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
@@ -112,9 +112,9 @@ def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(
     with repo._connect() as conn:
         conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2025-01-01T00:00:00+00:00", "old active"))
         conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-01T00:00:00+00:00", "recent ended"))
-        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-01T00:00:00+00:00", "recent active"))
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-10T00:00:00+00:00", "recent active"))
 
-    result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), retention_days=30)
+    result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)
 
     assert result["archived"] == 2
     remaining = repo.list_prompt_logs(teacher["id"], active["id"])
@@ -126,6 +126,58 @@ def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(
     assert archived_2025[0][0] == "old active"
     assert archived_2025[0][1]
     assert archived_2026[0][0] == "recent ended"
+
+
+def test_purge_archived_prompt_logs_deletes_by_created_at(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    context = repo.verify_api_key_context(key)
+    assert context is not None
+    repo.log_prompt(context, "keep me", "keep me", "fake-model", "ok", None)
+    repo.log_prompt(context, "delete me", "delete me", "fake-model", "ok", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-05-01T00:00:00+00:00", "delete me"))
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-10T00:00:00+00:00", "keep me"))
+    now = datetime(2026, 6, 18, tzinfo=UTC)
+    assert repo.archive_prompt_logs(now=now, archive_after_days=15)["archived"] == 1
+    purged = repo.purge_archived_prompt_logs(now=now, delete_after_days=30)
+    assert purged["deleted"] == 1
+    with sqlite3.connect(tmp_path / "archive" / "archive_2026.db") as conn:
+        rows = conn.execute("SELECT raw_prompt FROM prompt_logs_archive").fetchall()
+    assert rows == []
+
+
+def test_clear_all_archived_prompt_logs(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    session = repo.create_class_session(ended["id"], teacher["id"], "Session")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    context = repo.verify_api_key_context(key)
+    assert context is not None
+    repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
+    repo.set_class_status(ended["id"], "ended")
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))["archived"] == 1
+    cleared = repo.clear_all_archived_prompt_logs()
+    assert cleared["deleted"] == 1
+    with sqlite3.connect(tmp_path / "archive" / "archive_2026.db") as conn:
+        count = conn.execute("SELECT COUNT(*) FROM prompt_logs_archive").fetchone()[0]
+    assert count == 0
 
 
 def test_session_key_hash_updates_when_session_secret_rotates(tmp_path):

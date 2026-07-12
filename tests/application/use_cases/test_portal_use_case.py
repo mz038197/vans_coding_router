@@ -116,7 +116,7 @@ def test_archive_prompt_logs_delegates_to_repository(tmp_path):
 
     result = use_case.admin_run_archive(admin["id"], now=datetime(2026, 6, 18, tzinfo=UTC))
 
-    assert result == {"archived": 0}
+    assert result == {"archived": 0, "deleted": 0}
 
 
 def test_admin_run_archive_requires_admin(tmp_path):
@@ -140,7 +140,8 @@ def test_admin_can_update_runtime_settings_in_db(tmp_path):
         f"  path: {tmp_path / 'router.db'}\n"
         f"  archive_dir: {tmp_path / 'archive'}\n"
         "prompt_logs:\n"
-        "  retention_days: 30\n",
+        "  archive_after_days: 15\n"
+        "  delete_after_days: 30\n",
         encoding="utf-8",
     )
     original_text = config_path.read_text(encoding="utf-8")
@@ -155,21 +156,25 @@ def test_admin_can_update_runtime_settings_in_db(tmp_path):
 
     summary = use_case.admin_update_settings(
         admin["id"],
-        retention_days=14,
+        archive_after_days=14,
+        delete_after_days=28,
         student_default_ttl_hours=3,
         open_registration=False,
     )
 
     assert config_path.read_text(encoding="utf-8") == original_text
     assert repo.get_runtime_settings() == {
-        "retention_days": "14",
+        "archive_after_days": "14",
+        "delete_after_days": "28",
         "student_default_ttl_hours": "3",
         "open_registration": "false",
     }
-    assert summary["prompt_logs"]["retention_days"] == 14
+    assert summary["prompt_logs"]["archive_after_days"] == 14
+    assert summary["prompt_logs"]["delete_after_days"] == 28
     assert summary["student_default_ttl_hours"] == 3
     assert summary["auth"]["open_registration"] is False
-    assert use_case.settings.prompt_logs.retention_days == 14
+    assert use_case.settings.prompt_logs.archive_after_days == 14
+    assert use_case.settings.prompt_logs.delete_after_days == 28
 
 
 def test_admin_can_disable_class(tmp_path):
