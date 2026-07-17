@@ -103,13 +103,16 @@ Copilot may still send some sub-requests to `/v1/chat/completions` (Edit / Inlin
 
 Set the API key via **Chat: Manage Language Models** → **Update API Key** (`vcr_sk_...`).
 
-## Portal one-click install (Windows)
+## Portal one-click install (Windows / macOS)
 
-Logged-in students should download **`install-vscode-models.cmd`** from the Portal **課堂邀請碼** section and double-click it.
+Logged-in students open the Portal **課堂邀請碼** section. The page detects the browser OS and shows the matching download; use **需要其他系統版本？** if you need the other installer.
 
-The `.cmd` file is self-contained (no separate `.ps1` required). It runs PowerShell with `-ExecutionPolicy Bypass` and merges the bundled **VSRouter** models.
+| OS | Download | How to run |
+|----|----------|------------|
+| Windows | `install-vscode-models.cmd` | Double-click (self-contained; runs PowerShell with `-ExecutionPolicy Bypass`) |
+| macOS | `install-vscode-models.command` | Double-click (opens Terminal). If blocked: right-click → Open, or `chmod +x` then run. Requires local `python3`. |
 
-Advanced/manual option: download `install-vscode-models.ps1` and run:
+Advanced/manual (Windows): download `install-vscode-models.ps1` and run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1
@@ -117,10 +120,10 @@ powershell -ExecutionPolicy Bypass -File .\install-vscode-models.ps1
 
 The script merges the bundled **VSRouter** provider from [`config/chatLanguageModels.vans.json`](../config/chatLanguageModels.vans.json) into:
 
-| VS Code | Path |
-|---------|------|
-| Stable | `%APPDATA%\Code\User\chatLanguageModels.json` |
-| Insiders | `%APPDATA%\Code - Insiders\User\chatLanguageModels.json` |
+| VS Code | Windows | macOS |
+|---------|---------|-------|
+| Stable | `%APPDATA%\Code\User\chatLanguageModels.json` | `~/Library/Application Support/Code/User/chatLanguageModels.json` |
+| Insiders | `%APPDATA%\Code - Insiders\User\chatLanguageModels.json` | `~/Library/Application Support/Code - Insiders/User/chatLanguageModels.json` |
 
 Merge rules:
 
