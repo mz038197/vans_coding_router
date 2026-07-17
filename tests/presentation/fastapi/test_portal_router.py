@@ -614,7 +614,7 @@ def test_install_vscode_models_download_returns_script(tmp_path):
     )
     assert response.status_code == 200
     assert "install-vscode-models.ps1" in response.headers["content-disposition"]
-    assert "VSRouter" in response.text
+    assert "VCRouter" in response.text
     assert "Merge-ChatLanguageModels" in response.text
 
 

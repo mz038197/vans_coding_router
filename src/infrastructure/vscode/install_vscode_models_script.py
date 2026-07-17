@@ -169,5 +169,5 @@ Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '1. Reload VS Code window (Developer: Reload Window)'
 Write-Host '2. Chat: Manage Language Models -> update API Key with your vcr_sk_... key'
-Write-Host '3. Pick the VSRouter model in Copilot (avoid Auto)'
+Write-Host '3. Pick the VCRouter model in Copilot (avoid Auto)'
 """

@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $TemplateJson = @'
 [
   {
-    "name": "VSRouter",
+    "name": "VCRouter",
     "vendor": "customendpoint",
     "apiKey": "",
     "apiType": "responses",
@@ -40,8 +40,8 @@ $TemplateJson = @'
         "zeroDataRetentionEnabled": true,
         "toolCalling": true,
         "vision": true,
-        "maxInputTokens": 128000,
-        "maxOutputTokens": 16000
+        "maxInputTokens": 524288,
+        "maxOutputTokens": 131072
       },
       {
         "id": "ollama_cloud@kimi-k2.7-code:cloud",
@@ -61,12 +61,12 @@ $TemplateJson = @'
         "zeroDataRetentionEnabled": true,
         "toolCalling": true,
         "vision": true,
-        "maxInputTokens": 128000,
-        "maxOutputTokens": 16000
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
       },
       {
-        "id": "ollama_cloud@qwen3.5:cloud",
-        "name": "qwen3.5:cloud",
+        "id": "openrouter@minimax/minimax-m3",
+        "name": "minimax-m3-backup",
         "url": "https://ai.vanscoding.com/v1",
         "requestHeaders": {
           "Authorization": "Bearer ${apiKey}"
@@ -82,29 +82,8 @@ $TemplateJson = @'
         "zeroDataRetentionEnabled": true,
         "toolCalling": true,
         "vision": true,
-        "maxInputTokens": 128000,
-        "maxOutputTokens": 16000
-      },
-      {
-        "id": "ollama_cloud@nemotron-3-super:cloud",
-        "name": "nemotron-3-super",
-        "url": "https://ai.vanscoding.com/v1",
-        "requestHeaders": {
-          "Authorization": "Bearer ${apiKey}"
-        },
-        "thinking": true,
-        "reasoningEffortFormat": "responses",
-        "supportsReasoningEffort": [
-          "none",
-          "low",
-          "medium",
-          "high"
-        ],
-        "zeroDataRetentionEnabled": true,
-        "toolCalling": true,
-        "vision": false,
-        "maxInputTokens": 128000,
-        "maxOutputTokens": 16000
+        "maxInputTokens": 524288,
+        "maxOutputTokens": 131072
       }
     ]
   }
