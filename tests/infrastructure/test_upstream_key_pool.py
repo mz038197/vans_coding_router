@@ -67,8 +67,41 @@ async def test_queue_timeout_raises_upstream_busy():
     assert "busy" in exc_info.value.message.lower()
     assert exc_info.value.code == "upstream_busy"
     assert pool.in_flight_snapshot() == [1]
+    assert pool.status()["busy_total"] == 1
     await pool.release(held)
     assert pool.in_flight_snapshot() == [0]
+
+
+@pytest.mark.asyncio
+async def test_status_reports_in_flight_waiting_and_capacity():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=1,
+        queue_timeout_sec=2,
+        acquire_delay_ms=0,
+    )
+    first = await pool.acquire()
+    second = await pool.acquire()
+    waiter = asyncio.create_task(pool.acquire())
+    await asyncio.sleep(0.05)
+    status = pool.status()
+    assert status["key_count"] == 2
+    assert status["max_concurrent_per_key"] == 1
+    assert status["capacity"] == 2
+    assert status["in_flight_total"] == 2
+    assert status["waiting"] == 1
+    assert status["busy_total"] == 0
+    assert status["keys"] == [
+        {"index": 0, "in_flight": 1, "cap": 1},
+        {"index": 1, "in_flight": 1, "cap": 1},
+    ]
+    assert "key-a" not in str(status)
+
+    await pool.release(first)
+    third = await asyncio.wait_for(waiter, timeout=1)
+    assert pool.status()["waiting"] == 0
+    await pool.release(second)
+    await pool.release(third)
 
 
 @pytest.mark.asyncio

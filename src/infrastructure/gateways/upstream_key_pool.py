@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 from src.domain.errors import UpstreamBusyError
 
@@ -24,17 +25,38 @@ class UpstreamKeyPool:
         self._queue_timeout_sec = float(queue_timeout_sec)
         self._acquire_delay_ms = max(0, int(acquire_delay_ms))
         self._in_flight = [0] * len(self._keys)
+        self._waiting = 0
+        self._busy_total = 0
         self._condition = asyncio.Condition()
 
     @property
     def key_count(self) -> int:
         return len(self._keys)
 
+    @property
+    def max_concurrent_per_key(self) -> int:
+        return self._max_concurrent_per_key
+
     def key_at(self, index: int) -> str:
         return self._keys[index]
 
     def in_flight_snapshot(self) -> list[int]:
         return list(self._in_flight)
+
+    def status(self) -> dict[str, Any]:
+        """Sanitized pool snapshot (no API key material)."""
+        cap = self._max_concurrent_per_key if self._max_concurrent_per_key > 0 else None
+        in_flight = list(self._in_flight)
+        capacity = (cap * len(self._keys)) if cap is not None else None
+        return {
+            "key_count": len(self._keys),
+            "max_concurrent_per_key": self._max_concurrent_per_key,
+            "capacity": capacity,
+            "in_flight_total": sum(in_flight),
+            "waiting": self._waiting,
+            "busy_total": self._busy_total,
+            "keys": [{"index": i, "in_flight": load, "cap": cap} for i, load in enumerate(in_flight)],
+        }
 
     def _pick_index(self) -> int | None:
         best: int | None = None
@@ -46,6 +68,12 @@ class UpstreamKeyPool:
                 best = index
                 best_load = load
         return best
+
+    def _raise_busy(self, message: str, *, cause: BaseException | None = None) -> None:
+        self._busy_total += 1
+        if cause is not None:
+            raise UpstreamBusyError(message) from cause
+        raise UpstreamBusyError(message)
 
     async def _release_locked(self, index: int) -> None:
         async with self._condition:
@@ -62,31 +90,43 @@ class UpstreamKeyPool:
         """
         deadline = time.monotonic() + self._queue_timeout_sec
         acquired: int | None = None
+        waiting = False
         try:
             async with self._condition:
                 while True:
                     index = self._pick_index()
                     if index is not None:
+                        if waiting:
+                            self._waiting -= 1
+                            waiting = False
                         self._in_flight[index] += 1
                         acquired = index
                         break
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        raise UpstreamBusyError(
+                        self._raise_busy(
                             "The model provider is busy (queue full). Please wait a moment and try again."
                         )
+                    if not waiting:
+                        self._waiting += 1
+                        waiting = True
                     try:
                         await asyncio.wait_for(self._condition.wait(), timeout=remaining)
                     except TimeoutError as exc:
-                        raise UpstreamBusyError(
-                            "The model provider is busy (queue timeout). Please wait a moment and try again."
-                        ) from exc
+                        self._raise_busy(
+                            "The model provider is busy (queue timeout). Please wait a moment and try again.",
+                            cause=exc,
+                        )
 
             if self._acquire_delay_ms > 0:
                 await asyncio.sleep(self._acquire_delay_ms / 1000.0)
             assert acquired is not None
             return acquired
         except BaseException:
+            if waiting:
+                async with self._condition:
+                    if self._waiting > 0:
+                        self._waiting -= 1
             if acquired is not None:
                 # Shield so cancellation during delay cannot skip the rollback.
                 await asyncio.shield(self._release_locked(acquired))
