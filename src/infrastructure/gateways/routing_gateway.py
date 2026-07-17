@@ -32,6 +32,18 @@ class RoutingGateway:
             providers[name] = await gateway.health()
         return {"ok": all(item.get("ok") for item in providers.values()), "providers": providers}
 
+    def pool_status(self, *, limited_only: bool = True) -> dict[str, Any]:
+        providers: dict[str, Any] = {}
+        for name, gateway in self.gateways.items():
+            status_fn = getattr(gateway, "pool_status", None)
+            if not callable(status_fn):
+                continue
+            pool = status_fn(limited_only=limited_only)
+            if pool is None and limited_only:
+                continue
+            providers[name] = {"pool": pool}
+        return {"providers": providers}
+
     async def models(self) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}

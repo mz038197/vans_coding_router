@@ -83,12 +83,44 @@ class OpenAICompatibleGateway:
             await self._client.aclose()
             self._client = None
 
+    def pool_status(self, *, limited_only: bool = False) -> dict[str, Any] | None:
+        """Sanitized upstream key-pool snapshot, or None when unavailable / filtered."""
+        if self._pool is None:
+            return None
+        if limited_only and self.provider.max_concurrent_per_key <= 0:
+            return None
+        raw = self._pool.status()
+        label_prefix = self.provider.name.upper()
+        keys = [
+            {
+                "index": item["index"],
+                "label": f"{label_prefix} {int(item['index']) + 1}",
+                "in_flight": item["in_flight"],
+                "cap": item["cap"],
+            }
+            for item in raw["keys"]
+        ]
+        return {
+            "key_count": raw["key_count"],
+            "max_concurrent_per_key": raw["max_concurrent_per_key"],
+            "capacity": raw["capacity"],
+            "in_flight_total": raw["in_flight_total"],
+            "waiting": raw["waiting"],
+            "busy_total": raw["busy_total"],
+            "keys": keys,
+        }
+
     async def health(self) -> dict[str, Any]:
+        pool = self.pool_status(limited_only=False)
         try:
             response = await self._request("GET", "/models", use_pool=False)
-            return {"ok": response.status_code < 500, "status_code": response.status_code}
+            return {
+                "ok": response.status_code < 500,
+                "status_code": response.status_code,
+                "pool": pool,
+            }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc), "pool": pool}
 
     async def models(self) -> dict[str, Any]:
         response = await self._request("GET", "/models", use_pool=False)

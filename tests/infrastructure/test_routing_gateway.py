@@ -209,3 +209,40 @@ async def test_routing_gateway_audio_speech_rejects_unsupported_provider(audio_g
             {"model": "openrouter@gpt-4o-mini-tts", "input": "hello", "voice": "nova"}
         ):
             pass
+
+
+def test_routing_gateway_pool_status_limited_only(monkeypatch):
+    monkeypatch.setenv("K1", "a")
+    monkeypatch.setenv("K2", "b")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
+
+    limited = OpenAICompatibleGateway(
+        ProviderSettings(
+            name="ollama_cloud",
+            type="openai_compatible",
+            base_url="https://ollama.com/v1",
+            api_key_envs=("K1", "K2"),
+            max_concurrent_per_key=3,
+        ),
+        timeout=30.0,
+    )
+    unlimited = OpenAICompatibleGateway(
+        ProviderSettings(
+            name="openrouter",
+            type="openai_compatible",
+            base_url="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+            max_concurrent_per_key=0,
+        ),
+        timeout=30.0,
+    )
+    gateway = RoutingGateway({"ollama_cloud": limited, "openrouter": unlimited})
+    status = gateway.pool_status(limited_only=True)
+    assert set(status["providers"]) == {"ollama_cloud"}
+    pool = status["providers"]["ollama_cloud"]["pool"]
+    assert pool["keys"][0]["label"] == "OLLAMA_CLOUD 1"
+    assert pool["keys"][1]["label"] == "OLLAMA_CLOUD 2"
+    dumped = str(status)
+    assert "secret" not in dumped
+    assert "'a'" not in dumped
