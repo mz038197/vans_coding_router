@@ -24,7 +24,14 @@ providers:
   ollama_cloud:
     type: openai_compatible
     base_url: "https://ollama.com/v1"
-    api_key_env: "OLLAMA_CLOUD_API_KEY"
+    # Prefer api_key_envs for dual-account least-in-flight + per-key queue.
+    # Falls back to a single key if only one env is set.
+    api_key_envs:
+      - OLLAMA_CLOUD_API_KEY
+      - OLLAMA_CLOUD_API_KEY_2
+    max_concurrent_per_key: 3
+    queue_timeout_sec: 120
+    acquire_delay_ms: 200
     enabled: true
 
   openrouter:

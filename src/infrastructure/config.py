@@ -39,9 +39,32 @@ class ProviderSettings:
     base_url: str = ""
     api_key: str = ""
     api_key_env: str = ""
+    api_key_envs: tuple[str, ...] = ()
+    max_concurrent_per_key: int = 0
+    queue_timeout_sec: float = 120.0
+    acquire_delay_ms: int = 0
     enabled: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
     capabilities: tuple[str, ...] = ()
+
+
+def resolve_provider_api_keys(provider: ProviderSettings) -> list[str]:
+    """Resolve upstream API keys from api_key_envs, else api_key / api_key_env."""
+    if provider.api_key_envs:
+        keys = [
+            value
+            for env_name in provider.api_key_envs
+            if (value := (os.getenv(env_name) or ""))
+        ]
+        if keys:
+            return keys
+    if provider.api_key:
+        return [provider.api_key]
+    if provider.api_key_env:
+        value = os.getenv(provider.api_key_env) or ""
+        if value:
+            return [value]
+    return []
 
 
 def provider_supports(provider: ProviderSettings, capability: str) -> bool:
@@ -136,12 +159,18 @@ def _load_providers(raw: dict[str, Any]) -> dict[str, ProviderSettings]:
             continue
         raw_capabilities = item.get("capabilities") or ()
         capabilities = tuple(str(c) for c in raw_capabilities) if isinstance(raw_capabilities, list) else ()
+        raw_key_envs = item.get("api_key_envs") or ()
+        api_key_envs = tuple(str(e) for e in raw_key_envs) if isinstance(raw_key_envs, list) else ()
         providers[str(name)] = ProviderSettings(
             name=str(name),
             type=str(item.get("type", "openai_compatible")),
             base_url=str(item.get("base_url", "")).rstrip("/"),
             api_key=str(item.get("api_key", "")),
             api_key_env=str(item.get("api_key_env", "")),
+            api_key_envs=api_key_envs,
+            max_concurrent_per_key=int(item.get("max_concurrent_per_key", 0)),
+            queue_timeout_sec=float(item.get("queue_timeout_sec", 120)),
+            acquire_delay_ms=int(item.get("acquire_delay_ms", 0)),
             enabled=bool(item.get("enabled", True)),
             extra_headers={str(k): str(v) for k, v in (item.get("extra_headers") or {}).items()},
             capabilities=capabilities,
@@ -237,7 +266,15 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
             name: {
                 "type": provider.type,
                 "base_url": provider.base_url,
-                "api_key": "***" if provider.api_key or provider.api_key_env else "",
+                "api_key": "***"
+                if provider.api_key or provider.api_key_env or provider.api_key_envs
+                else "",
+                "api_keys": len(provider.api_key_envs)
+                if provider.api_key_envs
+                else (1 if (provider.api_key or provider.api_key_env) else 0),
+                "max_concurrent_per_key": provider.max_concurrent_per_key,
+                "queue_timeout_sec": provider.queue_timeout_sec,
+                "acquire_delay_ms": provider.acquire_delay_ms,
                 "enabled": provider.enabled,
                 "capabilities": list(provider.capabilities),
             }

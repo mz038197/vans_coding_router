@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import aclosing
 from dataclasses import replace
 from typing import Any, AsyncGenerator
 
@@ -63,8 +64,9 @@ class RoutingGateway:
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
         gateway, upstream_req = self._resolve_chat_request(req)
-        async for chunk in gateway.chat_completions_stream(upstream_req):
-            yield chunk
+        async with aclosing(gateway.chat_completions_stream(upstream_req)) as stream:
+            async for chunk in stream:
+                yield chunk
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
         gateway, payload = self._resolve_responses_body(body)
@@ -72,8 +74,9 @@ class RoutingGateway:
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         gateway, payload = self._resolve_responses_body(body)
-        async for chunk in gateway.responses_create_stream(payload):
-            yield chunk
+        async with aclosing(gateway.responses_create_stream(payload)) as stream:
+            async for chunk in stream:
+                yield chunk
 
     async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
         gateway, payload = self._resolve_images_body(body)
@@ -81,8 +84,9 @@ class RoutingGateway:
 
     async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         gateway, payload = self._resolve_images_body(body)
-        async for chunk in gateway.images_create_stream(payload):
-            yield chunk
+        async with aclosing(gateway.images_create_stream(payload)) as stream:
+            async for chunk in stream:
+                yield chunk
 
     async def images_models(self) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
@@ -111,8 +115,9 @@ class RoutingGateway:
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         gateway, payload = self._resolve_audio_speech_body(body)
-        async for chunk in gateway.audio_speech_create_stream(payload):
-            yield chunk
+        async with aclosing(gateway.audio_speech_create_stream(payload)) as stream:
+            async for chunk in stream:
+                yield chunk
 
     def prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
         self._resolve_audio_speech_body(body)

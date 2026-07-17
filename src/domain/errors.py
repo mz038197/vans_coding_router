@@ -87,6 +87,20 @@ class ServiceUnavailableError(AppError):
         )
 
 
+class UpstreamBusyError(AppError):
+    def __init__(
+        self,
+        message: str = (
+            "The model provider is busy. Please wait a moment and try again."
+        ),
+    ):
+        super().__init__(
+            message=message,
+            status_code=503,
+            code="upstream_busy",
+        )
+
+
 class InvalidModelIdError(AppError):
     def __init__(self, message: str):
         super().__init__(

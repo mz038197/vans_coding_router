@@ -1,12 +1,14 @@
 from typing import Any
 
+from contextlib import aclosing
+
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.application.dto.chat_dto import ChatCompletionInputDto
 from src.application.use_cases.api_use_case import ApiUseCase
-from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
+from src.domain.errors import ServiceUnavailableError, UpstreamBusyError, UpstreamServiceError
 from src.presentation.fastapi.auth_responses import openai_auth_error_response
 from src.presentation.fastapi.openai_errors import (
     openai_error_response,
@@ -15,6 +17,7 @@ from src.presentation.fastapi.openai_errors import (
 )
 from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
 from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
+from src.presentation.fastapi.streaming import AclosingStreamingResponse
 
 
 def _client_ip(request: Request) -> str | None:
@@ -65,10 +68,15 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
     async def _stream_with_error_handling(domain_req, api_key, client_ip, auth_context):
         """包含錯誤處理的流式生成器"""
         try:
-            async for chunk in api_use_case.chat_stream(domain_req, api_key, client_ip, auth_context):
-                yield chunk
+            async with aclosing(
+                api_use_case.chat_stream(domain_req, api_key, client_ip, auth_context)
+            ) as stream:
+                async for chunk in stream:
+                    yield chunk
         except UpstreamServiceError as e:
             yield openai_stream_chat_error_bytes(_upstream_error_message(e), model=domain_req.model)
+        except UpstreamBusyError as e:
+            yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except ServiceUnavailableError as e:
             yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except Exception as e:
@@ -76,10 +84,15 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
     async def _responses_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
         try:
-            async for chunk in api_use_case.responses_create_stream(body, api_key, client_ip, auth_context):
-                yield chunk
+            async with aclosing(
+                api_use_case.responses_create_stream(body, api_key, client_ip, auth_context)
+            ) as stream:
+                async for chunk in stream:
+                    yield chunk
         except UpstreamServiceError as e:
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
+        except UpstreamBusyError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error", code=e.code)
         except ServiceUnavailableError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
@@ -110,7 +123,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if domain_req.stream:
             generator = _stream_with_error_handling(domain_req, api_key, client_ip, auth_context)
-            return StreamingResponse(generator, media_type="text/event-stream")
+            return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.chat_nonstream(domain_req, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
@@ -130,15 +143,18 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
         if body.get("stream"):
             generator = _responses_stream_with_error_handling(body, api_key, client_ip, auth_context)
-            return StreamingResponse(generator, media_type="text/event-stream")
+            return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.responses_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
     async def _images_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
         try:
-            async for chunk in api_use_case.images_create_stream(body, api_key, client_ip, auth_context):
-                yield chunk
+            async with aclosing(
+                api_use_case.images_create_stream(body, api_key, client_ip, auth_context)
+            ) as stream:
+                async for chunk in stream:
+                    yield chunk
         except UpstreamServiceError as e:
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
@@ -159,7 +175,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
         body = req.model_dump(exclude_none=True)
         if req.stream:
             generator = _images_stream_with_error_handling(body, api_key, client_ip, auth_context)
-            return StreamingResponse(generator, media_type="text/event-stream")
+            return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.images_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
@@ -194,8 +210,11 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
 
     async def _audio_speech_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
         try:
-            async for chunk in api_use_case.audio_speech_stream(body, api_key, client_ip, auth_context):
-                yield chunk
+            async with aclosing(
+                api_use_case.audio_speech_stream(body, api_key, client_ip, auth_context)
+            ) as stream:
+                async for chunk in stream:
+                    yield chunk
         except UpstreamServiceError as e:
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
@@ -217,6 +236,6 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
         api_use_case.validate_audio_speech_request(body, auth_context)
         generator = _audio_speech_stream_with_error_handling(body, api_key, client_ip, auth_context)
         media_type = _audio_speech_media_type(body.get("response_format"))
-        return StreamingResponse(generator, media_type=media_type)
+        return AclosingStreamingResponse(generator, media_type=media_type)
 
     return router

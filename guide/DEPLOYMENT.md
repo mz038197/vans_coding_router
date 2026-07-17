@@ -63,8 +63,11 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 | `DATABASE_URL` | Neon connection string |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
 | `SESSION_SECRET` | 強隨機字串 |
-| `OLLAMA_CLOUD_API_KEY` | 必要 |
+| `OLLAMA_CLOUD_API_KEY` | 必要（Ollama Cloud 帳號 A） |
+| `OLLAMA_CLOUD_API_KEY_2` | 選填（帳號 B；與 A 為不同訂閱時可內部分流） |
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | 選填 |
+
+`ollama_cloud` 在 [`config/router.prod.yaml`](../config/router.prod.yaml) 使用 `api_key_envs` 掛兩把 key：學生仍用同一把 `vcr_sk_` 與 `ollama_cloud@...`，router 以 least-in-flight 分流，並以 `max_concurrent_per_key`（預設 3）在打上游前排隊，降低 Ollama Cloud rate limit。只設第一把 key 時行為與單帳號相同。
 
 非機密設定在 image 內 [`config/router.prod.yaml`](../config/router.prod.yaml)。`PUBLIC_URL` 在 [`fly.toml`](../fly.toml) 設為 `https://ai.vanscoding.com`。
 

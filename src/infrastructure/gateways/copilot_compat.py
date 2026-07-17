@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncGenerator
 from urllib.parse import urlparse
@@ -231,77 +232,78 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
     pending_role_chunk: bytes | None = None
     first_payload: dict[str, Any] | None = None
 
-    async for chunk in chunks:
-        buffer += chunk
-        while b"\n\n" in buffer:
-            event, buffer = buffer.split(b"\n\n", 1)
-            if not event.strip():
-                continue
+    async with aclosing(chunks) as source:
+        async for chunk in source:
+            buffer += chunk
+            while b"\n\n" in buffer:
+                event, buffer = buffer.split(b"\n\n", 1)
+                if not event.strip():
+                    continue
 
-            data_lines = [line[5:].strip() for line in event.split(b"\n") if line.startswith(b"data:")]
-            if not data_lines:
-                yield event + b"\n\n"
-                continue
+                data_lines = [line[5:].strip() for line in event.split(b"\n") if line.startswith(b"data:")]
+                if not data_lines:
+                    yield event + b"\n\n"
+                    continue
 
-            raw_data = b"\n".join(data_lines).decode("utf-8", errors="replace").strip()
-            if raw_data == "[DONE]":
-                if pending_role_chunk is not None:
-                    yield pending_role_chunk
-                    pending_role_chunk = None
-                    emitted_choice_chunk = True
-                if not emitted_choice_chunk:
-                    yield _make_assistant_role_chunk(first_payload or {})
-                    finish = {
-                        "id": (first_payload or {}).get("id", "chatcmpl-router"),
-                        "object": "chat.completion.chunk",
-                        "created": (first_payload or {}).get("created", int(time.time())),
-                        "model": (first_payload or {}).get("model", ""),
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    }
-                    yield _encode_sse_data(finish)
-                yield b"data: [DONE]\n\n"
-                continue
+                raw_data = b"\n".join(data_lines).decode("utf-8", errors="replace").strip()
+                if raw_data == "[DONE]":
+                    if pending_role_chunk is not None:
+                        yield pending_role_chunk
+                        pending_role_chunk = None
+                        emitted_choice_chunk = True
+                    if not emitted_choice_chunk:
+                        yield _make_assistant_role_chunk(first_payload or {})
+                        finish = {
+                            "id": (first_payload or {}).get("id", "chatcmpl-router"),
+                            "object": "chat.completion.chunk",
+                            "created": (first_payload or {}).get("created", int(time.time())),
+                            "model": (first_payload or {}).get("model", ""),
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        }
+                        yield _encode_sse_data(finish)
+                    yield b"data: [DONE]\n\n"
+                    continue
 
-            try:
-                payload = json.loads(raw_data)
-            except json.JSONDecodeError:
-                yield event + b"\n\n"
-                continue
+                try:
+                    payload = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    yield event + b"\n\n"
+                    continue
 
-            if not isinstance(payload, dict):
-                yield event + b"\n\n"
-                continue
+                if not isinstance(payload, dict):
+                    yield event + b"\n\n"
+                    continue
 
-            if payload.get("error"):
-                error_message = "Upstream provider error"
-                error_obj = payload.get("error")
-                if isinstance(error_obj, dict) and error_obj.get("message"):
-                    error_message = str(error_obj["message"])
-                model = str(payload.get("model") or (first_payload or {}).get("model") or "")
-                yield encode_chat_stream_error(error_message, model=model)
-                return
+                if payload.get("error"):
+                    error_message = "Upstream provider error"
+                    error_obj = payload.get("error")
+                    if isinstance(error_obj, dict) and error_obj.get("message"):
+                        error_message = str(error_obj["message"])
+                    model = str(payload.get("model") or (first_payload or {}).get("model") or "")
+                    yield encode_chat_stream_error(error_message, model=model)
+                    return
 
-            if _is_empty_choices_chunk(payload):
-                usage_chunk = _usage_only_chunk_to_finish(payload, first_payload)
-                if usage_chunk is not None:
-                    emitted_choice_chunk = True
-                    yield _encode_sse_data(usage_chunk)
-                continue
+                if _is_empty_choices_chunk(payload):
+                    usage_chunk = _usage_only_chunk_to_finish(payload, first_payload)
+                    if usage_chunk is not None:
+                        emitted_choice_chunk = True
+                        yield _encode_sse_data(usage_chunk)
+                    continue
 
-            if first_payload is None:
-                first_payload = payload
+                if first_payload is None:
+                    first_payload = payload
 
-            if _chunk_has_meaningful_delta(payload):
-                delta = payload["choices"][0]["delta"]
-                if not saw_meaningful_choice and not delta.get("role"):
-                    pending_role_chunk = _make_assistant_role_chunk(first_payload or payload)
-                saw_meaningful_choice = True
-                if pending_role_chunk is not None:
-                    yield pending_role_chunk
-                    pending_role_chunk = None
+                if _chunk_has_meaningful_delta(payload):
+                    delta = payload["choices"][0]["delta"]
+                    if not saw_meaningful_choice and not delta.get("role"):
+                        pending_role_chunk = _make_assistant_role_chunk(first_payload or payload)
+                    saw_meaningful_choice = True
+                    if pending_role_chunk is not None:
+                        yield pending_role_chunk
+                        pending_role_chunk = None
 
-            emitted_choice_chunk = True
-            yield _encode_sse_data(payload)
+                emitted_choice_chunk = True
+                yield _encode_sse_data(payload)
 
     if buffer.strip():
         yield buffer

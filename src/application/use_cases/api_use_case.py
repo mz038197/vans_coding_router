@@ -1,4 +1,5 @@
 import json
+from contextlib import aclosing
 from typing import Any, AsyncGenerator
 
 from src.infrastructure.logging.message_preview import (
@@ -67,9 +68,10 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         tracker = _SseStreamTracker(CHAT_COMPLETIONS_PATH)
-        async for chunk in self.gateway.chat_completions_stream(req):
-            tracker.feed(chunk)
-            yield chunk
+        async with aclosing(self.gateway.chat_completions_stream(req)) as stream:
+            async for chunk in stream:
+                tracker.feed(chunk)
+                yield chunk
         self._log_request(
             req,
             api_key,
@@ -113,9 +115,10 @@ class ApiUseCase:
     ) -> AsyncGenerator[bytes, None]:
         self._validate_responses_body(body)
         tracker = _SseStreamTracker(RESPONSES_PATH)
-        async for chunk in self.gateway.responses_create_stream(body):
-            tracker.feed(chunk)
-            yield chunk
+        async with aclosing(self.gateway.responses_create_stream(body)) as stream:
+            async for chunk in stream:
+                tracker.feed(chunk)
+                yield chunk
         self._log_responses_request(
             body,
             api_key,
@@ -155,9 +158,10 @@ class ApiUseCase:
     ) -> AsyncGenerator[bytes, None]:
         self._assert_image_generation_allowed(auth_context)
         tracker = _ImageSseStreamTracker()
-        async for chunk in self.gateway.images_create_stream(body):
-            tracker.feed(chunk)
-            yield chunk
+        async with aclosing(self.gateway.images_create_stream(body)) as stream:
+            async for chunk in stream:
+                tracker.feed(chunk)
+                yield chunk
         self._log_images_request(
             body,
             api_key,
@@ -185,9 +189,10 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         byte_count = 0
-        async for chunk in self.gateway.audio_speech_create_stream(body):
-            byte_count += len(chunk)
-            yield chunk
+        async with aclosing(self.gateway.audio_speech_create_stream(body)) as stream:
+            async for chunk in stream:
+                byte_count += len(chunk)
+                yield chunk
         self._log_tts_request(
             body,
             api_key,
