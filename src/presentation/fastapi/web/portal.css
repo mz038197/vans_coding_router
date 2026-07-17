@@ -26,6 +26,11 @@
     h2 { font-size: 1.25rem; }
     h3 { font-size: 1.05rem; color: var(--text-primary); }
 
+    #student h3 {
+      margin-top: 1.75rem;
+      padding-top: 0.25rem;
+    }
+
     .hidden { display: none !important; }
 
     .neural-grid {
@@ -237,6 +242,27 @@
     }
 
     .btn-secondary:hover { background: #334155; }
+
+    .btn-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      margin: 4px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      border: 0;
+      text-decoration: none;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s, border-color 0.15s;
+    }
+
+    .btn-download:hover { background: var(--accent-hover); color: white; }
+
+    .btn-download i { font-size: 0.9rem; }
 
     .btn-ghost {
       display: inline-flex;
