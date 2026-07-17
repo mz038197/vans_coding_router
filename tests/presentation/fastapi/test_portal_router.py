@@ -27,11 +27,13 @@ def _settings(tmp_path, *, google_client_id: str = "", google_client_secret: str
     )
 
 
-def _client(tmp_path, **settings_kwargs):
+def _client(tmp_path, llm_gateway=None, **settings_kwargs):
     settings = _settings(tmp_path, **settings_kwargs)
     repo = SqliteRouterRepository(settings.database.path, settings)
     app = FastAPI()
-    app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
+    app.include_router(
+        create_portal_router(PortalUseCase(repo, settings, llm_gateway=llm_gateway), settings)
+    )
     return TestClient(app), repo, settings
 
 
@@ -690,3 +692,43 @@ def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
         json={"status": "ended"},
     )
     assert forbidden.status_code == 403
+
+
+class _FakePoolGateway:
+    def pool_status(self, *, limited_only: bool = True):
+        return {
+            "providers": {
+                "ollama_cloud": {
+                    "pool": {
+                        "key_count": 2,
+                        "max_concurrent_per_key": 3,
+                        "capacity": 6,
+                        "in_flight_total": 3,
+                        "waiting": 0,
+                        "busy_total": 1,
+                        "keys": [
+                            {"index": 0, "label": "OLLAMA_CLOUD 1", "in_flight": 2, "cap": 3},
+                            {"index": 1, "label": "OLLAMA_CLOUD 2", "in_flight": 1, "cap": 3},
+                        ],
+                    }
+                }
+            }
+        }
+
+
+def test_teacher_upstream_pools_returns_limited_providers(tmp_path):
+    client, repo, _ = _client(tmp_path, llm_gateway=_FakePoolGateway())
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    response = client.get("/teacher/upstream-pools", cookies={"session_user_id": str(teacher["id"])})
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload["providers"]) == {"ollama_cloud"}
+    keys = payload["providers"]["ollama_cloud"]["pool"]["keys"]
+    assert [item["label"] for item in keys] == ["OLLAMA_CLOUD 1", "OLLAMA_CLOUD 2"]
+
+
+def test_student_upstream_pools_forbidden(tmp_path):
+    client, repo, _ = _client(tmp_path, llm_gateway=_FakePoolGateway())
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    response = client.get("/teacher/upstream-pools", cookies={"session_user_id": str(student["id"])})
+    assert response.status_code == 403

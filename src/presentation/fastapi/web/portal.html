@@ -119,6 +119,14 @@
           <div id="courseDetail"><p class="hint">請選擇課程</p></div>
         </div>
         <div id="monitorTab" class="hidden">
+          <div id="upstreamPools" class="upstream-pools">
+            <div class="upstream-pools-head">
+              <h3>上游負載</h3>
+              <button type="button" class="btn-secondary" onclick="loadUpstreamPools()">重新整理</button>
+            </div>
+            <div id="upstreamPoolsBody" class="hint">載入中…</div>
+            <p class="hint upstream-pools-hint">本機即時狀態，約每 5 秒更新</p>
+          </div>
           <div class="monitor-filters">
             <label for="monitorClassId">課程</label>
             <select id="monitorStatusFilter" onchange="onMonitorFilterChange()">
@@ -667,15 +675,85 @@
 
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
 
+    let upstreamPoolsTimer = null;
+
     function showTab(id) {
       ['keyTab','classTab','monitorTab','probeTab','adminTab'].forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
       document.querySelectorAll('.sidebar-nav-btn[data-tab]').forEach(btn => {
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
       });
-      if (id === 'monitorTab') syncMonitorCourseSelect();
+      if (id === 'monitorTab') {
+        syncMonitorCourseSelect();
+        startUpstreamPoolsPoll();
+      } else {
+        stopUpstreamPoolsPoll();
+      }
       if (id === 'classTab') syncCourseSelect();
       if (id === 'probeTab') syncProbeApiKey();
+    }
+
+    function stopUpstreamPoolsPoll() {
+      if (upstreamPoolsTimer != null) {
+        clearInterval(upstreamPoolsTimer);
+        upstreamPoolsTimer = null;
+      }
+    }
+
+    function startUpstreamPoolsPoll() {
+      stopUpstreamPoolsPoll();
+      loadUpstreamPools();
+      upstreamPoolsTimer = setInterval(loadUpstreamPools, 5000);
+    }
+
+    function renderUpstreamPools(data) {
+      const host = document.getElementById('upstreamPoolsBody');
+      if (!host) return;
+      const providers = data?.providers || {};
+      const names = Object.keys(providers);
+      if (!names.length) {
+        host.innerHTML = '<p class="hint">目前沒有設定併發上限的上游</p>';
+        return;
+      }
+      host.innerHTML = names.map(name => {
+        const pool = providers[name]?.pool;
+        if (!pool) {
+          return `<div class="upstream-provider"><div class="upstream-provider-title">${escapeHtml(name)}</div><p class="hint">無 pool 資料</p></div>`;
+        }
+        const capacity = pool.capacity;
+        const total = pool.in_flight_total ?? 0;
+        const summary = capacity != null
+          ? `${total}/${capacity} · 排隊 ${pool.waiting ?? 0} · busy ${pool.busy_total ?? 0}`
+          : `in-flight ${total} · 排隊 ${pool.waiting ?? 0} · busy ${pool.busy_total ?? 0}`;
+        const keys = (pool.keys || []).map(key => {
+          const cap = key.cap;
+          const inflight = key.in_flight ?? 0;
+          const ratio = cap != null && cap > 0 ? inflight / cap : 0;
+          const hot = (pool.waiting > 0) || ratio >= 0.8;
+          const barWidth = cap != null && cap > 0 ? Math.min(100, Math.round(ratio * 100)) : 0;
+          const countLabel = cap != null ? `${inflight}/${cap}` : String(inflight);
+          return `<div class="upstream-key-row">
+            <span class="upstream-key-label">${escapeHtml(key.label)}</span>
+            <div class="upstream-bar-track"><div class="upstream-bar-fill${hot ? ' hot' : ''}" style="width:${barWidth}%"></div></div>
+            <span class="upstream-key-count">${escapeHtml(countLabel)}</span>
+          </div>`;
+        }).join('');
+        return `<div class="upstream-provider">
+          <div class="upstream-provider-title">${escapeHtml(name)} · ${escapeHtml(summary)}</div>
+          ${keys}
+        </div>`;
+      }).join('');
+    }
+
+    async function loadUpstreamPools() {
+      const host = document.getElementById('upstreamPoolsBody');
+      if (!host) return;
+      try {
+        const data = await api('/teacher/upstream-pools');
+        renderUpstreamPools(data);
+      } catch (err) {
+        host.innerHTML = `<p class="hint">無法載入上游負載：${escapeHtml(err.message || err)}</p>`;
+      }
     }
 
     function syncProbeApiKey() {

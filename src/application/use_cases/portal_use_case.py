@@ -10,9 +10,15 @@ _VALID_SESSION_STATUSES = frozenset({"active", "ended"})
 
 
 class PortalUseCase:
-    def __init__(self, repo: RouterRepositoryPort, base_settings: RouterSettings):
+    def __init__(
+        self,
+        repo: RouterRepositoryPort,
+        base_settings: RouterSettings,
+        llm_gateway: Any | None = None,
+    ):
         self.repo = repo
         self._base_settings = base_settings
+        self._llm_gateway = llm_gateway
         self.refresh_settings()
 
     def refresh_settings(self) -> None:
@@ -39,6 +45,16 @@ class PortalUseCase:
         if not user or not (self._has_role(user, "teacher") or self._has_role(user, "admin")):
             raise PermissionError("teacher only")
         return {"api_key": self.repo.issue_long_lived_key(user_id)}
+
+    def upstream_pools(self, user_id: int) -> dict[str, Any]:
+        self._assert_teacher(user_id)
+        gateway = self._llm_gateway
+        if gateway is None:
+            return {"providers": {}}
+        status_fn = getattr(gateway, "pool_status", None)
+        if not callable(status_fn):
+            return {"providers": {}}
+        return status_fn(limited_only=True)
 
     def create_class(self, teacher_id: int, name: str, ends_at: str | None, api_key_ttl_hours: int | None) -> dict[str, Any]:
         self._assert_teacher(teacher_id)

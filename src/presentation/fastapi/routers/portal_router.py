@@ -265,6 +265,10 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     async def class_usage(class_id: int, session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: {"items": portal_use_case.class_usage(current_user_id(session_user_id), class_id)})
 
+    @router.get("/teacher/upstream-pools")
+    async def upstream_pools(session_user_id: str | None = Cookie(default=None)):
+        return portal_call(lambda: portal_use_case.upstream_pools(current_user_id(session_user_id)))
+
     @router.get("/teacher/classes/{class_id}/prompt-logs")
     async def prompt_logs(
         class_id: int,

@@ -679,6 +679,84 @@
       margin-right: 4px;
     }
 
+    .upstream-pools {
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--border-glass);
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.45);
+    }
+
+    .upstream-pools-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .upstream-pools-head h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .upstream-pools-hint {
+      margin: 8px 0 0;
+      font-size: 0.8rem;
+    }
+
+    .upstream-provider {
+      margin-top: 10px;
+    }
+
+    .upstream-provider-title {
+      font-weight: 600;
+      font-size: 0.92rem;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+
+    .upstream-key-row {
+      display: grid;
+      grid-template-columns: minmax(120px, 1.2fr) 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin: 4px 0;
+      font-size: 0.88rem;
+    }
+
+    .upstream-key-label {
+      color: var(--text-muted);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.82rem;
+    }
+
+    .upstream-bar-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #1e293b;
+      overflow: hidden;
+      border: 1px solid #334155;
+    }
+
+    .upstream-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+      transition: width 0.25s ease;
+    }
+
+    .upstream-bar-fill.hot {
+      background: var(--danger);
+    }
+
+    .upstream-key-count {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      min-width: 2.5rem;
+      text-align: right;
+    }
+
     @media (max-width: 640px) {
       .nav-user { justify-content: flex-end; max-width: 60%; }
       .profile-line > span:first-child { font-size: 0.82rem; }

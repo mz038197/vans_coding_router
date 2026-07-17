@@ -34,7 +34,7 @@ def build_container(
         api_key_repo=api_key_repo,
         logger=request_logger,
     )
-    portal_use_case = PortalUseCase(api_key_repo, settings)
+    portal_use_case = PortalUseCase(api_key_repo, settings, llm_gateway=llm_gateway)
 
     lobby_workspace = resolve_lobby_workspace()
     lobby_registry = RoomRegistry(lobby_workspace)
