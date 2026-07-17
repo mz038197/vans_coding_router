@@ -6,9 +6,153 @@ import json
 import zipfile
 
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from src.infrastructure.vscode.model_defaults import MODEL_PATCH_KEYS
 
 _CMD_PAYLOAD_MARKER = ":VANS_PAYLOAD"
 _CMD_PAYLOAD_SPLIT = "(?m)^:VANS_PAYLOAD\\r?\\n"
+
+
+def render_install_vscode_models_command() -> str:
+    """Self-contained macOS .command installer (double-click opens Terminal)."""
+    template_b64 = base64.b64encode(
+        json.dumps(load_vans_template(), ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    patch_keys_literal = ", ".join(repr(key) for key in MODEL_PATCH_KEYS)
+    python_body = f"""
+import base64
+import copy
+import json
+from datetime import datetime
+from pathlib import Path
+
+TEMPLATE = json.loads(base64.b64decode({template_b64!r}).decode("utf-8"))
+MODEL_PATCH_KEYS = ({patch_keys_literal},)
+
+
+def patch_model_from_template(existing, template):
+    for key in MODEL_PATCH_KEYS:
+        if key not in existing and key in template:
+            existing[key] = template[key]
+
+
+def provider_key(provider):
+    return provider.get("vendor"), provider.get("name")
+
+
+def merge_chat_language_models(existing, template):
+    merged = copy.deepcopy(existing or [])
+    index = {{
+        provider_key(provider): provider
+        for provider in merged
+        if isinstance(provider, dict)
+    }}
+
+    for template_provider in template:
+        if not isinstance(template_provider, dict):
+            continue
+        key = provider_key(template_provider)
+        if key not in index:
+            merged.append(copy.deepcopy(template_provider))
+            index[key] = merged[-1]
+            continue
+
+        target = index[key]
+        existing_models = target.get("models")
+        if not isinstance(existing_models, list):
+            existing_models = []
+            target["models"] = existing_models
+
+        model_ids = {{
+            model.get("id")
+            for model in existing_models
+            if isinstance(model, dict) and model.get("id")
+        }}
+        template_models = template_provider.get("models")
+        if not isinstance(template_models, list):
+            continue
+        for template_model in template_models:
+            if not isinstance(template_model, dict):
+                continue
+            model_id = template_model.get("id")
+            if model_id and model_id in model_ids:
+                for existing_model in existing_models:
+                    if isinstance(existing_model, dict) and existing_model.get("id") == model_id:
+                        patch_model_from_template(existing_model, template_model)
+                        break
+                continue
+            existing_models.append(copy.deepcopy(template_model))
+            if model_id:
+                model_ids.add(model_id)
+
+    return merged
+
+
+def install_edition(label, user_path):
+    target = Path(user_path) / "chatLanguageModels.json"
+    print(f"==> {{label}} : {{target}}")
+
+    existing = []
+    if target.is_file():
+        raw = target.read_text(encoding="utf-8").strip()
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                existing = parsed
+            elif isinstance(parsed, dict):
+                existing = [parsed]
+            else:
+                raise SystemExit(f"Unexpected JSON type in {{target}}")
+
+    merged = merge_chat_language_models(existing, TEMPLATE)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file():
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = target.with_name(f"{{target.name}}.bak.{{stamp}}")
+        backup.write_bytes(target.read_bytes())
+    target.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2) + "\\n",
+        encoding="utf-8",
+    )
+    print(f"Updated {{target}}")
+
+
+home = Path.home()
+install_edition(
+    "VS Code Stable",
+    home / "Library" / "Application Support" / "Code" / "User",
+)
+install_edition(
+    "VS Code Insiders",
+    home / "Library" / "Application Support" / "Code - Insiders" / "User",
+)
+
+print("")
+print("Next steps:")
+print("1. Reload VS Code window (Developer: Reload Window)")
+print("2. Chat: Manage Language Models -> update API Key with your vcr_sk_... key")
+print("3. Pick the VCRouter model in Copilot (avoid Auto)")
+"""
+    # Keep LF endings for macOS Terminal / .command.
+    return (
+        "#!/bin/bash\n"
+        'cd "$(dirname "$0")"\n'
+        "set -uo pipefail\n"
+        "\n"
+        "if ! command -v python3 >/dev/null 2>&1; then\n"
+        '  echo "python3 is required to merge chatLanguageModels.json."\n'
+        '  echo "Install Python 3 from https://www.python.org/downloads/ or: xcode-select --install"\n'
+        '  read -r -p "Press Enter to close..."\n'
+        "  exit 1\n"
+        "fi\n"
+        "\n"
+        "python3 - <<'PY'\n"
+        f"{python_body.strip()}\n"
+        "PY\n"
+        "status=$?\n"
+        "echo\n"
+        'read -r -p "Press Enter to close..."\n'
+        "exit $status\n"
+    )
 
 
 def render_install_vscode_models_cmd() -> str:
