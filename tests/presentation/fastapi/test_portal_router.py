@@ -645,6 +645,25 @@ def test_install_vscode_models_cmd_download(tmp_path):
     assert "ExecutionPolicy Bypass" in response.text
 
 
+def test_install_vscode_models_command_download_requires_login(tmp_path):
+    client, _, _ = _client(tmp_path)
+    response = client.get("/portal/download/install-vscode-models.command")
+    assert response.status_code == 401
+
+
+def test_install_vscode_models_command_download(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    student = repo.upsert_google_user("student@example.com", "Student")
+    response = client.get(
+        "/portal/download/install-vscode-models.command",
+        cookies={"session_user_id": str(student["id"])},
+    )
+    assert response.status_code == 200
+    assert "install-vscode-models.command" in response.headers["content-disposition"]
+    assert response.text.startswith("#!/bin/bash")
+    assert "python3" in response.text
+
+
 def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")

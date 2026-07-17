@@ -12,6 +12,7 @@ from src.infrastructure.config import RouterSettings
 from src.infrastructure.vscode.install_vscode_models_script import (
     build_install_vscode_models_zip,
     render_install_vscode_models_cmd,
+    render_install_vscode_models_command,
     render_install_vscode_models_script,
 )
 
@@ -328,6 +329,16 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             script,
             media_type="application/octet-stream",
             headers={"Content-Disposition": 'attachment; filename="install-vscode-models.cmd"'},
+        )
+
+    @router.get("/portal/download/install-vscode-models.command")
+    async def download_install_vscode_models_command(session_user_id: str | None = Cookie(default=None)):
+        current_user_id(session_user_id)
+        script = render_install_vscode_models_command()
+        return PlainTextResponse(
+            script,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="install-vscode-models.command"'},
         )
 
     @router.get("/portal/download/install-vscode-models.zip")

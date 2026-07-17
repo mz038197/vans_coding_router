@@ -64,8 +64,12 @@
           <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
         </div>
         <h3>VS Code 一鍵設定</h3>
-        <p class="hint">下載後<strong>雙擊 `install-vscode-models.cmd`</strong>即可（單一檔案、略過 Windows 執行原則）。會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。</p>
-        <a class="btn-download" href="/portal/download/install-vscode-models.cmd" download="install-vscode-models.cmd"><i class="fas fa-download" aria-hidden="true"></i>下載 install-vscode-models.cmd</a>
+        <p id="vscodeInstallHint" class="hint"></p>
+        <div id="vscodeInstallPrimary" class="vscode-install-primary"></div>
+        <details id="vscodeInstallAlt" class="vscode-install-alt">
+          <summary>需要其他系統版本？</summary>
+          <div id="vscodeInstallAltLinks" class="vscode-install-alt-links"></div>
+        </details>
         <h3>有效 Key</h3>
         <div id="keys" class="table-wrap"></div>
       </section>
@@ -1899,7 +1903,62 @@
       }
     }
 
+    function detectInstallOs() {
+      const platform = (navigator.userAgentData && navigator.userAgentData.platform)
+        || navigator.platform
+        || '';
+      const ua = navigator.userAgent || '';
+      const haystack = `${platform} ${ua}`;
+      if (/Win/i.test(haystack)) return 'windows';
+      if (/Mac/i.test(haystack)) return 'macos';
+      return 'other';
+    }
+
+    function renderVscodeInstallDownloads() {
+      const hintEl = document.getElementById('vscodeInstallHint');
+      const primaryEl = document.getElementById('vscodeInstallPrimary');
+      const altLinksEl = document.getElementById('vscodeInstallAltLinks');
+      const altEl = document.getElementById('vscodeInstallAlt');
+      if (!hintEl || !primaryEl || !altLinksEl || !altEl) return;
+
+      const windowsLink = {
+        href: '/portal/download/install-vscode-models.cmd',
+        download: 'install-vscode-models.cmd',
+        label: '下載 install-vscode-models.cmd（Windows）',
+      };
+      const macLink = {
+        href: '/portal/download/install-vscode-models.command',
+        download: 'install-vscode-models.command',
+        label: '下載 install-vscode-models.command（macOS）',
+      };
+      const linkHtml = (item) => (
+        `<a class="btn-download" href="${item.href}" download="${item.download}">`
+        + `<i class="fas fa-download" aria-hidden="true"></i>${item.label}</a>`
+      );
+      const mergeHint = '會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。';
+      const os = detectInstallOs();
+
+      if (os === 'windows') {
+        hintEl.innerHTML = `下載後<strong>雙擊 \`install-vscode-models.cmd\`</strong>即可（單一檔案、略過 Windows 執行原則）。${mergeHint}`;
+        primaryEl.innerHTML = linkHtml(windowsLink);
+        altLinksEl.innerHTML = linkHtml(macLink);
+        altEl.classList.remove('hidden');
+        return;
+      }
+      if (os === 'macos') {
+        hintEl.innerHTML = `下載後<strong>雙擊 \`install-vscode-models.command\`</strong>即可（會開啟 Terminal）。若被擋可右鍵 → 打開，或先執行 <code>chmod +x</code>。需要本機有 <code>python3</code>。${mergeHint}`;
+        primaryEl.innerHTML = linkHtml(macLink);
+        altLinksEl.innerHTML = linkHtml(windowsLink);
+        altEl.classList.remove('hidden');
+        return;
+      }
+      hintEl.innerHTML = `目前一鍵安裝支援 Windows 與 macOS。請選擇對應系統下載。${mergeHint}`;
+      primaryEl.innerHTML = linkHtml(windowsLink) + linkHtml(macLink);
+      altEl.classList.add('hidden');
+    }
+
     loginNetwork.init();
+    renderVscodeInstallDownloads();
     initLogin()
       .catch(() => showLoginShell());
     refresh()
