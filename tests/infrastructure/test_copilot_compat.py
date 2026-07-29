@@ -237,6 +237,33 @@ async def test_normalize_sse_converts_inline_error_to_choices():
     assert '"error":' not in text.replace(" ", "")
 
 
+@pytest.mark.asyncio
+async def test_normalize_sse_converts_string_error_to_choices():
+    error_chunk = (
+        b'data: {"error":"this model uses extra usage only and your extra usage balance is empty"}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    body = await _collect_sse([error_chunk])
+    text = body.decode("utf-8")
+    assert "choices" in text
+    assert "extra usage balance is empty" in text
+    assert '"error":' not in text.replace(" ", "")
+
+
+def test_encode_responses_stream_error_is_completed_output_text():
+    from src.infrastructure.gateways.copilot_compat import encode_responses_stream_error
+
+    text = encode_responses_stream_error("extra usage balance is empty", model="kimi-k3:cloud").decode(
+        "utf-8"
+    )
+    assert "event: response.created" in text
+    assert "event: response.completed" in text
+    assert "extra usage balance is empty" in text
+    assert "output_text" in text
+    assert '"type": "error"' not in text
+    assert '"type":"error"' not in text.replace(" ", "")
+
+
 def test_derive_ollama_native_base():
     assert derive_ollama_native_base("https://ollama.com/v1") == "https://ollama.com"
     assert derive_ollama_native_base("https://ollama.com/v1/") == "https://ollama.com"

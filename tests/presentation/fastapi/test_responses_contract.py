@@ -65,3 +65,32 @@ def test_responses_stream_contract(fake_repo, fake_gateway, fake_logger):
         assert "response.created" in body
         assert fake_gateway.last_responses_body is not None
         assert fake_gateway.last_responses_body["stream"] is True
+
+
+def test_responses_stream_upstream_error_surfaces_readable_text(fake_repo, fake_gateway, fake_logger):
+    from src.domain.errors import UpstreamServiceError
+
+    async def failing_stream(_body):
+        raise UpstreamServiceError(
+            status_code=402,
+            backend="ollama_cloud",
+            body={"error": "extra usage balance is empty, add extra usage"},
+        )
+        yield b""  # pragma: no cover
+
+    fake_gateway.responses_create_stream = failing_stream  # type: ignore[method-assign]
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    with client.stream(
+        "POST",
+        "/v1/responses",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "ollama_cloud@kimi-k3:cloud", "input": "hi", "stream": True},
+    ) as response:
+        body = b"".join(response.iter_bytes()).decode("utf-8")
+        assert response.status_code == 200
+        assert "response.completed" in body
+        assert "extra usage balance is empty" in body
+        assert "output_text" in body
+        # Bare error events collapse to Copilot "no choices"; prefer completed text.
+        assert '"type": "error"' not in body
+        assert '"type":"error"' not in body.replace(" ", "")

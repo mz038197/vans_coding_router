@@ -225,6 +225,109 @@ def encode_chat_stream_error(message: str, *, model: str = "") -> bytes:
     return "".join(parts).encode("utf-8")
 
 
+def _error_message_from_payload(payload: dict[str, Any]) -> str | None:
+    error_obj = payload.get("error")
+    if isinstance(error_obj, str) and error_obj.strip():
+        return error_obj.strip()
+    if isinstance(error_obj, dict):
+        message = error_obj.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return None
+
+
+def encode_responses_stream_error(message: str, *, model: str = "") -> bytes:
+    """Emit a completed Responses SSE so Copilot surfaces the text instead of 'no choices'.
+
+    A bare ``data: {"error": ...}`` event is often swallowed by VS Code BYOK (Responses
+    path) and collapses into ``Response contained no choices``. Emitting a short
+    completed response with the message as assistant ``output_text`` keeps the stream
+    terminal and readable.
+    """
+    created = int(time.time())
+    response_id = "resp_router_error"
+    item_id = "msg_router_error"
+    completed_item = {
+        "id": item_id,
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": message}],
+    }
+    response_in_progress = {
+        "id": response_id,
+        "object": "response",
+        "created_at": created,
+        "model": model,
+        "status": "in_progress",
+        "error": None,
+        "output": [],
+    }
+    response_completed = {
+        **response_in_progress,
+        "status": "completed",
+        "output": [completed_item],
+    }
+    events: list[dict[str, Any]] = [
+        {"type": "response.created", "sequence_number": 0, "response": response_in_progress},
+        {
+            "type": "response.output_item.added",
+            "sequence_number": 1,
+            "output_index": 0,
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "status": "in_progress",
+                "role": "assistant",
+                "content": [],
+            },
+        },
+        {
+            "type": "response.content_part.added",
+            "sequence_number": 2,
+            "item_id": item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": ""},
+        },
+        {
+            "type": "response.output_text.delta",
+            "sequence_number": 3,
+            "item_id": item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "delta": message,
+        },
+        {
+            "type": "response.output_text.done",
+            "sequence_number": 4,
+            "item_id": item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "text": message,
+        },
+        {
+            "type": "response.content_part.done",
+            "sequence_number": 5,
+            "item_id": item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": message},
+        },
+        {
+            "type": "response.output_item.done",
+            "sequence_number": 6,
+            "output_index": 0,
+            "item": completed_item,
+        },
+        {"type": "response.completed", "sequence_number": 7, "response": response_completed},
+    ]
+    parts = [
+        f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
+    ]
+    return "".join(parts).encode("utf-8")
+
+
 async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
     buffer = b""
     saw_meaningful_choice = False
@@ -274,11 +377,8 @@ async def normalize_chat_completions_sse(chunks: AsyncGenerator[bytes, None]) ->
                     yield event + b"\n\n"
                     continue
 
-                if payload.get("error"):
-                    error_message = "Upstream provider error"
-                    error_obj = payload.get("error")
-                    if isinstance(error_obj, dict) and error_obj.get("message"):
-                        error_message = str(error_obj["message"])
+                if payload.get("error") is not None:
+                    error_message = _error_message_from_payload(payload) or "Upstream provider error"
                     model = str(payload.get("model") or (first_payload or {}).get("model") or "")
                     yield encode_chat_stream_error(error_message, model=model)
                     return

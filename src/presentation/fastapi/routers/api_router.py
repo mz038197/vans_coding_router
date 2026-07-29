@@ -14,6 +14,7 @@ from src.presentation.fastapi.openai_errors import (
     openai_error_response,
     openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
+    openai_stream_responses_error_bytes,
 )
 from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
 from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
@@ -36,9 +37,7 @@ def _extract_api_key(request: Request) -> str | None:
 
 
 def _upstream_error_message(exc: UpstreamServiceError) -> str:
-    if exc.status_code in (401, 403):
-        return "Upstream provider authentication failed. Contact your teacher or administrator."
-    return exc.message
+    return exc.user_facing_message()
 
 
 def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
@@ -83,6 +82,7 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
             yield openai_stream_chat_error_bytes(str(e), model=domain_req.model)
 
     async def _responses_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+        model = str(body.get("model") or "")
         try:
             async with aclosing(
                 api_use_case.responses_create_stream(body, api_key, client_ip, auth_context)
@@ -90,13 +90,13 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
-            yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
+            yield openai_stream_responses_error_bytes(_upstream_error_message(e), model=model)
         except UpstreamBusyError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error", code=e.code)
+            yield openai_stream_responses_error_bytes(e.message, model=model)
         except ServiceUnavailableError as e:
-            yield openai_stream_error_bytes(e.message, error_type="server_error")
+            yield openai_stream_responses_error_bytes(e.message, model=model)
         except Exception as e:
-            yield openai_stream_error_bytes(str(e), error_type="server_error")
+            yield openai_stream_responses_error_bytes(str(e), model=model)
 
     @router.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionsRequestSchema, request: Request):

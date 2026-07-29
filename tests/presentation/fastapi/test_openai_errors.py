@@ -9,6 +9,7 @@ from src.presentation.fastapi.openai_errors import (
     make_openai_error_body,
     openai_stream_chat_error_bytes,
     openai_stream_error_bytes,
+    openai_stream_responses_error_bytes,
 )
 
 
@@ -49,3 +50,11 @@ def test_openai_stream_chat_error_bytes_includes_choices():
     assert "upstream down" in text
     assert "data: [DONE]" in text
     assert '"error"' not in text
+
+
+def test_openai_stream_responses_error_bytes_completes_with_text():
+    raw = openai_stream_responses_error_bytes("extra usage empty", model="kimi-k3:cloud")
+    text = raw.decode("utf-8")
+    assert "response.completed" in text
+    assert "extra usage empty" in text
+    assert "output_text" in text
