@@ -77,17 +77,11 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UpstreamServiceError)
     async def handle_upstream_error(request: Request, exc: UpstreamServiceError):
         if is_openai_compatible_path(request.url.path):
-            if exc.status_code in (401, 403):
-                return openai_error_response(
-                    502,
-                    "Upstream provider authentication failed. Contact your teacher or administrator.",
-                    error_type="server_error",
-                    code="upstream_authentication_error",
-                )
             return openai_error_response(
-                exc.status_code,
-                exc.message,
+                502 if exc.status_code in (401, 403) else exc.status_code,
+                exc.user_facing_message(),
                 error_type="server_error",
+                code="upstream_authentication_error" if exc.status_code in (401, 403) else None,
             )
         details = exc.details or {}
         return JSONResponse(

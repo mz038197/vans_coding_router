@@ -1,4 +1,54 @@
+from __future__ import annotations
+
+import json
 from typing import Any
+
+_UPSTREAM_AUTH_MESSAGE = (
+    "Upstream provider authentication failed. Contact your teacher or administrator."
+)
+_MAX_UPSTREAM_ERROR_CHARS = 2000
+
+
+def extract_upstream_error_text(body: Any) -> str | None:
+    """Pull a human-readable message from an upstream error body.
+
+    Providers differ: OpenAI-style ``{"error": {"message": "..."}}``,
+    Ollama-style ``{"error": "..."}``, raw JSON strings, or plain text.
+    """
+    if body is None:
+        return None
+
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+
+    if isinstance(body, str):
+        text = body.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return text[:_MAX_UPSTREAM_ERROR_CHARS]
+        return extract_upstream_error_text(parsed)
+
+    if isinstance(body, dict):
+        error_obj = body.get("error")
+        if isinstance(error_obj, str) and error_obj.strip():
+            return error_obj.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+        if isinstance(error_obj, dict):
+            message = error_obj.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+            nested = error_obj.get("error")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+        message = body.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+        return None
+
+    text = str(body).strip()
+    return text[:_MAX_UPSTREAM_ERROR_CHARS] if text else None
 
 
 class AppError(Exception):
@@ -76,6 +126,13 @@ class UpstreamServiceError(AppError):
             code="UPSTREAM_SERVICE_ERROR",
             details={"backend": backend, "body": body},
         )
+
+    def user_facing_message(self) -> str:
+        if self.status_code in (401, 403):
+            return _UPSTREAM_AUTH_MESSAGE
+        body = (self.details or {}).get("body")
+        extracted = extract_upstream_error_text(body)
+        return extracted or self.message
 
 
 class ServiceUnavailableError(AppError):

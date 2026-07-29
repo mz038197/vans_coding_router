@@ -122,7 +122,7 @@ def test_chat_completion_upstream_error_nonstream_openai_format(fake_repo, fake_
     )
     assert response.status_code == 502
     payload = response.json()
-    assert payload["error"]["message"] == "Upstream provider error"
+    assert payload["error"]["message"] == "upstream failed"
     assert payload["error"]["type"] == "server_error"
     assert "detail" not in payload
 
@@ -147,8 +147,27 @@ def test_chat_completion_upstream_error_stream_openai_sse(fake_repo, fake_gatewa
         body = b"".join(response.iter_bytes()).decode("utf-8")
         assert response.status_code == 200
         assert "choices" in body
-        assert "Upstream provider error" in body
+        assert "upstream failed" in body
         assert "data: [DONE]" in body
+
+
+def test_chat_completion_upstream_string_error_json_body(fake_repo, fake_gateway, fake_logger):
+    async def failing_nonstream(_req):
+        raise UpstreamServiceError(
+            status_code=402,
+            backend="ollama_cloud",
+            body='{"error":"this model uses extra usage only and your extra usage balance is empty"}',
+        )
+
+    fake_gateway.chat_completions_nonstream = failing_nonstream
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "fake-model", "messages": [{"role": "user", "content": "hello"}], "stream": False},
+    )
+    assert response.status_code == 402
+    assert "extra usage balance is empty" in response.json()["error"]["message"]
 
 
 def test_chat_completion_rejects_empty_content(fake_repo, fake_gateway, fake_logger):
