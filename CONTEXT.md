@@ -15,3 +15,19 @@ _Avoid_: Copilot bug, no choices, model offline
 **Readable Upstream Error**:
 The provider's refusal text surfaced to the client (chat choices content or Responses `output_text`) so the user can act on it.
 _Avoid_: Generic "Upstream provider error", "Response contained no choices"
+
+**Speech** (Portal: 語音):
+A class-session permission for text-to-speech. It does not grant speech-to-text.
+_Avoid_: Voice, 語音轉寫, transcription
+
+**Speech Transcription** (Portal: 語音轉寫):
+A class-session permission for speech-to-text, covering both file transcription and realtime transcription. New sessions leave this off by default.
+_Avoid_: Speech, 語音, TTS
+
+**File Transcription**:
+Speech-to-text over a completed audio upload, including optional streamed transcript output while that file is processed.
+_Avoid_: Realtime transcription, live microphone session
+
+**Realtime Transcription**:
+Speech-to-text over a live audio stream in a persistent realtime session.
+_Avoid_: File transcription, streamed file transcript

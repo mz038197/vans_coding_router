@@ -151,6 +151,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(
                 conn,
                 "class_sessions",
+                "speech_transcription_enabled",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                conn,
+                "class_sessions",
                 "prompt_logging_enabled",
                 "INTEGER NOT NULL DEFAULT 1",
             )

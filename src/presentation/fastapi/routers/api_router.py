@@ -2,13 +2,21 @@ from typing import Any
 
 from contextlib import aclosing
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.application.dto.chat_dto import ChatCompletionInputDto
 from src.application.use_cases.api_use_case import ApiUseCase
-from src.domain.errors import ServiceUnavailableError, UpstreamBusyError, UpstreamServiceError
+from src.application.use_cases.auth_use_case import AuthUseCase
+from src.domain.errors import (
+    InvalidModelIdError,
+    ServiceUnavailableError,
+    SpeechTranscriptionDisabledError,
+    SpeechTranscriptionNotSupportedError,
+    UpstreamBusyError,
+    UpstreamServiceError,
+)
 from src.presentation.fastapi.auth_responses import openai_auth_error_response
 from src.presentation.fastapi.openai_errors import (
     openai_error_response,
@@ -16,6 +24,7 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_error_bytes,
     openai_stream_responses_error_bytes,
 )
+from src.infrastructure.gateways.realtime_proxy import UpstreamConnect, proxy_realtime_session
 from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
 from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
 from src.presentation.fastapi.streaming import AclosingStreamingResponse
@@ -40,8 +49,21 @@ def _upstream_error_message(exc: UpstreamServiceError) -> str:
     return exc.user_facing_message()
 
 
-def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
+async def _default_realtime_connect(url: str, headers: dict[str, str]):
+    import websockets
+
+    return await websockets.connect(url, additional_headers=headers)
+
+
+def create_api_router(
+    api_use_case: ApiUseCase,
+    *,
+    auth_use_case: AuthUseCase | None = None,
+    realtime_connect: UpstreamConnect | None = None,
+) -> APIRouter:
     router = APIRouter(tags=["API"])
+    auth = auth_use_case or AuthUseCase(api_key_repo=api_use_case.api_key_repo)
+    connect = realtime_connect or _default_realtime_connect
 
     @router.get("/health")
     async def health():
@@ -237,5 +259,128 @@ def create_api_router(api_use_case: ApiUseCase) -> APIRouter:
         generator = _audio_speech_stream_with_error_handling(body, api_key, client_ip, auth_context)
         media_type = _audio_speech_media_type(body.get("response_format"))
         return AclosingStreamingResponse(generator, media_type=media_type)
+
+    async def _audio_transcriptions_stream_with_error_handling(
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+        api_key,
+        client_ip,
+        auth_context,
+    ):
+        try:
+            async with aclosing(
+                api_use_case.audio_transcriptions_create_stream(
+                    fields, file, api_key, client_ip, auth_context
+                )
+            ) as stream:
+                async for chunk in stream:
+                    yield chunk
+        except UpstreamServiceError as e:
+            yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
+        except ServiceUnavailableError as e:
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except Exception as e:
+            yield openai_stream_error_bytes(str(e), error_type="server_error")
+
+    @router.post("/v1/audio/transcriptions")
+    async def audio_transcriptions_create(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            return openai_error_response(
+                400,
+                "Missing file",
+                error_type="invalid_request_error",
+                code="invalid_request_error",
+                param="file",
+            )
+        file_bytes = await upload.read()
+        filename = getattr(upload, "filename", None) or "audio"
+        content_type = getattr(upload, "content_type", None)
+        fields: dict[str, Any] = {}
+        for key, value in form.multi_items():
+            if key == "file":
+                continue
+            if hasattr(value, "read"):
+                continue
+            fields[key] = value
+
+        api_use_case.validate_audio_transcriptions_request(fields, auth_context)
+        file = (str(filename), file_bytes, content_type)
+        stream_flag = str(fields.get("stream", "")).lower() in {"1", "true", "yes"}
+        if stream_flag:
+            generator = _audio_transcriptions_stream_with_error_handling(
+                fields, file, api_key, client_ip, auth_context
+            )
+            return AclosingStreamingResponse(generator, media_type="text/event-stream")
+
+        data = await api_use_case.audio_transcriptions_create(
+            fields, file, api_key, client_ip, auth_context
+        )
+        return JSONResponse(content=data)
+
+    def _extract_ws_api_key(ws: WebSocket) -> str | None:
+        auth_header = ws.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            value = normalize_api_key(auth_header[7:])
+            return value or None
+        value = normalize_api_key(ws.headers.get("x-api-key"))
+        if value:
+            return value
+        query_key = ws.query_params.get("api_key")
+        if query_key:
+            return normalize_api_key(query_key) or None
+        return None
+
+    @router.websocket("/v1/realtime")
+    async def realtime_proxy(ws: WebSocket, model: str = Query(default="")):
+        api_key = _extract_ws_api_key(ws) or ""
+        auth_context = auth.verify_context(api_key)
+        if auth_context is None:
+            await ws.close(code=1008, reason="invalid_api_key")
+            return
+        try:
+            target = api_use_case.validate_realtime_request(model, auth_context)
+        except InvalidModelIdError:
+            await ws.close(code=1008, reason="invalid_model_id")
+            return
+        except SpeechTranscriptionDisabledError:
+            await ws.close(code=1008, reason="speech_transcription_disabled")
+            return
+        except SpeechTranscriptionNotSupportedError:
+            await ws.close(code=1008, reason="speech_transcription_not_supported")
+            return
+        except ServiceUnavailableError:
+            await ws.close(code=1013, reason="upstream_unavailable")
+            return
+
+        await ws.accept()
+        client_ip = ws.client.host if ws.client else None
+        transcript_text = ""
+        try:
+            transcript_text = await proxy_realtime_session(ws, target, connect=connect)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            try:
+                await ws.close(code=1011, reason="realtime_proxy_error")
+            except Exception:
+                pass
+        finally:
+            api_use_case.log_realtime_transcription(
+                model,
+                api_key,
+                client_ip,
+                auth_context,
+                transcript_text,
+            )
 
     return router

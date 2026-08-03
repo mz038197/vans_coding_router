@@ -69,6 +69,7 @@ providers:
     api_key_env: "OPENAI_API_KEY"
     capabilities:
       - audio_speech
+      - audio_transcription
 ```
 
 Examples:
@@ -100,10 +101,12 @@ Supported endpoints:
 - `POST /v1/images` (OpenRouter image generation; model ID e.g. `openrouter@black-forest-labs/flux.2-pro`)
 - `GET /v1/images/models`
 - `POST /v1/audio/speech` (TTS via providers with `audio_speech` capability; model ID e.g. `openai@gpt-4o-mini-tts`)
+- `POST /v1/audio/transcriptions` (file STT via providers with `audio_transcription` capability; model ID e.g. `openai@gpt-transcribe`; supports `stream=true`)
+- `WS /v1/realtime?model=openai@gpt-live-transcribe` (Realtime transcription proxy; same `audio_transcription` capability and **語音轉寫** toggle)
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.
 
-Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). TTS follows each session's **語音** toggle (default on). Teacher long-lived keys are not restricted by session toggles.
+Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). TTS follows each session's **語音** toggle (default on). File and realtime speech-to-text follow each session's **語音轉寫** toggle (default off). Teacher long-lived keys are not restricted by session toggles.
 
 ## Portal Flow
 

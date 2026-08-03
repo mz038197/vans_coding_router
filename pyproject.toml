@@ -20,4 +20,5 @@ dependencies = [
     "requests>=2.34.2",
     "psycopg[binary]>=3.2.0",
     "websockets>=16.0",
+    "python-multipart>=0.0.20",
 ]

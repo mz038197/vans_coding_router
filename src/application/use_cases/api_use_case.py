@@ -4,6 +4,7 @@ from typing import Any, AsyncGenerator
 
 from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
+    AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
     IMAGES_PATH,
     RESPONSES_PATH,
@@ -17,7 +18,14 @@ from src.infrastructure.logging.message_preview import (
 
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import ImageGenerationDisabledError, StatefulResponsesNotSupportedError, TtsDisabledError
+from src.domain.errors import (
+    ImageGenerationDisabledError,
+    SpeechTranscriptionDisabledError,
+    SpeechTranscriptionNotSupportedError,
+    StatefulResponsesNotSupportedError,
+    TtsDisabledError,
+)
+from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
@@ -230,6 +238,140 @@ class ApiUseCase:
         prepare = getattr(self.gateway, "prepare_audio_speech_body", None)
         if callable(prepare):
             prepare(body)
+
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        response = await self.gateway.audio_transcriptions_create(fields, file)
+        self._log_transcription_request(
+            fields,
+            file[0],
+            api_key,
+            client_ip,
+            auth_context,
+            transcript_text=str(response.get("text") or "") if isinstance(response, dict) else "",
+            api_endpoint=AUDIO_TRANSCRIPTIONS_PATH,
+        )
+        return response
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> AsyncGenerator[bytes, None]:
+        chunks: list[bytes] = []
+        async with aclosing(
+            self.gateway.audio_transcriptions_create_stream(fields, file)
+        ) as stream:
+            async for chunk in stream:
+                chunks.append(chunk)
+                yield chunk
+        self._log_transcription_request(
+            fields,
+            file[0],
+            api_key,
+            client_ip,
+            auth_context,
+            transcript_text=_transcript_text_from_stream_chunks(chunks),
+            api_endpoint=AUDIO_TRANSCRIPTIONS_PATH,
+        )
+
+    def validate_audio_transcriptions_request(
+        self,
+        fields: dict[str, Any],
+        auth_context: AuthContext | None = None,
+    ) -> None:
+        self._assert_speech_transcription_allowed(auth_context)
+        self._prepare_audio_transcriptions_fields(fields)
+
+    def _assert_speech_transcription_allowed(self, auth_context: AuthContext | None) -> None:
+        if auth_context is None or auth_context.session_id is None:
+            return
+        if not hasattr(self.api_key_repo, "is_speech_transcription_enabled"):
+            return
+        if not self.api_key_repo.is_speech_transcription_enabled(auth_context.session_id):
+            raise SpeechTranscriptionDisabledError()
+
+    def validate_realtime_request(
+        self,
+        model_id: str,
+        auth_context: AuthContext | None = None,
+    ) -> RealtimeUpstreamTarget:
+        self._assert_speech_transcription_allowed(auth_context)
+        resolve = getattr(self.gateway, "resolve_realtime", None)
+        if not callable(resolve):
+            raise SpeechTranscriptionNotSupportedError(
+                "此 gateway 不支援 realtime transcription"
+            )
+        return resolve(model_id)
+
+    def log_realtime_transcription(
+        self,
+        model_id: str,
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        transcript_text: str,
+    ) -> None:
+        self._log_transcription_request(
+            {"model": model_id},
+            "realtime",
+            api_key,
+            client_ip,
+            auth_context,
+            transcript_text=transcript_text,
+            api_endpoint="/v1/realtime",
+        )
+
+    def _prepare_audio_transcriptions_fields(self, fields: dict[str, Any]) -> None:
+        prepare = getattr(self.gateway, "prepare_audio_transcriptions_fields", None)
+        if callable(prepare):
+            prepare(fields)
+
+    def _log_transcription_request(
+        self,
+        fields: dict[str, Any],
+        filename: str,
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        transcript_text: str,
+        api_endpoint: str = AUDIO_TRANSCRIPTIONS_PATH,
+    ) -> None:
+        model = fields.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        filename_text = filename or "audio"
+        messages = [{"role": "user", "content": f"[audio file: {filename_text}]"}]
+        assistant_messages = (
+            [{"role": "assistant", "content": transcript_text}] if transcript_text else []
+        )
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            None,
+            assistant_messages=assistant_messages,
+            api_endpoint=api_endpoint,
+        )
 
     def _validate_responses_body(self, body: dict[str, Any]) -> None:
         previous_response_id = body.get("previous_response_id")
@@ -677,3 +819,32 @@ def _responses_input_for_log(body: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _transcript_text_from_stream_chunks(chunks: list[bytes]) -> str:
+    deltas: list[str] = []
+    for chunk in chunks:
+        text = chunk.decode("utf-8", errors="replace")
+        for line in text.splitlines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                data = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            delta = data.get("delta")
+            if isinstance(delta, str) and delta:
+                deltas.append(delta)
+                continue
+            full_text = data.get("text")
+            if isinstance(full_text, str) and full_text and data.get("type") in {
+                "transcript.text.done",
+                "transcription.completed",
+            }:
+                return full_text
+    return "".join(deltas)

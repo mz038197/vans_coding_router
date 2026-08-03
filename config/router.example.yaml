@@ -50,3 +50,4 @@ providers:
     enabled: true
     capabilities:
       - audio_speech
+      - audio_transcription

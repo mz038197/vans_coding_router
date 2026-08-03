@@ -11,11 +11,13 @@ from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
     ImageGenerationNotSupportedError,
     ServiceUnavailableError,
+    SpeechTranscriptionNotSupportedError,
     TtsNotSupportedError,
     UpstreamServiceError,
 )
 from src.infrastructure.config import (
     CAPABILITY_AUDIO_SPEECH,
+    CAPABILITY_AUDIO_TRANSCRIPTION,
     ProviderSettings,
     providers_with_capability,
     resolve_provider_api_keys,
@@ -176,6 +178,39 @@ class OpenAICompatibleGateway:
             async for chunk in stream:
                 yield chunk
 
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> dict[str, Any]:
+        self._assert_audio_transcription_provider()
+        response = await self._request(
+            "POST",
+            "/audio/transcriptions",
+            data=_multipart_form_data(fields),
+            files=_multipart_file(file),
+        )
+        return self._json_or_error(response)
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> AsyncGenerator[bytes, None]:
+        self._assert_audio_transcription_provider()
+        payload = dict(fields)
+        payload["stream"] = "true"
+        async with aclosing(
+            self._stream(
+                "POST",
+                "/audio/transcriptions",
+                data=_multipart_form_data(payload),
+                files=_multipart_file(file),
+            )
+        ) as stream:
+            async for chunk in stream:
+                yield chunk
+
     def _assert_image_provider(self) -> None:
         if self.provider.name not in _IMAGE_API_PROVIDERS:
             raise ImageGenerationNotSupportedError(
@@ -188,6 +223,17 @@ class OpenAICompatibleGateway:
             hint = f"{capable[0]}@..." if capable else "audio_speech provider"
             raise TtsNotSupportedError(
                 f"provider「{self.provider.name}」不支援 /v1/audio/speech，請使用 {hint}"
+            )
+
+    def _assert_audio_transcription_provider(self) -> None:
+        if CAPABILITY_AUDIO_TRANSCRIPTION not in self.provider.capabilities:
+            capable = providers_with_capability(
+                {self.provider.name: self.provider},
+                CAPABILITY_AUDIO_TRANSCRIPTION,
+            )
+            hint = f"{capable[0]}@..." if capable else "audio_transcription provider"
+            raise SpeechTranscriptionNotSupportedError(
+                f"provider「{self.provider.name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
             )
 
     async def _request(
@@ -301,6 +347,23 @@ class OpenAICompatibleGateway:
             self._headers(),
         )
         return sanitize_responses_request(payload, supports_thinking)
+
+
+def _multipart_form_data(fields: dict[str, Any]) -> dict[str, str]:
+    data: dict[str, str] = {}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            data[key] = "true" if value else "false"
+        else:
+            data[key] = str(value)
+    return data
+
+
+def _multipart_file(file: tuple[str, bytes, str | None]) -> dict[str, tuple[str, bytes, str]]:
+    filename, content, content_type = file
+    return {"file": (filename, content, content_type or "application/octet-stream")}
 
 
 def _chat_payload(req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:

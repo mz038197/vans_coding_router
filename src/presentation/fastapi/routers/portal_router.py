@@ -47,6 +47,7 @@ class SessionPatchRequest(BaseModel):
     name: str | None = None
     image_generation_enabled: bool | None = None
     tts_enabled: bool | None = None
+    speech_transcription_enabled: bool | None = None
     prompt_logging_enabled: bool | None = None
     status: str | None = None
 
@@ -253,6 +254,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 name=data.name,
                 image_generation_enabled=data.image_generation_enabled,
                 tts_enabled=data.tts_enabled,
+                speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
                 status=data.status,
             )

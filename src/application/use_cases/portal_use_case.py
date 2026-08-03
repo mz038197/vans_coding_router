@@ -93,6 +93,7 @@ class PortalUseCase:
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
     ) -> dict[str, Any] | None:
@@ -108,6 +109,7 @@ class PortalUseCase:
             name=name,
             image_generation_enabled=image_generation_enabled,
             tts_enabled=tts_enabled,
+            speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
             status=status,
         )

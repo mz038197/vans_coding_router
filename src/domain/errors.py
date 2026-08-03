@@ -203,6 +203,24 @@ class TtsDisabledError(AppError):
         )
 
 
+class SpeechTranscriptionNotSupportedError(AppError):
+    def __init__(self, message: str = "此 provider 不支援 /v1/audio/transcriptions"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="speech_transcription_not_supported",
+        )
+
+
+class SpeechTranscriptionDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放語音轉寫"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="speech_transcription_disabled",
+        )
+
+
 class StatefulResponsesNotSupportedError(AppError):
     def __init__(
         self,

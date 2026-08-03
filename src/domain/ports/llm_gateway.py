@@ -39,3 +39,17 @@ class LLMGatewayPort(Protocol):
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         ...
+
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> dict[str, Any]:
+        ...
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> AsyncGenerator[bytes, None]:
+        ...

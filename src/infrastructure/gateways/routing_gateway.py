@@ -5,10 +5,20 @@ from dataclasses import replace
 from typing import Any, AsyncGenerator
 
 from src.domain.entities.chat import ChatCompletionRequest
-from src.domain.errors import InvalidModelIdError, TtsNotSupportedError
+from src.domain.errors import (
+    InvalidModelIdError,
+    ServiceUnavailableError,
+    SpeechTranscriptionNotSupportedError,
+    TtsNotSupportedError,
+)
 from src.domain.ports.llm_gateway import LLMGatewayPort
-from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH
+from src.infrastructure.config import (
+    CAPABILITY_AUDIO_SPEECH,
+    CAPABILITY_AUDIO_TRANSCRIPTION,
+    resolve_provider_api_keys,
+)
 from src.infrastructure.gateways.copilot_compat import to_ollama_cloud_inference_id
+from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget, http_base_to_realtime_ws_url
 from src.infrastructure.routing.model_id import format_model_id, parse_model_id
 
 _OLLAMA_CLOUD_PROVIDER = "ollama_cloud"
@@ -134,6 +144,50 @@ class RoutingGateway:
     def prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
         self._resolve_audio_speech_body(body)
 
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> dict[str, Any]:
+        gateway, payload = self._resolve_audio_transcriptions_fields(fields)
+        return await gateway.audio_transcriptions_create(payload, file)
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> AsyncGenerator[bytes, None]:
+        gateway, payload = self._resolve_audio_transcriptions_fields(fields)
+        async with aclosing(gateway.audio_transcriptions_create_stream(payload, file)) as stream:
+            async for chunk in stream:
+                yield chunk
+
+    def prepare_audio_transcriptions_fields(self, fields: dict[str, Any]) -> None:
+        self._resolve_audio_transcriptions_fields(fields)
+
+    def resolve_realtime(self, model_id: str) -> RealtimeUpstreamTarget:
+        provider_name, upstream_model = parse_model_id(model_id, self._known_providers())
+        if not self._provider_supports_audio_transcription(provider_name):
+            capable = self._audio_transcription_provider_names()
+            hint = "、".join(f"{name}@..." for name in capable) if capable else "audio_transcription provider"
+            raise SpeechTranscriptionNotSupportedError(
+                f"provider「{provider_name}」不支援 realtime transcription，請使用 {hint}"
+            )
+        upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
+        gateway = self.gateways[provider_name]
+        provider = getattr(gateway, "provider", None)
+        if provider is None or not getattr(provider, "base_url", ""):
+            raise ServiceUnavailableError(f"{provider_name} unavailable: missing base_url")
+        keys = resolve_provider_api_keys(provider)
+        if not keys:
+            raise ServiceUnavailableError(f"{provider_name} unavailable: missing api key")
+        return RealtimeUpstreamTarget(
+            provider_name=provider_name,
+            upstream_model=upstream_model,
+            ws_url=http_base_to_realtime_ws_url(provider.base_url, upstream_model),
+            api_key=keys[0],
+        )
+
     def _known_providers(self) -> set[str]:
         return set(self.gateways.keys())
 
@@ -167,21 +221,41 @@ class RoutingGateway:
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
 
+    def _resolve_audio_transcriptions_fields(
+        self,
+        fields: dict[str, Any],
+    ) -> tuple[LLMGatewayPort, dict[str, Any]]:
+        provider_name, upstream_model = parse_model_id(str(fields.get("model", "")), self._known_providers())
+        if not self._provider_supports_audio_transcription(provider_name):
+            capable = self._audio_transcription_provider_names()
+            hint = "、".join(f"{name}@..." for name in capable) if capable else "audio_transcription provider"
+            raise SpeechTranscriptionNotSupportedError(
+                f"provider「{provider_name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
+            )
+        payload = dict(fields)
+        payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
+        return self.gateways[provider_name], payload
+
     def _provider_supports_audio_speech(self, provider_name: str) -> bool:
+        return self._provider_has_capability(provider_name, CAPABILITY_AUDIO_SPEECH)
+
+    def _provider_supports_audio_transcription(self, provider_name: str) -> bool:
+        return self._provider_has_capability(provider_name, CAPABILITY_AUDIO_TRANSCRIPTION)
+
+    def _provider_has_capability(self, provider_name: str, capability: str) -> bool:
         gateway = self.gateways.get(provider_name)
         if gateway is None:
             return False
         provider = getattr(gateway, "provider", None)
         if provider is None:
             return False
-        return CAPABILITY_AUDIO_SPEECH in getattr(provider, "capabilities", ())
+        return capability in getattr(provider, "capabilities", ())
 
     def _audio_speech_provider_names(self) -> list[str]:
-        names: list[str] = []
-        for name, gateway in self.gateways.items():
-            if self._provider_supports_audio_speech(name):
-                names.append(name)
-        return names
+        return [name for name in self.gateways if self._provider_supports_audio_speech(name)]
+
+    def _audio_transcription_provider_names(self) -> list[str]:
+        return [name for name in self.gateways if self._provider_supports_audio_transcription(name)]
 
     def _normalize_upstream_model(self, provider_name: str, upstream_model: str) -> str:
         if provider_name == _OLLAMA_CLOUD_PROVIDER:

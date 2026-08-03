@@ -82,6 +82,7 @@ class RouterRepositoryPort(Protocol):
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
     ) -> dict[str, Any] | None:
@@ -91,6 +92,9 @@ class RouterRepositoryPort(Protocol):
         ...
 
     def is_tts_enabled(self, session_id: int) -> bool:
+        ...
+
+    def is_speech_transcription_enabled(self, session_id: int) -> bool:
         ...
 
     def is_prompt_logging_enabled(self, session_id: int) -> bool:

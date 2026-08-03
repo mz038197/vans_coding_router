@@ -1284,9 +1284,9 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 5 + (allowOwnerActions ? 3 : 0) + (showRedemptions ? 1 : 0);
+      const colCount = 5 + (allowOwnerActions ? 4 : 0) + (showRedemptions ? 1 : 0);
       box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}</tr>
+        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>語音轉寫</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}</tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(classId, s, allowOwnerActions)}</td>
@@ -1307,6 +1307,14 @@
                   ${sessionTtsEnabled(s) ? 'checked' : ''}
                   onchange="toggleSessionTts(${classId}, ${s.id}, this.checked, this)" />
                 <span>${sessionTtsEnabled(s) ? '開啟' : '關閉'}</span>
+              </label>
+            </td>
+            <td>
+              <label class="session-speech-transcription-toggle" title="上傳音檔／即時語音轉寫">
+                <input type="checkbox"
+                  ${sessionSpeechTranscriptionEnabled(s) ? 'checked' : ''}
+                  onchange="toggleSessionSpeechTranscription(${classId}, ${s.id}, this.checked, this)" />
+                <span>${sessionSpeechTranscriptionEnabled(s) ? '開啟' : '關閉'}</span>
               </label>
             </td>
             <td>
@@ -1362,6 +1370,27 @@
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
           body: JSON.stringify({ tts_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '開啟' : '關閉';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    function sessionSpeechTranscriptionEnabled(session) {
+      const value = session.speech_transcription_enabled;
+      if (value === undefined || value === null) return false;
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function toggleSessionSpeechTranscription(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-speech-transcription-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ speech_transcription_enabled: enabled }),
         });
         if (label) label.textContent = enabled ? '開啟' : '關閉';
       } catch (err) {

@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 from src.domain.entities.chat import ChatCompletionRequest
+from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.logging.message_preview import build_message_preview
 
 
@@ -228,6 +229,13 @@ class FakeLLMGateway:
         ]
         self.last_audio_speech_body: dict[str, Any] | None = None
         self.audio_speech_stream_chunks = [b"\x00\x01", b"\x00\x02"]
+        self.last_audio_transcriptions_fields: dict[str, Any] | None = None
+        self.last_audio_transcriptions_file: tuple[str, bytes, str | None] | None = None
+        self.audio_transcriptions_response = {"text": "hello from audio"}
+        self.audio_transcriptions_stream_chunks = [
+            b'data: {"type":"transcript.text.delta","delta":"hello"}\n\n',
+            b"data: [DONE]\n\n",
+        ]
 
     async def startup(self) -> None:
         return None
@@ -279,3 +287,33 @@ class FakeLLMGateway:
         self.last_audio_speech_body = body
         for chunk in self.audio_speech_stream_chunks:
             yield chunk
+
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> dict[str, Any]:
+        self.last_audio_transcriptions_fields = fields
+        self.last_audio_transcriptions_file = file
+        return self.audio_transcriptions_response
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> AsyncGenerator[bytes, None]:
+        self.last_audio_transcriptions_fields = fields
+        self.last_audio_transcriptions_file = file
+        for chunk in self.audio_transcriptions_stream_chunks:
+            yield chunk
+
+    def resolve_realtime(self, model_id: str) -> RealtimeUpstreamTarget:
+        from src.infrastructure.routing.model_id import parse_model_id
+
+        _provider, upstream = parse_model_id(model_id, {"openai", "openrouter", "ollama_cloud"})
+        return RealtimeUpstreamTarget(
+            provider_name="openai",
+            upstream_model=upstream,
+            ws_url=f"ws://upstream.test/v1/realtime?model={upstream}",
+            api_key="sk-test",
+        )

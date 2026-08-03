@@ -3,8 +3,8 @@ from typing import Any, AsyncGenerator
 import pytest
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import InvalidModelIdError, TtsNotSupportedError
-from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH, ProviderSettings
+from src.domain.errors import InvalidModelIdError, SpeechTranscriptionNotSupportedError, TtsNotSupportedError
+from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH, CAPABILITY_AUDIO_TRANSCRIPTION, ProviderSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
 
@@ -62,6 +62,26 @@ class FakeGateway:
         self.requests.append(str(body.get("model")))
         yield b"\x00\x01"
 
+    async def audio_transcriptions_create(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> dict[str, Any]:
+        self.requests.append(str(fields.get("model")))
+        self.last_transcription_fields = fields
+        self.last_transcription_file = file
+        return {"text": "ok", "provider": self.name}
+
+    async def audio_transcriptions_create_stream(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+    ) -> AsyncGenerator[bytes, None]:
+        self.requests.append(str(fields.get("model")))
+        self.last_transcription_fields = fields
+        self.last_transcription_file = file
+        yield b"data: [DONE]\n\n"
+
 
 @pytest.fixture
 def gateway() -> RoutingGateway:
@@ -79,7 +99,7 @@ def audio_gateway() -> RoutingGateway:
         {
             "openrouter": FakeGateway("openrouter"),
             "ollama_cloud": FakeGateway("ollama_cloud"),
-            "openai": FakeGateway("openai", (CAPABILITY_AUDIO_SPEECH,)),
+            "openai": FakeGateway("openai", (CAPABILITY_AUDIO_SPEECH, CAPABILITY_AUDIO_TRANSCRIPTION)),
         }
     )
 
@@ -209,6 +229,44 @@ async def test_routing_gateway_audio_speech_rejects_unsupported_provider(audio_g
             {"model": "openrouter@gpt-4o-mini-tts", "input": "hello", "voice": "nova"}
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_audio_transcriptions_strips_provider_prefix(audio_gateway: RoutingGateway):
+    openai = audio_gateway.gateways["openai"]
+    response = await audio_gateway.audio_transcriptions_create(
+        {"model": "openai@gpt-transcribe"},
+        ("speech.wav", b"RIFF", "audio/wav"),
+    )
+    assert response["provider"] == "openai"
+    assert openai.requests == ["gpt-transcribe"]
+    assert openai.last_transcription_file == ("speech.wav", b"RIFF", "audio/wav")
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_audio_transcriptions_rejects_unsupported_provider(
+    audio_gateway: RoutingGateway,
+):
+    with pytest.raises(SpeechTranscriptionNotSupportedError):
+        await audio_gateway.audio_transcriptions_create(
+            {"model": "openrouter@gpt-transcribe"},
+            ("speech.wav", b"RIFF", "audio/wav"),
+        )
+
+
+def test_routing_gateway_resolve_realtime(monkeypatch, audio_gateway: RoutingGateway):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    openai = audio_gateway.gateways["openai"]
+    openai.provider = ProviderSettings(
+        name="openai",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        capabilities=(CAPABILITY_AUDIO_SPEECH, CAPABILITY_AUDIO_TRANSCRIPTION),
+    )
+    target = audio_gateway.resolve_realtime("openai@gpt-live-transcribe")
+    assert target.upstream_model == "gpt-live-transcribe"
+    assert target.ws_url == "wss://api.openai.com/v1/realtime?model=gpt-live-transcribe"
+    assert target.api_key == "sk-from-env"
 
 
 def test_routing_gateway_pool_status_limited_only(monkeypatch):

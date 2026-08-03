@@ -576,6 +576,7 @@ class RouterRepositoryBase(ABC):
         name: str | None = None,
         image_generation_enabled: bool | None = None,
         tts_enabled: bool | None = None,
+        speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
     ) -> dict[str, Any] | None:
@@ -584,6 +585,7 @@ class RouterRepositoryBase(ABC):
             and name is None
             and image_generation_enabled is None
             and tts_enabled is None
+            and speech_transcription_enabled is None
             and prompt_logging_enabled is None
             and status is None
         ):
@@ -625,6 +627,13 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET tts_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(tts_enabled), session_id),
                 )
+            if speech_transcription_enabled is not None:
+                conn.execute(
+                    self._sql(
+                        "UPDATE class_sessions SET speech_transcription_enabled = ? WHERE id = ?"
+                    ),
+                    (self._bool_storage_value(speech_transcription_enabled), session_id),
+                )
             if prompt_logging_enabled is not None:
                 conn.execute(
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
@@ -658,6 +667,21 @@ class RouterRepositoryBase(ABC):
             if not row:
                 return False
             value = row["tts_enabled"]
+            if isinstance(value, bool):
+                return value
+            return bool(int(value or 0))
+
+    def is_speech_transcription_enabled(self, session_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT speech_transcription_enabled FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            value = row["speech_transcription_enabled"]
+            if value is None:
+                return False
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))

@@ -30,6 +30,7 @@ class PromptLogSettings:
 
 
 CAPABILITY_AUDIO_SPEECH = "audio_speech"
+CAPABILITY_AUDIO_TRANSCRIPTION = "audio_transcription"
 
 
 @dataclass(frozen=True)
