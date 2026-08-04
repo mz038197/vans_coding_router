@@ -16,7 +16,10 @@ from src.infrastructure.vscode.install_vscode_models_script import (
     render_install_vscode_models_script,
 )
 
-PORTAL_HTML_PATH = Path(__file__).resolve().parent.parent / "web" / "portal.html"
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+PORTAL_HTML_PATH = WEB_DIR / "portal.html"
+PORTAL_CSS_PATH = WEB_DIR / "portal.css"
+PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +124,24 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.get("/portal", response_class=HTMLResponse)
     async def portal_page():
         return HTMLResponse(PORTAL_HTML_PATH.read_text(encoding="utf-8"))
+
+    @router.get("/portal/static/portal.css")
+    async def portal_css():
+        if not PORTAL_CSS_PATH.is_file():
+            raise HTTPException(status_code=404, detail="portal.css not found")
+        return Response(
+            content=PORTAL_CSS_PATH.read_text(encoding="utf-8"),
+            media_type="text/css",
+        )
+
+    @router.get("/portal/static/brand-logo.png")
+    async def portal_brand_logo():
+        if not PORTAL_BRAND_LOGO_PATH.is_file():
+            raise HTTPException(status_code=404, detail="brand-logo.png not found")
+        return Response(
+            content=PORTAL_BRAND_LOGO_PATH.read_bytes(),
+            media_type="image/png",
+        )
 
     @router.get("/auth/config")
     async def auth_config():

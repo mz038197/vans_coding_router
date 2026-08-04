@@ -19,7 +19,6 @@ from src.infrastructure.lobby.storage import load_room_messages, load_room_timel
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 LOBBY_HTML_PATH = WEB_DIR / "lobby_host.html"
-PORTAL_CSS_PATH = WEB_DIR / "portal.css"
 
 
 class CreateRoomRequest(BaseModel):
@@ -78,15 +77,6 @@ def create_lobby_router(
         if str(exc) == "room not found":
             return HTTPException(status_code=404, detail=str(exc))
         return HTTPException(status_code=400, detail=str(exc))
-
-    @router.get("/portal/static/portal.css")
-    async def portal_css():
-        if not PORTAL_CSS_PATH.is_file():
-            raise HTTPException(status_code=404, detail="portal.css not found")
-        return HTMLResponse(
-            PORTAL_CSS_PATH.read_text(encoding="utf-8"),
-            media_type="text/css",
-        )
 
     @router.get("/lobby", response_class=HTMLResponse)
     async def lobby_page(session_user_id: str | None = Cookie(default=None)):

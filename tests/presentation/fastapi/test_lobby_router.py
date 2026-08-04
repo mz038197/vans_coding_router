@@ -10,6 +10,7 @@ from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSett
 from src.infrastructure.lobby.registry import ConnectionHub, RoomRegistry
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.presentation.fastapi.routers.lobby_router import create_lobby_router
+from src.presentation.fastapi.routers.portal_router import create_portal_router
 
 
 def _settings(tmp_path: Path) -> RouterSettings:
@@ -35,6 +36,7 @@ def _lobby_client(tmp_path: Path):
     hub = ConnectionHub()
     lobby = LobbyHostUseCase(workspace, registry, hub)
     app = FastAPI()
+    app.include_router(create_portal_router(portal, settings))
     app.include_router(create_lobby_router(lobby, portal, settings))
     return TestClient(app), repo
 
@@ -57,6 +59,10 @@ def test_lobby_page_requires_teacher(tmp_path):
     response = client.get("/lobby", cookies=_teacher_cookie(client, repo))
     assert response.status_code == 200
     assert "Agent Lobby" in response.text or "Agent" in response.text
+    assert 'src="/portal/static/brand-logo.png"' in response.text
+    assert "fa-route" not in response.text
+    assert 'class="nav-theme-toggle"' in response.text
+    assert "portal-theme" in response.text
 
 
 def test_create_and_list_rooms_creator_only(tmp_path):

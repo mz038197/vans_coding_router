@@ -93,6 +93,41 @@ def test_auth_config_reports_oauth_enabled(tmp_path):
     }
 
 
+def test_portal_brand_logo_served(tmp_path):
+    client, _, _ = _client(tmp_path)
+    response = client.get("/portal/static/brand-logo.png")
+    assert response.status_code == 200
+    assert "image/png" in response.headers.get("content-type", "")
+    assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert html.count('src="/portal/static/brand-logo.png"') == 2
+    assert 'class="nav-logo"' in html
+    assert "fa-route" not in html
+
+
+def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert html.count('class="nav-theme-toggle"') == 2
+    assert 'data-theme-toggle' in html
+    assert "portal-theme" in html
+    assert 'data-theme' in html
+
+
+def test_portal_css_defines_light_and_dark_themes(tmp_path):
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    assert "--accent: #007070" in css
+    assert "--bg-base: #f3f7f7" in css
+    assert 'data-theme="dark"' in css
+    assert "--accent: #4f46e5" in css
+    assert "--bg-base: #020617" in css
+
+
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
     client, repo, _ = _client(tmp_path)
     response = client.post("/auth/google", json={"email": "student@gmail.com", "name": "Student"})

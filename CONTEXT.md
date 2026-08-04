@@ -31,3 +31,19 @@ _Avoid_: Realtime transcription, live microphone session
 **Realtime Transcription**:
 Speech-to-text over a live audio stream in a persistent realtime session.
 _Avoid_: File transcription, streamed file transcript
+
+**Theme**:
+A named Portal visual identity that changes colors and material treatment only. It does not change branding assets or page structure. The two Themes are Dark Theme and Light Theme. One Theme applies across Portal login, the signed-in Portal, and lobby host. The user's Theme choice is remembered on that browser. When no choice is stored, Light Theme is the default.
+_Avoid_: Mode, skin, style, dark mode
+
+**Dark Theme** (`dark`):
+The original Vans Portal visual identity: dark glass surfaces with indigo accent.
+_Avoid_: vans theme, indigo theme
+
+**Light Theme** (`light`):
+The school Portal visual identity aligned with pegasi_router: light surfaces with teal accent.
+_Avoid_: school theme, pegasi theme, teal theme
+
+**Brand Logo**:
+The fixed Vans character image mark shown in Portal navigation chrome. It does not change with Theme. Navigation presents it on a Theme-aware light badge plate; the image asset itself stays a transparent character cutout.
+_Avoid_: Icon, favicon, nav icon, school logo
