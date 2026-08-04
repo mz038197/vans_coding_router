@@ -47,3 +47,7 @@ _Avoid_: school theme, pegasi theme, teal theme
 **Brand Logo**:
 The fixed Vans character image mark shown in Portal navigation chrome. It does not change with Theme. Navigation presents it on a Theme-aware light badge plate; the image asset itself stays a transparent character cutout.
 _Avoid_: Icon, favicon, nav icon, school logo
+
+**Login Network**:
+The animated field of moving dots and connecting lines on the Portal login hero only. It is decorative atmosphere, not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
+_Avoid_: Neural Grid, particle background, login animation, constellation

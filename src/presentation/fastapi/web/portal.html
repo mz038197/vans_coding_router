@@ -355,9 +355,26 @@
         mouse.active = false;
       }
 
-      function drawLine(x1, y1, x2, y2, dist, maxDist) {
+      function loginNetworkPalette() {
+        if (getPortalTheme() === 'dark') {
+          return {
+            dot: 'rgba(255, 255, 255, 0.55)',
+            lineRgb: '255, 255, 255',
+            lineBase: 0.08,
+            lineSpan: 0.28,
+          };
+        }
+        return {
+          dot: 'rgba(0, 112, 112, 0.50)',
+          lineRgb: '0, 112, 112',
+          lineBase: 0.12,
+          lineSpan: 0.28,
+        };
+      }
+
+      function drawLine(x1, y1, x2, y2, dist, maxDist, palette) {
         const t = 1 - dist / maxDist;
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.08 + t * 0.28})`;
+        ctx.strokeStyle = `rgba(${palette.lineRgb}, ${palette.lineBase + t * palette.lineSpan})`;
         ctx.lineWidth = 0.6 + t * 0.4;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -369,6 +386,7 @@
         if (!running || !ctx || !canvas) return;
         const w = canvas.width / (window.devicePixelRatio || 1);
         const h = canvas.height / (window.devicePixelRatio || 1);
+        const palette = loginNetworkPalette();
         ctx.clearRect(0, 0, w, h);
 
         for (const p of particles) {
@@ -387,19 +405,19 @@
             const dx = a.x - b.x;
             const dy = a.y - b.y;
             const dist = Math.hypot(dx, dy);
-            if (dist < LINK_DIST) drawLine(a.x, a.y, b.x, b.y, dist, LINK_DIST);
+            if (dist < LINK_DIST) drawLine(a.x, a.y, b.x, b.y, dist, LINK_DIST, palette);
           }
         }
 
         if (mouse.active) {
           for (const p of particles) {
             const dist = Math.hypot(p.x - mouse.x, p.y - mouse.y);
-            if (dist < MOUSE_LINK_DIST) drawLine(p.x, p.y, mouse.x, mouse.y, dist, MOUSE_LINK_DIST);
+            if (dist < MOUSE_LINK_DIST) drawLine(p.x, p.y, mouse.x, mouse.y, dist, MOUSE_LINK_DIST, palette);
           }
         }
 
         for (const p of particles) {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+          ctx.fillStyle = palette.dot;
           ctx.beginPath();
           ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
           ctx.fill();

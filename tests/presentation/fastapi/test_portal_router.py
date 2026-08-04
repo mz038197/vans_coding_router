@@ -128,6 +128,21 @@ def test_portal_css_defines_light_and_dark_themes(tmp_path):
     assert "--bg-base: #020617" in css
 
 
+def test_portal_login_network_uses_theme_aware_colors(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert 'id="loginNetworkCanvas"' in html
+    assert "loginNetworkPalette" in html
+    # Light Theme Login Network: teal (preview B)
+    assert "rgba(0, 112, 112, 0.50)" in html
+    assert "lineRgb: '0, 112, 112'" in html
+    assert "lineBase: 0.12" in html
+    # Dark Theme Login Network: existing white
+    assert "rgba(255, 255, 255, 0.55)" in html
+    assert "lineRgb: '255, 255, 255'" in html
+    assert "lineBase: 0.08" in html
+
+
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
     client, repo, _ = _client(tmp_path)
     response = client.post("/auth/google", json={"email": "student@gmail.com", "name": "Student"})
