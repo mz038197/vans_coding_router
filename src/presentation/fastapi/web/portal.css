@@ -504,6 +504,10 @@
       flex-direction: column;
     }
 
+    .modal-content-sm {
+      width: min(420px, 100%);
+    }
+
     .modal-header {
       padding: 14px 16px;
       border-bottom: 1px solid #334155;
@@ -511,6 +515,25 @@
     }
 
     .modal-body { padding: 16px; overflow: auto; }
+
+    .modal-field-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--text-muted);
+      font-size: 0.88rem;
+    }
+
+    .modal-datetime-input {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: var(--text-primary);
+      font: inherit;
+    }
 
     .modal-footer {
       padding: 12px 16px;
@@ -728,11 +751,6 @@
       background: #0f172a;
       color: var(--text-primary);
       font: inherit;
-    }
-
-    .inline-edit-datetime {
-      min-width: 190px;
-      max-width: 220px;
     }
 
     .monitor-filters label {

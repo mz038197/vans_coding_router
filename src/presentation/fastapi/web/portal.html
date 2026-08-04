@@ -210,6 +210,22 @@
     </div>
   </div>
 
+  <div class="modal" id="editExpiresModal" onclick="onEditExpiresBackdropClick(event)">
+    <div class="modal-content modal-content-sm" onclick="event.stopPropagation()">
+      <div class="modal-header">編輯到期時間</div>
+      <div class="modal-body">
+        <label class="modal-field-label" for="editExpiresInput">key 到期</label>
+        <input id="editExpiresInput" type="datetime-local" class="modal-datetime-input" />
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-actions">
+          <button type="button" class="btn-secondary" onclick="closeEditExpiresModal()">取消</button>
+          <button type="button" onclick="saveEditExpiresModal()">儲存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentRoles = ['student'];
     let currentUserId = null;
@@ -1519,54 +1535,70 @@
       input.select();
     }
 
+    let editExpiresContext = null;
+
     function beginEditSessionExpires(classId, sessionId, currentIso) {
       const cell = document.getElementById(`expires-cell-${sessionId}`);
-      if (!cell || cell.querySelector('input.inline-edit')) return;
-      const current = isoToDatetimeLocalValue(currentIso || cell.dataset.expires || '');
-      const original = cell.innerHTML;
-      cell.innerHTML = `<input type="datetime-local" class="inline-edit inline-edit-datetime" value="${escapeHtml(current)}" />`;
-      const input = cell.querySelector('input');
-      let finished = false;
-      const restore = () => {
-        if (finished) return;
-        finished = true;
-        cell.innerHTML = original;
-      };
-      const save = async () => {
-        if (finished) return;
-        const expiresAt = datetimeLocalToUtcIso((input.value || '').trim());
-        if (!expiresAt) {
-          alert('到期時間格式無效');
-          input.focus();
-          return;
-        }
-        const prevIso = currentIso || cell.dataset.expires || '';
-        if (isoToDatetimeLocalValue(prevIso) === input.value) {
-          restore();
-          return;
-        }
-        finished = true;
-        input.disabled = true;
-        try {
-          await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ expires_at: expiresAt }),
-          });
-          await reloadSessionViews(classId);
-        } catch (err) {
-          finished = false;
-          input.disabled = false;
-          alert(err.message || String(err));
-          input.focus();
-        }
-      };
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); save(); }
-        if (e.key === 'Escape') { e.preventDefault(); restore(); }
-      });
-      input.addEventListener('blur', () => { setTimeout(save, 0); });
-      input.focus();
+      const prevIso = currentIso || (cell && cell.dataset.expires) || '';
+      const input = document.getElementById('editExpiresInput');
+      const modal = document.getElementById('editExpiresModal');
+      if (!input || !modal) return;
+      editExpiresContext = { classId, sessionId, prevIso };
+      input.value = isoToDatetimeLocalValue(prevIso);
+      input.disabled = false;
+      modal.classList.add('show');
+      setTimeout(() => input.focus(), 0);
     }
+
+    function closeEditExpiresModal() {
+      const modal = document.getElementById('editExpiresModal');
+      if (modal) modal.classList.remove('show');
+      editExpiresContext = null;
+    }
+
+    function onEditExpiresBackdropClick(event) {
+      if (event.target && event.target.id === 'editExpiresModal') {
+        closeEditExpiresModal();
+      }
+    }
+
+    async function saveEditExpiresModal() {
+      if (!editExpiresContext) return;
+      const input = document.getElementById('editExpiresInput');
+      if (!input || input.disabled) return;
+      const expiresAt = datetimeLocalToUtcIso((input.value || '').trim());
+      if (!expiresAt) {
+        alert('到期時間格式無效');
+        input.focus();
+        return;
+      }
+      const { classId, sessionId, prevIso } = editExpiresContext;
+      if (isoToDatetimeLocalValue(prevIso) === input.value) {
+        closeEditExpiresModal();
+        return;
+      }
+      input.disabled = true;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ expires_at: expiresAt }),
+        });
+        closeEditExpiresModal();
+        await reloadSessionViews(classId);
+      } catch (err) {
+        input.disabled = false;
+        alert(err.message || String(err));
+        input.focus();
+      }
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const modal = document.getElementById('editExpiresModal');
+      if (!modal || !modal.classList.contains('show')) return;
+      event.preventDefault();
+      closeEditExpiresModal();
+    });
 
     async function endSessionNow(classId, sessionId) {
       const ok = window.confirm(
