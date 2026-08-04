@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 
 import pytest
@@ -209,7 +209,13 @@ def test_admin_can_end_and_reopen_other_teacher_session(tmp_path):
     listed = use_case.list_sessions(admin["id"], klass["id"])
     assert listed[0]["status"] == "ended"
 
-    reopened = use_case.update_session(admin["id"], klass["id"], session["id"], status="active")
+    with pytest.raises(ValueError, match="到期時間"):
+        use_case.update_session(admin["id"], klass["id"], session["id"], status="active")
+
+    future = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+    reopened = use_case.update_session(
+        admin["id"], klass["id"], session["id"], expires_at=future, status="active"
+    )
     assert reopened["status"] == "active"
 
 
