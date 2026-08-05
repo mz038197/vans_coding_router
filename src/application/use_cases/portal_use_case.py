@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Any
 
 from src.domain.ports.router_repository import RouterRepositoryPort
+from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
+from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
 _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
@@ -116,6 +118,22 @@ class PortalUseCase:
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
         return self.repo.redeem_invite(invite_code, user_id)
+
+    def issue_extension_handoff(self, user_id: int) -> str:
+        return self._handoff_service().create_token(user_id)
+
+    def redeem_with_handoff(self, handoff_token: str, invite_code: str) -> dict[str, Any]:
+        user_id = self._handoff_service().consume_token(handoff_token)
+        return self.repo.redeem_invite(invite_code, user_id)
+
+    def chat_language_models_template(self) -> list[dict[str, Any]]:
+        return load_vans_template()
+
+    def _handoff_service(self) -> ExtensionHandoffService:
+        return ExtensionHandoffService(
+            session_secret=self.settings.auth.session_secret,
+            try_mark_nonce_used=self.repo.try_consume_handoff_nonce,
+        )
 
     def redemptions(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner(teacher_id, class_id)

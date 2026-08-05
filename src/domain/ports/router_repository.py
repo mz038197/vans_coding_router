@@ -103,6 +103,10 @@ class RouterRepositoryPort(Protocol):
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:
         ...
 
+    def try_consume_handoff_nonce(self, nonce: str) -> bool:
+        """Mark a Sign-in Handoff nonce as used. Returns False if already used."""
+        ...
+
     def list_session_redemptions(self, class_id: int) -> list[dict[str, Any]]:
         ...
 

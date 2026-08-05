@@ -2,11 +2,15 @@ from pathlib import Path
 from urllib.parse import quote
 import logging
 
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Cookie, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.infrastructure.auth.extension_handoff import (
+    build_extension_uri,
+    handoff_complete_html,
+)
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.vscode.install_vscode_models_script import (
@@ -27,6 +31,12 @@ class GoogleLoginRequest(BaseModel):
     email: str
     name: str
     google_sub: str | None = None
+    client: str | None = None
+
+
+class ExtensionRedeemRequest(BaseModel):
+    handoff_token: str
+    invite_code: str
 
 
 class ClassRequest(BaseModel):
@@ -152,7 +162,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         }
 
     @router.get("/auth/google/login")
-    async def google_login_start():
+    async def google_login_start(client: str | None = Query(default=None)):
         if not oauth.is_configured():
             raise HTTPException(status_code=503, detail="Google OAuth 尚未設定")
         state = oauth.create_state()
@@ -165,6 +175,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             max_age=600,
             secure=secure_cookie,
         )
+        if (client or "").strip().lower() == "extension":
+            redirect.set_cookie(
+                "oauth_client",
+                "extension",
+                httponly=True,
+                samesite="lax",
+                max_age=600,
+                secure=secure_cookie,
+            )
+        else:
+            redirect.delete_cookie("oauth_client")
         return redirect
 
     @router.get("/auth/google/callback")
@@ -174,6 +195,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         state: str | None = None,
         error: str | None = None,
         oauth_state: str | None = Cookie(default=None),
+        oauth_client: str | None = Cookie(default=None),
     ):
         if error:
             return _portal_redirect("Google 登入已取消")
@@ -190,10 +212,34 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             logger.exception("Google login callback failed")
             return _portal_redirect("Google 登入失敗，請稍後再試")
 
+        if (oauth_client or "").strip().lower() == "extension":
+            token = portal_use_case.issue_extension_handoff(int(user["id"]))
+            redirect = RedirectResponse(
+                url=f"/auth/extension/complete?token={quote(token)}",
+                status_code=302,
+            )
+            redirect.delete_cookie("oauth_state")
+            redirect.delete_cookie("oauth_client")
+            _set_session(redirect, user["id"])
+            return redirect
+
         redirect = _portal_redirect()
         redirect.delete_cookie("oauth_state")
+        redirect.delete_cookie("oauth_client")
         _set_session(redirect, user["id"])
         return redirect
+
+    @router.get("/auth/extension/complete", response_class=HTMLResponse)
+    async def extension_handoff_complete(token: str = Query(...)):
+        cleaned = (token or "").strip()
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="missing handoff token")
+        html = handoff_complete_html(
+            cleaned,
+            vscode_uri=build_extension_uri(cleaned, uri_scheme="vscode"),
+            cursor_uri=build_extension_uri(cleaned, uri_scheme="cursor"),
+        )
+        return HTMLResponse(html)
 
     @router.post("/auth/google")
     async def google_login_dev(data: GoogleLoginRequest, response: Response):
@@ -201,7 +247,20 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             raise HTTPException(status_code=403, detail="請使用 Google OAuth 登入")
         user = portal_use_case.google_login(data.email, data.name, data.google_sub)
         _set_session(response, user["id"])
-        return {"user": user}
+        payload: dict = {"user": user}
+        if (data.client or "").strip().lower() == "extension":
+            payload["handoff_token"] = portal_use_case.issue_extension_handoff(int(user["id"]))
+        return payload
+
+    @router.get("/extension/chat-language-models")
+    async def extension_chat_language_models():
+        return portal_call(portal_use_case.chat_language_models_template)
+
+    @router.post("/extension/sessions/redeem")
+    async def extension_redeem(data: ExtensionRedeemRequest):
+        return portal_call(
+            lambda: portal_use_case.redeem_with_handoff(data.handoff_token, data.invite_code)
+        )
 
     @router.get("/auth/me")
     async def me(session_user_id: str | None = Cookie(default=None)):

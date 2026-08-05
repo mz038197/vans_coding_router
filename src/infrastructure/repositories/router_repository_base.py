@@ -724,6 +724,29 @@ class RouterRepositoryBase(ABC):
         key = self.issue_session_key(user_id, int(session["id"]))
         return {"api_key": key, "session": dict(session)}
 
+    def try_consume_handoff_nonce(self, nonce: str) -> bool:
+        cleaned = (nonce or "").strip()
+        if not cleaned:
+            return False
+        now = dt(utc_now())
+        with self._connect() as conn:
+            if self.dialect == "postgres":
+                cursor = conn.execute(
+                    self._sql(
+                        "INSERT INTO extension_handoff_nonces(nonce, created_at) VALUES (?, ?) "
+                        "ON CONFLICT (nonce) DO NOTHING"
+                    ),
+                    (cleaned, now),
+                )
+            else:
+                cursor = conn.execute(
+                    self._sql(
+                        "INSERT OR IGNORE INTO extension_handoff_nonces(nonce, created_at) VALUES (?, ?)"
+                    ),
+                    (cleaned, now),
+                )
+            return int(cursor.rowcount or 0) > 0
+
     def list_session_redemptions(self, class_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

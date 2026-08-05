@@ -201,6 +201,14 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS extension_handoff_nonces (
+                    nonce TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
 
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
         with self._connect() as conn:

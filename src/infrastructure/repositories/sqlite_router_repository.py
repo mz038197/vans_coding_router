@@ -125,6 +125,10 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS extension_handoff_nonces (
+                    nonce TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")

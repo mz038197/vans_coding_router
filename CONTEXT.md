@@ -51,3 +51,11 @@ _Avoid_: Icon, favicon, nav icon, school logo
 **Login Network**:
 The animated field of moving dots and connecting lines on the Portal login hero only. It is decorative atmosphere, not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
 _Avoid_: Neural Grid, particle background, login animation, constellation
+
+**Sign-in Handoff**:
+A short-lived, single-use proof issued after Google login for the classroom extension. Delivered via `vscode://` / `cursor://` deep link or a one-time paste code. It authorizes one Invite Code redeem only; it is not a long-lived Portal session and must never carry a Classroom API Key.
+_Avoid_: session cookie as extension auth, API key in URI, reusable bearer for Portal admin APIs
+
+**Invite Code**:
+A teacher-issued class-session code a signed-in student redeems for a Classroom API Key (`vcr_sk_…`).
+_Avoid_: handoff token, Google OAuth code
