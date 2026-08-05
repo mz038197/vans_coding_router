@@ -123,9 +123,13 @@ def test_portal_css_defines_light_and_dark_themes(tmp_path):
     css = client.get("/portal/static/portal.css").text
     assert "--accent: #007070" in css
     assert "--bg-base: #f3f7f7" in css
+    assert "--code-text: #0f172a" in css
     assert 'data-theme="dark"' in css
     assert "--accent: #4f46e5" in css
     assert "--bg-base: #020617" in css
+    assert "--code-text: #d7f5e9" in css
+    assert "color: var(--code-text)" in css
+    assert "color: #d7f5e9" not in css
 
 
 def test_portal_login_network_uses_theme_aware_colors(tmp_path):

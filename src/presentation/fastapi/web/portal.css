@@ -16,6 +16,7 @@
       --accent-text: #007070;
       --brand-yellow: #f8c000;
       --code-bg: #f1f5f9;
+      --code-text: #0f172a;
       --danger: #b91c1c;
       --success: #047857;
       --warning: #b45309;
@@ -56,6 +57,7 @@
       --accent-text: #a5b4fc;
       --brand-yellow: #f8c000;
       --code-bg: #0d1117;
+      --code-text: #d7f5e9;
       --danger: #f87171;
       --success: #34d399;
       --warning: #fbbf24;
@@ -574,7 +576,7 @@
     pre.key-display {
       white-space: pre-wrap;
       background: var(--code-bg);
-      color: #d7f5e9;
+      color: var(--code-text);
       padding: 12px;
       border-radius: 8px;
       border: 1px solid var(--border-strong);
