@@ -59,3 +59,7 @@ _Avoid_: session cookie as extension auth, API key in URI, reusable bearer for P
 **Invite Code**:
 A teacher-issued class-session code a signed-in student redeems for a Classroom API Key (`vcr_sk_…`).
 _Avoid_: handoff token, Google OAuth code
+
+**Client Setup Card**:
+The Portal surface shown after a successful Invite Code redeem. It presents the Classroom API Key and Router Base URL a student needs to configure a client, plus class-session context for confirmation.
+_Avoid_: redeem result dump, key display blob, redemption receipt
