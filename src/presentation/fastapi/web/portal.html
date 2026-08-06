@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-  <link rel="stylesheet" href="/portal/static/portal.css" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=login-glass-3" />
 </head>
 <body>
   <div id="loginShell">
@@ -36,7 +36,7 @@
     </header>
     <main class="login-hero neural-grid">
       <div class="login-orbs" aria-hidden="true"></div>
-      <canvas id="loginNetworkCanvas" class="login-network-canvas" aria-hidden="true"></canvas>
+      <div id="loginNetworkRoot" class="login-network-canvas" aria-hidden="true"></div>
       <section id="login" class="glass-card login-card">
         <h1>Vans Coding <span class="gradient-text">Router</span></h1>
         <p class="login-subtitle">課堂 LLM 路由與 API Key 管理</p>
@@ -355,128 +355,122 @@
     }
 
     const loginNetwork = (() => {
-      const LINK_DIST = 120;
-      const MOUSE_LINK_DIST = 150;
-      const MAX_PARTICLES = 80;
-      let canvas = null;
-      let ctx = null;
+      const THREE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+      let container = null;
       let hero = null;
-      let particles = [];
+      let camera = null;
+      let scene = null;
+      let renderer = null;
+      let uniforms = null;
       let rafId = 0;
       let running = false;
-      let mouse = { x: 0, y: 0, active: false };
       let reducedMotion = false;
+      let loadPromise = null;
+      let startGeneration = 0;
 
-      function particleCount(w, h) {
-        return Math.min(MAX_PARTICLES, Math.max(35, Math.floor((w * h) / 15000)));
-      }
-
-      function resetParticles(w, h) {
-        const n = particleCount(w, h);
-        particles = Array.from({ length: n }, () => ({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          vx: (Math.random() - 0.5) * 0.35,
-          vy: (Math.random() - 0.5) * 0.35,
-        }));
-      }
-
-      function resizeCanvas() {
-        if (!canvas || !hero) return;
-        const rect = hero.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const w = Math.max(1, Math.floor(rect.width));
-        const h = Math.max(1, Math.floor(rect.height));
-        canvas.width = Math.floor(w * dpr);
-        canvas.height = Math.floor(h * dpr);
-        canvas.style.width = `${w}px`;
-        canvas.style.height = `${h}px`;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        if (!particles.length || particles.length !== particleCount(w, h)) {
-          resetParticles(w, h);
+      const vertexShader = `
+        void main() {
+          gl_Position = vec4(position, 1.0);
         }
-      }
+      `;
 
-      function onMouseMove(event) {
-        if (!hero) return;
-        const rect = hero.getBoundingClientRect();
-        mouse.x = event.clientX - rect.left;
-        mouse.y = event.clientY - rect.top;
-        mouse.active = true;
-      }
+      const fragmentShader = `
+        #define TWO_PI 6.2831853072
+        #define PI 3.14159265359
 
-      function onMouseLeave() {
-        mouse.active = false;
-      }
+        precision highp float;
+        uniform vec2 resolution;
+        uniform float time;
+        uniform vec3 tint;
+        uniform float intensity;
 
-      function loginNetworkPalette() {
+        float random (in float x) {
+            return fract(sin(x)*1e4);
+        }
+        float random (vec2 st) {
+            return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+        }
+
+        void main(void) {
+          vec2 uv = (gl_FragCoord.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);
+
+          vec2 fMosaicScal = vec2(4.0, 2.0);
+          vec2 vScreenSize = vec2(256.0, 256.0);
+          uv.x = floor(uv.x * vScreenSize.x / fMosaicScal.x) / (vScreenSize.x / fMosaicScal.x);
+          uv.y = floor(uv.y * vScreenSize.y / fMosaicScal.y) / (vScreenSize.y / fMosaicScal.y);
+
+          float t = time*0.06+random(uv.x)*0.4;
+          float lineWidth = 0.0008;
+
+          vec3 color = vec3(0.0);
+          for(int j = 0; j < 3; j++){
+            for(int i=0; i < 5; i++){
+              color[j] += lineWidth*float(i*i) / abs(fract(t - 0.01*float(j)+float(i)*0.01)*1.0 - length(uv));
+            }
+          }
+
+          vec3 glow = vec3(color[2], color[1], color[0]) * tint * intensity;
+          /* Additive pass: dark pixels stay transparent so --bg-base / Neural Grid show through. */
+          float alpha = clamp(max(glow.r, max(glow.g, glow.b)), 0.0, 1.0);
+          gl_FragColor = vec4(glow, alpha);
+        }
+      `;
+
+      function themeLook() {
         if (getPortalTheme() === 'dark') {
-          return {
-            dot: 'rgba(255, 255, 255, 0.55)',
-            lineRgb: '255, 255, 255',
-            lineBase: 0.08,
-            lineSpan: 0.28,
-          };
+          return { r: 1.0, g: 1.0, b: 1.0, intensity: 1.0 };
         }
-        return {
-          dot: 'rgba(0, 112, 112, 0.50)',
-          lineRgb: '0, 112, 112',
-          lineBase: 0.12,
-          lineSpan: 0.28,
-        };
+        /* Brighter cyan-teal so additive lines read on --bg-base. */
+        return { r: 0.12, g: 0.92, b: 0.85, intensity: 1.65 };
       }
 
-      function drawLine(x1, y1, x2, y2, dist, maxDist, palette) {
-        const t = 1 - dist / maxDist;
-        ctx.strokeStyle = `rgba(${palette.lineRgb}, ${palette.lineBase + t * palette.lineSpan})`;
-        ctx.lineWidth = 0.6 + t * 0.4;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
+      function applyTint() {
+        if (!uniforms) return;
+        const look = themeLook();
+        uniforms.tint.value.set(look.r, look.g, look.b);
+        uniforms.intensity.value = look.intensity;
+      }
+
+      function ensureThree() {
+        if (window.THREE) return Promise.resolve(window.THREE);
+        if (loadPromise) return loadPromise;
+        loadPromise = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = THREE_CDN;
+          script.async = true;
+          script.onload = () => {
+            if (window.THREE) resolve(window.THREE);
+            else {
+              loadPromise = null;
+              reject(new Error('THREE missing after load'));
+            }
+          };
+          script.onerror = () => {
+            loadPromise = null;
+            reject(new Error('THREE CDN failed'));
+          };
+          document.head.appendChild(script);
+        });
+        return loadPromise;
+      }
+
+      function onWindowResize() {
+        if (!renderer || !uniforms || !container) return;
+        const rect = container.getBoundingClientRect();
+        const width = Math.max(1, Math.floor(rect.width));
+        const height = Math.max(1, Math.floor(rect.height));
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        // updateStyle true: CSS px match logical size; buffer uses devicePixelRatio.
+        renderer.setSize(width, height, true);
+        uniforms.resolution.value.x = renderer.domElement.width;
+        uniforms.resolution.value.y = renderer.domElement.height;
       }
 
       function tick() {
-        if (!running || !ctx || !canvas) return;
-        const w = canvas.width / (window.devicePixelRatio || 1);
-        const h = canvas.height / (window.devicePixelRatio || 1);
-        const palette = loginNetworkPalette();
-        ctx.clearRect(0, 0, w, h);
-
-        for (const p of particles) {
-          p.x += p.vx;
-          p.y += p.vy;
-          if (p.x < 0 || p.x > w) p.vx *= -1;
-          if (p.y < 0 || p.y > h) p.vy *= -1;
-          p.x = Math.max(0, Math.min(w, p.x));
-          p.y = Math.max(0, Math.min(h, p.y));
-        }
-
-        for (let i = 0; i < particles.length; i++) {
-          for (let j = i + 1; j < particles.length; j++) {
-            const a = particles[i];
-            const b = particles[j];
-            const dx = a.x - b.x;
-            const dy = a.y - b.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist < LINK_DIST) drawLine(a.x, a.y, b.x, b.y, dist, LINK_DIST, palette);
-          }
-        }
-
-        if (mouse.active) {
-          for (const p of particles) {
-            const dist = Math.hypot(p.x - mouse.x, p.y - mouse.y);
-            if (dist < MOUSE_LINK_DIST) drawLine(p.x, p.y, mouse.x, mouse.y, dist, MOUSE_LINK_DIST, palette);
-          }
-        }
-
-        for (const p of particles) {
-          ctx.fillStyle = palette.dot;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
+        if (!running || !renderer || !scene || !camera || !uniforms) return;
+        applyTint();
+        uniforms.time.value += 0.05;
+        renderer.render(scene, camera);
         rafId = requestAnimationFrame(tick);
       }
 
@@ -489,38 +483,102 @@
         }
       }
 
+      function disposeScene() {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+        window.removeEventListener('resize', onWindowResize);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        if (renderer) {
+          renderer.dispose();
+          if (renderer.domElement && renderer.domElement.parentNode) {
+            renderer.domElement.parentNode.removeChild(renderer.domElement);
+          }
+        }
+        if (scene) {
+          scene.traverse((obj) => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+              if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+              else obj.material.dispose();
+            }
+          });
+        }
+        camera = null;
+        scene = null;
+        renderer = null;
+        uniforms = null;
+        if (container) container.innerHTML = '';
+      }
+
+      function mountScene(THREE) {
+        if (!container || !hero) return false;
+        container.innerHTML = '';
+        camera = new THREE.Camera();
+        camera.position.z = 1;
+        scene = new THREE.Scene();
+        uniforms = {
+          time: { value: 1.0 },
+          resolution: { value: new THREE.Vector2() },
+          tint: { value: new THREE.Vector3(1, 1, 1) },
+          intensity: { value: 1.0 },
+        };
+        const material = new THREE.ShaderMaterial({
+          uniforms,
+          vertexShader,
+          fragmentShader,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+        scene.add(mesh);
+        try {
+          renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+        } catch (err) {
+          disposeScene();
+          return false;
+        }
+        if (!renderer.getContext()) {
+          disposeScene();
+          return false;
+        }
+        renderer.setClearColor(0x000000, 0);
+        renderer.setClearAlpha(0);
+        container.appendChild(renderer.domElement);
+        applyTint();
+        onWindowResize();
+        window.addEventListener('resize', onWindowResize, false);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return true;
+      }
+
       return {
         start() {
           if (running || reducedMotion) return;
-          canvas = document.getElementById('loginNetworkCanvas');
+          container = document.getElementById('loginNetworkRoot');
           hero = document.querySelector('#loginShell .login-hero');
-          if (!canvas || !hero || !window.requestAnimationFrame) return;
-          ctx = canvas.getContext('2d');
-          if (!ctx) return;
+          if (!container || !hero || !window.requestAnimationFrame) return;
+          const generation = ++startGeneration;
           running = true;
-          resizeCanvas();
-          hero.addEventListener('mousemove', onMouseMove);
-          hero.addEventListener('mouseleave', onMouseLeave);
-          window.addEventListener('resize', resizeCanvas);
-          document.addEventListener('visibilitychange', onVisibilityChange);
-          rafId = requestAnimationFrame(tick);
+          ensureThree()
+            .then((THREE) => {
+              if (!running || generation !== startGeneration) return;
+              if (!mountScene(THREE)) {
+                running = false;
+                return;
+              }
+              rafId = requestAnimationFrame(tick);
+            })
+            .catch(() => {
+              if (generation === startGeneration) running = false;
+            });
         },
         stop() {
+          startGeneration += 1;
           running = false;
-          cancelAnimationFrame(rafId);
-          rafId = 0;
-          if (hero) {
-            hero.removeEventListener('mousemove', onMouseMove);
-            hero.removeEventListener('mouseleave', onMouseLeave);
-          }
-          window.removeEventListener('resize', resizeCanvas);
-          document.removeEventListener('visibilitychange', onVisibilityChange);
-          if (ctx && canvas) {
-            const w = canvas.width / (window.devicePixelRatio || 1);
-            const h = canvas.height / (window.devicePixelRatio || 1);
-            ctx.clearRect(0, 0, w, h);
-          }
-          mouse.active = false;
+          disposeScene();
+          container = null;
+          hero = null;
         },
         init() {
           reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

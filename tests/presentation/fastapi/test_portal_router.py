@@ -191,16 +191,15 @@ def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path)
 def test_portal_login_network_uses_theme_aware_colors(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert 'id="loginNetworkCanvas"' in html
-    assert "loginNetworkPalette" in html
-    # Light Theme Login Network: teal (preview B)
-    assert "rgba(0, 112, 112, 0.50)" in html
-    assert "lineRgb: '0, 112, 112'" in html
-    assert "lineBase: 0.12" in html
-    # Dark Theme Login Network: existing white
-    assert "rgba(255, 255, 255, 0.55)" in html
-    assert "lineRgb: '255, 255, 255'" in html
-    assert "lineBase: 0.08" in html
+    assert 'id="loginNetworkRoot"' in html
+    assert "themeLook" in html
+    assert "ShaderMaterial" in html
+    assert "prefers-reduced-motion" in html
+    # Light Theme Login Network: brighter cyan-teal on light field
+    assert "g: 0.92" in html
+    assert "intensity: 1.65" in html
+    # Dark Theme Login Network: white / full tint
+    assert "r: 1.0, g: 1.0, b: 1.0" in html
 
 
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):

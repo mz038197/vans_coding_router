@@ -225,6 +225,37 @@
       margin-left: auto;
     }
 
+    #loginShell .login-hero {
+      background-color: var(--bg-base);
+    }
+
+    /* Light login: clearly open glass (override .glass-card solid --bg-glass). */
+    html[data-theme="light"] #loginShell .site-nav {
+      background: rgba(255, 255, 255, 0.42);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom-color: rgba(15, 23, 42, 0.08);
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+
+    html[data-theme="light"] #loginShell .glass-card.login-card {
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-color: var(--accent-border);
+      box-shadow:
+        0 16px 40px rgba(15, 23, 42, 0.08),
+        0 0 0 1px rgba(0, 112, 112, 0.04);
+    }
+
+    html[data-theme="light"] #loginShell .login-orbs::before {
+      background: rgba(0, 112, 112, 0.2);
+    }
+
+    html[data-theme="light"] #loginShell .login-orbs::after {
+      background: rgba(248, 192, 0, 0.14);
+    }
+
     .nav-title {
       font-size: 1.15rem;
       font-weight: 700;
@@ -288,6 +319,12 @@
       height: 100%;
       z-index: 0;
       pointer-events: none;
+      overflow: hidden;
+    }
+
+    .login-network-canvas canvas {
+      display: block;
+      /* Size comes from Three.js setSize (style + drawing buffer); do not force 100%. */
     }
 
     @media (prefers-reduced-motion: reduce) {
