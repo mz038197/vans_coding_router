@@ -69,6 +69,8 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 
 `ollama_cloud` 在 [`config/router.prod.yaml`](../config/router.prod.yaml) 使用 `api_key_envs` 掛兩把 key：學生仍用同一把 `vcr_sk_` 與 `ollama_cloud@...`，router 以 least-in-flight 分流，並以 `max_concurrent_per_key`（預設 3）在打上游前排隊，降低 Ollama Cloud rate limit。只設第一把 key 時行為與單帳號相同。
 
+`openrouter` 同樣走 UpstreamKeyPool：單 key `OPENROUTER_API_KEY`，`max_concurrent_per_key` 為 5（搭配 `queue_timeout_sec` / `acquire_delay_ms` / `quarantine_ttl_sec`），在打上游前排隊以降低突發並發。
+
 非機密設定在 image 內 [`config/router.prod.yaml`](../config/router.prod.yaml)。`PUBLIC_URL` 在 [`fly.toml`](../fly.toml) 設為 `https://ai.vanscoding.com`。
 
 套用 secrets：

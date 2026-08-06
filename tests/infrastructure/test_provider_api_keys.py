@@ -74,3 +74,20 @@ providers:
     assert provider.queue_timeout_sec == 90
     assert provider.acquire_delay_ms == 200
     assert resolve_provider_api_keys(provider) == ["a", "b"]
+
+
+def test_shipped_openrouter_configs_limit_concurrency(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    root = Path(__file__).resolve().parents[2]
+    for relative in (
+        "config/router.example.yaml",
+        "config/router.stg.example.yaml",
+        "config/router.prod.yaml",
+    ):
+        settings = load_router_settings(str(root / relative))
+        provider = settings.providers["openrouter"]
+        assert provider.api_key_env == "OPENROUTER_API_KEY"
+        assert provider.max_concurrent_per_key == 5
+        assert provider.queue_timeout_sec == 120
+        assert provider.acquire_delay_ms == 200
+        assert provider.quarantine_ttl_sec == 3600

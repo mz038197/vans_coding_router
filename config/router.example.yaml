@@ -39,6 +39,10 @@ providers:
     type: openai_compatible
     base_url: "https://openrouter.ai/api/v1"
     api_key_env: "OPENROUTER_API_KEY"
+    max_concurrent_per_key: 5
+    queue_timeout_sec: 120
+    acquire_delay_ms: 200
+    quarantine_ttl_sec: 3600
     enabled: true
     extra_headers:
       HTTP-Referer: "https://ai.vanscoding.com"
