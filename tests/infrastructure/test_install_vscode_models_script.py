@@ -16,7 +16,8 @@ def test_render_install_script_contains_template_and_merge():
     assert "VCRouter" in script
     assert "Merge-ChatLanguageModels" in script
     assert "ollama_cloud@minimax-m3:cloud" in script
-    assert '"maxInputTokens": 524288' in script
+    assert '"maxInputTokens": 262144' in script
+    assert '"maxOutputTokens": 65536' in script
     assert "ExecutionPolicy Bypass" in script
     assert "Chat: Manage Language Models" in script
 

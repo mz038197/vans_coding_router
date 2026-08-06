@@ -40,8 +40,8 @@ $TemplateJson = @'
         "zeroDataRetentionEnabled": true,
         "toolCalling": true,
         "vision": true,
-        "maxInputTokens": 524288,
-        "maxOutputTokens": 131072
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
       },
       {
         "id": "ollama_cloud@kimi-k2.7-code:cloud",
@@ -82,8 +82,8 @@ $TemplateJson = @'
         "zeroDataRetentionEnabled": true,
         "toolCalling": true,
         "vision": true,
-        "maxInputTokens": 524288,
-        "maxOutputTokens": 131072
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
       }
     ]
   }
