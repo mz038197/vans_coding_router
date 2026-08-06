@@ -2,11 +2,12 @@ from pathlib import Path
 from urllib.parse import quote
 import logging
 
-from fastapi import APIRouter, Cookie, HTTPException, Query
+from fastapi import APIRouter, Cookie, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.infrastructure.auth.extension_handoff import (
     build_extension_uri,
     handoff_complete_html,
@@ -63,6 +64,7 @@ class SessionPatchRequest(BaseModel):
     speech_transcription_enabled: bool | None = None
     prompt_logging_enabled: bool | None = None
     status: str | None = None
+    course_catalog_yaml: str | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -262,6 +264,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.redeem_with_handoff(data.handoff_token, data.invite_code)
         )
 
+    @router.get("/extension/course-catalog")
+    async def extension_course_catalog(request: Request):
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            api_key = normalize_api_key(auth_header[7:]) or ""
+        else:
+            api_key = normalize_api_key(request.headers.get("X-API-Key")) or ""
+        if not api_key:
+            raise HTTPException(status_code=401, detail="缺少 Classroom API Key")
+        return portal_call(lambda: portal_use_case.extension_course_catalog(api_key))
+
     @router.get("/auth/me")
     async def me(session_user_id: str | None = Cookie(default=None)):
         user = portal_use_case.me(current_user_id(session_user_id))
@@ -337,6 +350,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
                 status=data.status,
+                course_catalog_yaml=data.course_catalog_yaml,
             )
         )
 

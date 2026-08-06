@@ -570,6 +570,18 @@
 
     .hint-inline { margin: 0; }
 
+    .session-catalog { margin: 4px 0 10px; }
+    .session-catalog summary { cursor: pointer; font-weight: 600; }
+    .session-catalog-yaml {
+      width: 100%;
+      max-width: 100%;
+      font-family: var(--font-mono, ui-monospace, monospace);
+      font-size: 0.85rem;
+      margin: 8px 0;
+      box-sizing: border-box;
+    }
+    .session-catalog-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
     .probe-panel { display: grid; gap: 12px; max-width: 640px; }
     .probe-panel input, .probe-panel select { width: 100%; max-width: 100%; }
     .probe-actions { display: flex; flex-wrap: wrap; gap: 8px; }

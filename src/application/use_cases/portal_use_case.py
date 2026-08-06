@@ -112,6 +112,7 @@ class PortalUseCase:
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
+        course_catalog_yaml: str | None = None,
     ) -> dict[str, Any] | None:
         # Class owner or admin may update any session fields (privileged and non-privileged).
         # Admins must be allowed for non-privileged-only updates too, so permission stays consistent.
@@ -128,7 +129,14 @@ class PortalUseCase:
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
             status=status,
+            course_catalog_yaml=course_catalog_yaml,
         )
+
+    def extension_course_catalog(self, api_key: str) -> dict[str, str]:
+        yaml_text = self.repo.get_course_catalog_yaml_for_api_key(api_key)
+        if yaml_text is None:
+            raise PermissionError("無效的 Classroom API Key")
+        return {"course_catalog_yaml": yaml_text}
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
         return self.repo.redeem_invite(invite_code, user_id)

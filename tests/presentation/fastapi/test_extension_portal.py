@@ -85,6 +85,68 @@ def test_extension_redeem_with_handoff(tmp_path):
     assert reuse.status_code == 400
 
 
+def test_extension_course_catalog_get_and_after_session_end(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    assert "actions:" in (session.get("course_catalog_yaml") or "")
+
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+    redeem = client.post(
+        "/extension/sessions/redeem",
+        json={
+            "handoff_token": login.json()["handoff_token"],
+            "invite_code": session["invite_code"],
+        },
+    )
+    api_key = redeem.json()["api_key"]
+
+    catalog = client.get(
+        "/extension/course-catalog",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert catalog.status_code == 200
+    assert "actions:" in catalog.json()["course_catalog_yaml"]
+
+    yaml_body = """
+actions:
+  - id: demo
+    title: Demo
+    kind: package
+    command: uv add demo
+"""
+    patch = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"course_catalog_yaml": yaml_body},
+    )
+    assert patch.status_code == 200
+    assert "demo" in patch.json()["course_catalog_yaml"]
+
+    bad = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"course_catalog_yaml": "actions:\n  - id: x\n"},
+    )
+    assert bad.status_code == 400
+
+    client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"status": "ended"},
+    )
+    after_end = client.get(
+        "/extension/course-catalog",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert after_end.status_code == 200
+    assert "demo" in after_end.json()["course_catalog_yaml"]
+
+
 def test_google_login_start_sets_extension_client_cookie(tmp_path):
     client, _, _ = _client(tmp_path, google_client_id="cid", google_client_secret="csecret")
     response = client.get("/auth/google/login?client=extension", follow_redirects=False)

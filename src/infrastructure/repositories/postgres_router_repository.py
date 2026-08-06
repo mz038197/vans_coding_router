@@ -191,6 +191,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS prompt_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
+            conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []\n'"
+            )
             conn.commit()
             conn.execute(
                 """

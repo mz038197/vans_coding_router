@@ -1447,11 +1447,50 @@
             <td>${sessionExpiresCell(classId, s)}</td>
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
+          ${allowOwnerActions ? `<tr class="session-catalog-row">
+            <td colspan="${colCount}">
+              <details class="session-catalog">
+                <summary>本課安裝清單（Course Catalog YAML）</summary>
+                <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校验。學生連線後由擴充拉取。</p>
+                <textarea id="catalog-yaml-${s.id}" class="session-catalog-yaml" rows="8">${escapeHtml(sessionCatalogYaml(s))}</textarea>
+                <div class="session-catalog-actions">
+                  <button type="button" onclick="saveSessionCatalog(${classId}, ${s.id})">儲存清單</button>
+                  <span id="catalog-msg-${s.id}" class="hint-inline"></span>
+                </div>
+              </details>
+            </td>
+          </tr>` : ''}
           ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
             <td colspan="${colCount}"><div id="redemption-body-${s.id}"></div></td>
           </tr>` : ''}
         `).join('')}
       </table>`;
+    }
+
+    function sessionCatalogYaml(session) {
+      const value = session.course_catalog_yaml;
+      if (typeof value === 'string' && value.trim()) return value;
+      return 'actions: []\n';
+    }
+
+    async function saveSessionCatalog(classId, sessionId) {
+      const area = document.getElementById(`catalog-yaml-${sessionId}`);
+      const msg = document.getElementById(`catalog-msg-${sessionId}`);
+      if (!area) return;
+      if (msg) msg.textContent = '儲存中…';
+      try {
+        const updated = await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ course_catalog_yaml: area.value }),
+        });
+        if (typeof updated.course_catalog_yaml === 'string') {
+          area.value = updated.course_catalog_yaml;
+        }
+        if (msg) msg.textContent = '已儲存';
+      } catch (err) {
+        if (msg) msg.textContent = err?.message || '儲存失敗';
+        throw err;
+      }
     }
 
     function sessionImageEnabled(session) {

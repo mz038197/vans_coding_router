@@ -507,15 +507,27 @@ class RouterRepositoryBase(ABC):
         expires_at = start + timedelta(hours=ttl)
         invite_code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
         now = dt(utc_now())
+        from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
+
         with self._connect() as conn:
             session_id = self._insert_returning_id(
                 conn,
                 """
                 INSERT INTO class_sessions(
-                    class_id, invite_code, expires_at, session_at, name, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    class_id, invite_code, expires_at, session_at, name, created_by, created_at,
+                    course_catalog_yaml
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (class_id, invite_code, dt(expires_at), dt(start), cleaned_name, created_by, now),
+                (
+                    class_id,
+                    invite_code,
+                    dt(expires_at),
+                    dt(start),
+                    cleaned_name,
+                    created_by,
+                    now,
+                    DEFAULT_COURSE_CATALOG_YAML,
+                ),
             )
             row = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
@@ -579,6 +591,7 @@ class RouterRepositoryBase(ABC):
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
+        course_catalog_yaml: str | None = None,
     ) -> dict[str, Any] | None:
         if (
             expires_at is None
@@ -588,6 +601,7 @@ class RouterRepositoryBase(ABC):
             and speech_transcription_enabled is None
             and prompt_logging_enabled is None
             and status is None
+            and course_catalog_yaml is None
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -639,11 +653,50 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(prompt_logging_enabled), session_id),
                 )
+            if course_catalog_yaml is not None:
+                from src.domain.course_catalog import normalize_course_catalog_yaml
+
+                normalized = normalize_course_catalog_yaml(course_catalog_yaml)
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET course_catalog_yaml = ? WHERE id = ?"),
+                    (normalized, session_id),
+                )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
             return dict(updated) if updated else None
+
+    def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
+        from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
+        from src.infrastructure.auth.client_api_key import normalize_api_key
+
+        api_key = normalize_api_key(api_key)
+        if not api_key:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql(
+                    """
+                    SELECT k.enabled, k.session_id, u.status AS user_status, s.course_catalog_yaml
+                    FROM api_keys k
+                    JOIN users u ON u.id = k.user_id
+                    LEFT JOIN class_sessions s ON s.id = k.session_id
+                    WHERE k.key_hash = ?
+                    """
+                ),
+                (self._hash_key(api_key),),
+            ).fetchone()
+            if not row:
+                return None
+            if not bool(row["enabled"]) or row["user_status"] != "active":
+                return None
+            if not row["session_id"]:
+                return None
+            yaml_text = row["course_catalog_yaml"]
+            if yaml_text is None or yaml_text == "":
+                return DEFAULT_COURSE_CATALOG_YAML
+            return str(yaml_text)
 
     def is_image_generation_enabled(self, session_id: int) -> bool:
         with self._connect() as conn:

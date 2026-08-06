@@ -164,6 +164,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 "prompt_logging_enabled",
                 "INTEGER NOT NULL DEFAULT 1",
             )
+            self._ensure_column(
+                conn,
+                "class_sessions",
+                "course_catalog_yaml",
+                "TEXT NOT NULL DEFAULT 'actions: []\n'",
+            )
             self._backfill_user_roles(conn)
             self._backfill_ended_session_expires(conn)
 

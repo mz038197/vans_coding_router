@@ -85,7 +85,16 @@ class RouterRepositoryPort(Protocol):
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
+        course_catalog_yaml: str | None = None,
     ) -> dict[str, Any] | None:
+        ...
+
+    def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
+        """Return Session Course Catalog YAML for a Classroom API Key.
+
+        Ignores session/key expiry so ended sittings still serve the last catalog.
+        Returns None when the key is missing, disabled, or not bound to a session.
+        """
         ...
 
     def is_image_generation_enabled(self, session_id: int) -> bool:
