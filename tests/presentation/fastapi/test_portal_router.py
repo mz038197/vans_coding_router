@@ -133,6 +133,35 @@ def test_portal_css_defines_light_and_dark_themes(tmp_path):
     assert "color: #d7f5e9" not in css
 
 
+def test_portal_css_error_uses_theme_tokens_with_readable_light_contrast(tmp_path):
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    assert "--error-fg:" in css
+    assert "--error-bg:" in css
+    assert "--error-border:" in css
+    error_rule = re.search(r"(?m)^\s*\.error\s*\{([^}]+)\}", css)
+    assert error_rule, "missing .error rule"
+    body = error_rule.group(1)
+    assert "color: var(--error-fg)" in body
+    assert "background: var(--error-bg)" in body
+    assert "border:" in body and "var(--error-border)" in body
+    # Light Theme must not keep the dark-oriented pale pink text.
+    assert re.search(r"(?m)^\s*:root\s*\{[^}]*--error-fg:\s*#b91c1c", css, re.S)
+    assert "#fca5a5" not in re.search(r"(?m)^\s*:root\s*\{([^}]+)\}", css, re.S).group(1)
+
+
+def test_portal_page_has_collapsible_active_keys_section(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert 'id="activeKeysSection"' in html
+    assert "toggleActiveKeys" in html
+    assert 'aria-expanded="false"' in html
+    assert "有效 Key" in html
+    css = client.get("/portal/static/portal.css").text
+    assert "max-height: 240px" in css
+    assert ".active-keys-section.is-collapsed" in css or ".is-collapsed" in css
+
+
 def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text

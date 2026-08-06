@@ -89,8 +89,21 @@
           <summary>需要其他系統版本？</summary>
           <div id="vscodeInstallAltLinks" class="vscode-install-alt-links"></div>
         </details>
-        <h3>有效 Key</h3>
-        <div id="keys" class="table-wrap"></div>
+        <div id="activeKeysSection" class="active-keys-section is-collapsed">
+          <button
+            type="button"
+            class="active-keys-header"
+            id="activeKeysHeader"
+            aria-expanded="false"
+            aria-controls="keys"
+            onclick="toggleActiveKeys()"
+          >
+            <span class="active-keys-chevron" aria-hidden="true">▶</span>
+            <h3 class="active-keys-title">有效 Key（<span id="activeKeysCount">0</span>）</h3>
+            <span class="active-keys-toggle-label" id="activeKeysToggleLabel">展開</span>
+          </button>
+          <div id="keys" class="table-wrap active-keys-body"></div>
+        </div>
       </section>
 
       <section id="teacher" class="glass-card hidden">
@@ -628,6 +641,30 @@
       </table>`;
     }
 
+    function setActiveKeysCollapsed(collapsed) {
+      const section = document.getElementById('activeKeysSection');
+      const header = document.getElementById('activeKeysHeader');
+      const label = document.getElementById('activeKeysToggleLabel');
+      if (!section || !header || !label) return;
+      section.classList.toggle('is-collapsed', collapsed);
+      header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      label.textContent = collapsed ? '展開' : '收合';
+    }
+
+    function toggleActiveKeys() {
+      const section = document.getElementById('activeKeysSection');
+      if (!section) return;
+      setActiveKeysCollapsed(!section.classList.contains('is-collapsed'));
+    }
+
+    function renderActiveKeysSection(keys) {
+      const items = keys || [];
+      const countEl = document.getElementById('activeKeysCount');
+      if (countEl) countEl.textContent = String(items.length);
+      document.getElementById('keys').innerHTML = renderActiveKeysTable(items);
+      setActiveKeysCollapsed(true);
+    }
+
     function renderTeacherKeyMeta(keys) {
       const longLived = (keys || []).filter(k => !k.session_id);
       const box = document.getElementById('teacherKeyMeta');
@@ -1018,7 +1055,7 @@
       currentRoles = me.roles || [me.role];
       showAppShell();
       document.getElementById('navWho').innerHTML = renderProfileLine(me);
-      document.getElementById('keys').innerHTML = renderActiveKeysTable(me.keys || []);
+      renderActiveKeysSection(me.keys || []);
       document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
       document.getElementById('teacher').classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
       if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
