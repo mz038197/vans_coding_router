@@ -258,6 +258,47 @@
     </div>
   </div>
 
+  <div class="modal" id="editCatalogModal" onclick="onEditCatalogBackdropClick(event)">
+    <div class="modal-content modal-content-catalog" onclick="event.stopPropagation()">
+      <div class="modal-header" id="editCatalogTitle">編輯本課安裝清單</div>
+      <div class="modal-body">
+        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校验。學生連線後由擴充拉取。</p>
+        <div
+          id="catalogDropzone"
+          class="catalog-dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="上傳 Course Catalog YAML"
+        >
+          <input
+            type="file"
+            id="catalogFileInput"
+            accept=".yaml,.yml,text/yaml,application/x-yaml"
+            hidden
+          />
+          <p class="catalog-dropzone-title">拖拉 YAML 到此上傳</p>
+          <p class="hint-inline">或 <button type="button" class="btn-link" id="catalogPickFileBtn">選擇 .yaml／.yml 檔</button></p>
+        </div>
+        <p id="catalogUploadMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
+        <label class="modal-field-label" for="editCatalogYaml">Course Catalog YAML</label>
+        <textarea id="editCatalogYaml" class="session-catalog-yaml" rows="14" spellcheck="false"></textarea>
+        <p id="catalogSaveMsg" class="hint-inline" aria-live="polite"></p>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-actions modal-footer-actions-split">
+          <div class="modal-footer-start">
+            <button type="button" class="btn-secondary" onclick="downloadCatalogTemplate()">下載範本</button>
+            <button type="button" class="btn-secondary" onclick="downloadCurrentCatalogYaml()">下載目前清單</button>
+          </div>
+          <div class="modal-footer-end">
+            <button type="button" class="btn-secondary" onclick="requestCloseEditCatalogModal()">取消</button>
+            <button type="button" id="catalogSaveBtn" onclick="saveEditCatalogModal()">儲存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentRoles = ['student'];
     let currentUserId = null;
@@ -599,6 +640,65 @@
       return `<div class="cell-with-action" id="expires-cell-${session.id}" data-expires="${iso}">
         <span class="expires-label">${display}</span>
         ${iconBtn('fas fa-pen', '編輯到期時間', `beginEditSessionExpires(${classId}, ${session.id}, '${iso}')`)}
+      </div>`;
+    }
+
+    function sessionCatalogYaml(session) {
+      const value = session.course_catalog_yaml;
+      if (typeof value === 'string' && value.trim()) return value;
+      return 'actions: []\n';
+    }
+
+    function catalogHasInstallActions(yaml) {
+      const trimmed = String(yaml || '').trim();
+      if (!trimmed) return false;
+      if (/^actions:\s*\[\s*\]\s*$/.test(trimmed)) return false;
+      // Normalized catalogs use a block list under `actions:`; treat that as empty only when no list item follows.
+      const actionsIdx = trimmed.search(/^actions:\s*$/m);
+      if (actionsIdx >= 0) {
+        const after = trimmed.slice(actionsIdx).split(/\r?\n/).slice(1);
+        return after.some((line) => /^-\s+\S/.test(line));
+      }
+      // Flow form with at least one mapping entry inside the array.
+      if (/^actions:\s*\[\s*\{/m.test(trimmed)) return true;
+      return false;
+    }
+
+    function sessionCatalogCell(classId, session) {
+      const yaml = sessionCatalogYaml(session);
+      const hasActions = catalogHasInstallActions(yaml);
+      const title = hasActions ? '編輯本課安裝清單' : '編輯本課安裝清單（尚無項目）';
+      const stateClass = hasActions ? 'has-actions' : 'is-empty';
+      return `<div class="cell-with-action cell-catalog">
+        <button type="button" class="icon-btn catalog-icon ${stateClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" onclick="beginEditSessionCatalog(${classId}, ${session.id})">
+          <i class="fas fa-file-code"></i>
+        </button>
+      </div>`;
+    }
+
+    function capabilityToggleHtml(className, title, checked, onchange, labelText) {
+      return `<label class="${className}"${title ? ` title="${escapeHtml(title)}"` : ''}>
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="${onchange}" />
+        <span>${escapeHtml(labelText)}</span>
+      </label>`;
+    }
+
+    function sessionCapabilitiesCell(classId, session, allowOwnerActions) {
+      const imageOn = sessionImageEnabled(session);
+      const ttsOn = sessionTtsEnabled(session);
+      const speechOn = sessionSpeechTranscriptionEnabled(session);
+      const promptOn = sessionPromptLoggingEnabled(session);
+      if (!allowOwnerActions) {
+        const bit = (name, on) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}">${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
+        return `<div class="session-capabilities session-capabilities-readonly">
+          ${bit('生圖', imageOn)}${bit('語音', ttsOn)}${bit('語音轉寫', speechOn)}${bit('Prompt', promptOn)}
+        </div>`;
+      }
+      return `<div class="session-capabilities">
+        ${capabilityToggleHtml('session-image-toggle', '', imageOn, `toggleSessionImageGen(${classId}, ${session.id}, this.checked, this)`, `生圖 ${imageOn ? '開' : '關'}`)}
+        ${capabilityToggleHtml('session-tts-toggle', '', ttsOn, `toggleSessionTts(${classId}, ${session.id}, this.checked, this)`, `語音 ${ttsOn ? '開' : '關'}`)}
+        ${capabilityToggleHtml('session-speech-transcription-toggle', '上傳音檔／即時語音轉寫', speechOn, `toggleSessionSpeechTranscription(${classId}, ${session.id}, this.checked, this)`, `語音轉寫 ${speechOn ? '開' : '關'}`)}
+        ${capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)}
       </div>`;
     }
 
@@ -1439,64 +1539,29 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 5 + (allowOwnerActions ? 4 : 0) + (showRedemptions ? 1 : 0);
-      box.innerHTML = `<table>
-        <tr><th>課堂名稱</th><th>課堂時間</th><th>狀態</th>${allowOwnerActions ? '<th>生圖</th><th>語音</th><th>語音轉寫</th><th>Prompt 記錄</th>' : ''}<th>邀請碼</th><th>key 到期</th>${showRedemptions ? '<th>已領取</th>' : ''}</tr>
+      const colCount = 5 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
+      window.__sessionById = window.__sessionById || {};
+      sessions.forEach((s) => { window.__sessionById[s.id] = s; });
+      box.innerHTML = `<table class="session-table">
+        <tr>
+          <th>課堂</th>
+          <th>狀態</th>
+          <th>能力</th>
+          <th>邀請碼</th>
+          <th>key 到期</th>
+          ${allowOwnerActions ? '<th>安裝清單</th>' : ''}
+          ${showRedemptions ? '<th>已領取</th>' : ''}
+        </tr>
         ${sessions.map(s => `
           <tr>
             <td>${sessionNameCell(classId, s, allowOwnerActions)}</td>
-            <td>${escapeHtml(formatLocalDateTime(s.session_at || s.created_at))}</td>
             <td>${sessionStatusCell(classId, s, courseStatus)}</td>
-            ${allowOwnerActions ? `
-            <td>
-              <label class="session-image-toggle">
-                <input type="checkbox"
-                  ${sessionImageEnabled(s) ? 'checked' : ''}
-                  onchange="toggleSessionImageGen(${classId}, ${s.id}, this.checked, this)" />
-                <span>${sessionImageEnabled(s) ? '開啟' : '關閉'}</span>
-              </label>
-            </td>
-            <td>
-              <label class="session-tts-toggle">
-                <input type="checkbox"
-                  ${sessionTtsEnabled(s) ? 'checked' : ''}
-                  onchange="toggleSessionTts(${classId}, ${s.id}, this.checked, this)" />
-                <span>${sessionTtsEnabled(s) ? '開啟' : '關閉'}</span>
-              </label>
-            </td>
-            <td>
-              <label class="session-speech-transcription-toggle" title="上傳音檔／即時語音轉寫">
-                <input type="checkbox"
-                  ${sessionSpeechTranscriptionEnabled(s) ? 'checked' : ''}
-                  onchange="toggleSessionSpeechTranscription(${classId}, ${s.id}, this.checked, this)" />
-                <span>${sessionSpeechTranscriptionEnabled(s) ? '開啟' : '關閉'}</span>
-              </label>
-            </td>
-            <td>
-              <label class="session-prompt-toggle" title="關閉後不記錄 prompt 與 token 用量">
-                <input type="checkbox"
-                  ${sessionPromptLoggingEnabled(s) ? 'checked' : ''}
-                  onchange="toggleSessionPromptLogging(${classId}, ${s.id}, this.checked, this)" />
-                <span>${sessionPromptLoggingEnabled(s) ? '開啟' : '關閉'}</span>
-              </label>
-            </td>` : ''}
+            <td>${sessionCapabilitiesCell(classId, s, allowOwnerActions)}</td>
             <td>${sessionInviteCell(s, allowOwnerActions)}</td>
             <td>${sessionExpiresCell(classId, s)}</td>
+            ${allowOwnerActions ? `<td>${sessionCatalogCell(classId, s)}</td>` : ''}
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
-          ${allowOwnerActions ? `<tr class="session-catalog-row">
-            <td colspan="${colCount}">
-              <details class="session-catalog">
-                <summary>本課安裝清單（Course Catalog YAML）</summary>
-                <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校验。學生連線後由擴充拉取。</p>
-                <textarea id="catalog-yaml-${s.id}" class="session-catalog-yaml" rows="8">${escapeHtml(sessionCatalogYaml(s))}</textarea>
-                <div class="session-catalog-actions">
-                  <button type="button" onclick="saveSessionCatalog(${classId}, ${s.id})">儲存清單</button>
-                  <span id="catalog-msg-${s.id}" class="hint-inline"></span>
-                </div>
-              </details>
-            </td>
-          </tr>` : ''}
           ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
             <td colspan="${colCount}"><div id="redemption-body-${s.id}"></div></td>
           </tr>` : ''}
@@ -1504,29 +1569,211 @@
       </table>`;
     }
 
-    function sessionCatalogYaml(session) {
-      const value = session.course_catalog_yaml;
-      if (typeof value === 'string' && value.trim()) return value;
-      return 'actions: []\n';
+    const COURSE_CATALOG_TEMPLATE_YAML = `# Course Catalog 範本（與擴充 classroom-installs.yaml 同形）
+# 儲存時註解會被正規化移除；請改成你的 Install Actions。
+actions:
+- id: example-skill
+  title: 範例 Skill
+  kind: skill
+  command: npx skills add example/skill -g -y
+  description: 可刪除後改成實際安裝指令
+- id: example-package
+  title: 範例套件
+  kind: package
+  command: npm install -g example-cli
+- id: example-mcp
+  title: 範例 MCP
+  kind: mcp
+  command: echo "configure your mcp server"
+`;
+
+    let editCatalogContext = null;
+    let catalogDropzoneBound = false;
+
+    function ensureCatalogDropzoneBound() {
+      if (catalogDropzoneBound) return;
+      const zone = document.getElementById('catalogDropzone');
+      const input = document.getElementById('catalogFileInput');
+      const pickBtn = document.getElementById('catalogPickFileBtn');
+      if (!zone || !input || !pickBtn) return;
+      pickBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        input.click();
+      });
+      zone.addEventListener('click', (event) => {
+        if (event.target === pickBtn || pickBtn.contains(event.target)) return;
+        input.click();
+      });
+      zone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          input.click();
+        }
+      });
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (file) loadCatalogYamlFile(file);
+        input.value = '';
+      });
+      zone.addEventListener('dragenter', (event) => {
+        event.preventDefault();
+        zone.classList.add('is-dragover');
+      });
+      zone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        zone.classList.add('is-dragover');
+      });
+      zone.addEventListener('dragleave', (event) => {
+        if (!zone.contains(event.relatedTarget)) zone.classList.remove('is-dragover');
+      });
+      zone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        zone.classList.remove('is-dragover');
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (file) loadCatalogYamlFile(file);
+      });
+      catalogDropzoneBound = true;
     }
 
-    async function saveSessionCatalog(classId, sessionId) {
-      const area = document.getElementById(`catalog-yaml-${sessionId}`);
-      const msg = document.getElementById(`catalog-msg-${sessionId}`);
-      if (!area) return;
-      if (msg) msg.textContent = '儲存中…';
+    function setCatalogUploadMsg(text, isError) {
+      const msg = document.getElementById('catalogUploadMsg');
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.classList.toggle('is-error', Boolean(isError && text));
+    }
+
+    function isYamlCatalogFilename(name) {
+      return /\.ya?ml$/i.test(String(name || '').trim());
+    }
+
+    function loadCatalogYamlFile(file) {
+      const area = document.getElementById('editCatalogYaml');
+      if (!area || !file) return;
+      if (!isYamlCatalogFilename(file.name)) {
+        setCatalogUploadMsg('僅接受 .yaml／.yml 檔，編輯器內容未變更。', true);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result || '');
+        const trimmed = text.trim();
+        if (!trimmed) {
+          setCatalogUploadMsg('檔案是空的，編輯器內容未變更。', true);
+          return;
+        }
+        // Lightweight client guard; full validation still happens on save.
+        if (!/actions\s*:/m.test(trimmed)) {
+          setCatalogUploadMsg('檔案缺少頂層 actions，編輯器內容未變更。', true);
+          return;
+        }
+        area.value = text;
+        setCatalogUploadMsg(`已載入 ${file.name}（尚未儲存）`, false);
+        const saveMsg = document.getElementById('catalogSaveMsg');
+        if (saveMsg) saveMsg.textContent = '';
+      };
+      reader.onerror = () => {
+        setCatalogUploadMsg('讀取檔案失敗，編輯器內容未變更。', true);
+      };
+      reader.readAsText(file);
+    }
+
+    function downloadTextFile(filename, text) {
+      const blob = new Blob([text], { type: 'text/yaml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadCatalogTemplate() {
+      downloadTextFile('course-catalog.template.yaml', COURSE_CATALOG_TEMPLATE_YAML);
+    }
+
+    function downloadCurrentCatalogYaml() {
+      const area = document.getElementById('editCatalogYaml');
+      const text = area ? area.value : 'actions: []\n';
+      const sessionId = editCatalogContext?.sessionId;
+      const name = sessionId ? `course-catalog-session-${sessionId}.yaml` : 'course-catalog.yaml';
+      downloadTextFile(name, text.endsWith('\n') ? text : `${text}\n`);
+    }
+
+    function beginEditSessionCatalog(classId, sessionId) {
+      const modal = document.getElementById('editCatalogModal');
+      const area = document.getElementById('editCatalogYaml');
+      const title = document.getElementById('editCatalogTitle');
+      const saveBtn = document.getElementById('catalogSaveBtn');
+      if (!modal || !area) return;
+      ensureCatalogDropzoneBound();
+      const session = window.__sessionById && window.__sessionById[sessionId];
+      const yaml = session ? sessionCatalogYaml(session) : 'actions: []\n';
+      editCatalogContext = { classId, sessionId, baselineYaml: yaml };
+      area.value = yaml;
+      area.disabled = false;
+      if (saveBtn) saveBtn.disabled = false;
+      if (title) {
+        const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
+        title.textContent = `編輯本課安裝清單 · ${label}`;
+      }
+      setCatalogUploadMsg('', false);
+      const saveMsg = document.getElementById('catalogSaveMsg');
+      if (saveMsg) saveMsg.textContent = '';
+      modal.classList.add('show');
+      setTimeout(() => area.focus(), 0);
+    }
+
+    function isCatalogModalDirty() {
+      const area = document.getElementById('editCatalogYaml');
+      if (!area || !editCatalogContext) return false;
+      return area.value !== editCatalogContext.baselineYaml;
+    }
+
+    function requestCloseEditCatalogModal() {
+      if (isCatalogModalDirty()) {
+        const ok = window.confirm('尚未儲存，確定離開？');
+        if (!ok) return;
+      }
+      closeEditCatalogModal();
+    }
+
+    function closeEditCatalogModal() {
+      const modal = document.getElementById('editCatalogModal');
+      if (modal) modal.classList.remove('show');
+      editCatalogContext = null;
+      setCatalogUploadMsg('', false);
+    }
+
+    function onEditCatalogBackdropClick(event) {
+      if (event.target && event.target.id === 'editCatalogModal') {
+        requestCloseEditCatalogModal();
+      }
+    }
+
+    async function saveEditCatalogModal() {
+      if (!editCatalogContext) return;
+      const area = document.getElementById('editCatalogYaml');
+      const saveMsg = document.getElementById('catalogSaveMsg');
+      const saveBtn = document.getElementById('catalogSaveBtn');
+      if (!area || area.disabled) return;
+      const { classId, sessionId } = editCatalogContext;
+      if (saveMsg) saveMsg.textContent = '儲存中…';
+      if (saveBtn) saveBtn.disabled = true;
+      area.disabled = true;
       try {
-        const updated = await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
           body: JSON.stringify({ course_catalog_yaml: area.value }),
         });
-        if (typeof updated.course_catalog_yaml === 'string') {
-          area.value = updated.course_catalog_yaml;
-        }
-        if (msg) msg.textContent = '已儲存';
+        closeEditCatalogModal();
+        await reloadSessionViews(classId);
       } catch (err) {
-        if (msg) msg.textContent = err?.message || '儲存失敗';
-        throw err;
+        if (saveMsg) saveMsg.textContent = err?.message || '儲存失敗';
+        area.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
       }
     }
 
@@ -1544,7 +1791,7 @@
           method: 'PATCH',
           body: JSON.stringify({ image_generation_enabled: enabled }),
         });
-        if (label) label.textContent = enabled ? '開啟' : '關閉';
+        if (label) label.textContent = enabled ? '生圖 開' : '生圖 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;
@@ -1565,7 +1812,7 @@
           method: 'PATCH',
           body: JSON.stringify({ tts_enabled: enabled }),
         });
-        if (label) label.textContent = enabled ? '開啟' : '關閉';
+        if (label) label.textContent = enabled ? '語音 開' : '語音 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;
@@ -1586,7 +1833,7 @@
           method: 'PATCH',
           body: JSON.stringify({ speech_transcription_enabled: enabled }),
         });
-        if (label) label.textContent = enabled ? '開啟' : '關閉';
+        if (label) label.textContent = enabled ? '語音轉寫 開' : '語音轉寫 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;
@@ -1607,7 +1854,7 @@
           method: 'PATCH',
           body: JSON.stringify({ prompt_logging_enabled: enabled }),
         });
-        if (label) label.textContent = enabled ? '開啟' : '關閉';
+        if (label) label.textContent = enabled ? 'Prompt 開' : 'Prompt 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;
@@ -1772,6 +2019,12 @@
 
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
+      const catalogModal = document.getElementById('editCatalogModal');
+      if (catalogModal && catalogModal.classList.contains('show')) {
+        event.preventDefault();
+        requestCloseEditCatalogModal();
+        return;
+      }
       const modal = document.getElementById('editExpiresModal');
       if (!modal || !modal.classList.contains('show')) return;
       event.preventDefault();
