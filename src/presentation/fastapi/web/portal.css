@@ -921,11 +921,15 @@
 
     .upstream-key-row {
       display: grid;
-      grid-template-columns: minmax(120px, 1.2fr) 1fr auto;
-      gap: 10px;
+      grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.2fr) auto auto auto;
+      gap: 8px;
       align-items: center;
       margin: 4px 0;
       font-size: 0.88rem;
+    }
+
+    .upstream-key-row.quarantined .upstream-key-label {
+      color: var(--danger);
     }
 
     .upstream-key-label {
@@ -953,11 +957,28 @@
       background: var(--danger);
     }
 
+    .upstream-bar-fill.quarantined {
+      background: var(--text-muted);
+      opacity: 0.55;
+    }
+
     .upstream-key-count {
       color: var(--text-muted);
       font-variant-numeric: tabular-nums;
       min-width: 2.5rem;
       text-align: right;
+    }
+
+    .upstream-quarantine-badge {
+      color: var(--danger);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .upstream-quarantine-release {
+      font-size: 0.78rem;
+      padding: 2px 8px;
+      min-height: 0;
     }
 
     @media (max-width: 640px) {

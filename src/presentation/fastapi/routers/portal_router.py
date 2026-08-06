@@ -352,6 +352,28 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     async def upstream_pools(session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: portal_use_case.upstream_pools(current_user_id(session_user_id)))
 
+    @router.post("/teacher/upstream-pools/{provider}/keys/{key_index}/quarantine-release")
+    async def release_key_quarantine(
+        provider: str,
+        key_index: int,
+        session_user_id: str | None = Cookie(default=None),
+    ):
+        try:
+            return await portal_use_case.release_key_quarantine(
+                current_user_id(session_user_id),
+                provider,
+                key_index,
+            )
+        except HTTPException:
+            raise
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="權限不足") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except Exception:
+            logger.exception("Portal quarantine release failed")
+            raise HTTPException(status_code=500, detail="伺服器錯誤，請稍後再試") from None
+
     @router.get("/teacher/classes/{class_id}/prompt-logs")
     async def prompt_logs(
         class_id: int,

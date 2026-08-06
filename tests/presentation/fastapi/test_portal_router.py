@@ -826,6 +826,9 @@ def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
 
 
 class _FakePoolGateway:
+    def __init__(self):
+        self.released: list[tuple[str, int]] = []
+
     def pool_status(self, *, limited_only: bool = True):
         return {
             "providers": {
@@ -838,13 +841,30 @@ class _FakePoolGateway:
                         "waiting": 0,
                         "busy_total": 1,
                         "keys": [
-                            {"index": 0, "label": "OLLAMA_CLOUD 1", "in_flight": 2, "cap": 3},
-                            {"index": 1, "label": "OLLAMA_CLOUD 2", "in_flight": 1, "cap": 3},
+                            {
+                                "index": 0,
+                                "label": "OLLAMA_CLOUD 1",
+                                "in_flight": 2,
+                                "cap": 3,
+                                "quarantined": True,
+                                "quarantine_remaining_sec": 1200.0,
+                            },
+                            {
+                                "index": 1,
+                                "label": "OLLAMA_CLOUD 2",
+                                "in_flight": 1,
+                                "cap": 3,
+                                "quarantined": False,
+                                "quarantine_remaining_sec": None,
+                            },
                         ],
                     }
                 }
             }
         }
+
+    async def release_key_quarantine(self, provider: str, index: int) -> None:
+        self.released.append((provider, index))
 
 
 def test_teacher_upstream_pools_returns_limited_providers(tmp_path):
@@ -856,10 +876,35 @@ def test_teacher_upstream_pools_returns_limited_providers(tmp_path):
     assert set(payload["providers"]) == {"ollama_cloud"}
     keys = payload["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["label"] for item in keys] == ["OLLAMA_CLOUD 1", "OLLAMA_CLOUD 2"]
+    assert keys[0]["quarantined"] is True
+    assert keys[0]["quarantine_remaining_sec"] == 1200.0
 
 
 def test_student_upstream_pools_forbidden(tmp_path):
     client, repo, _ = _client(tmp_path, llm_gateway=_FakePoolGateway())
     student = repo.upsert_google_user("student@gmail.com", "Student")
     response = client.get("/teacher/upstream-pools", cookies={"session_user_id": str(student["id"])})
+    assert response.status_code == 403
+
+
+def test_teacher_can_release_key_quarantine(tmp_path):
+    gateway = _FakePoolGateway()
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    response = client.post(
+        "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "provider": "ollama_cloud", "index": 0}
+    assert gateway.released == [("ollama_cloud", 0)]
+
+
+def test_student_cannot_release_key_quarantine(tmp_path):
+    client, repo, _ = _client(tmp_path, llm_gateway=_FakePoolGateway())
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    response = client.post(
+        "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
+        cookies={"session_user_id": str(student["id"])},
+    )
     assert response.status_code == 403

@@ -12,6 +12,22 @@ _Avoid_: Bare model name, display name
 A provider response that rejects the request before any model output is produced (for example Ollama Extra Usage exhausted). It is a billing or entitlement failure at the provider, not a router routing mistake.
 _Avoid_: Copilot bug, no choices, model offline
 
+**Extra Usage Exhaustion**:
+An Upstream Refusal that means the upstream account has no remaining Extra Usage (or equivalent paid entitlement) for that model. It is not a rate-limit queue busy signal and not a router routing mistake.
+_Avoid_: quota full (ambiguous), rate limit, UpstreamBusy
+
+**Key Failover**:
+On Extra Usage Exhaustion, trying the same student request against another key in that provider's key pool before returning to the client. The student still uses one Model ID; key choice stays inside the router.
+_Avoid_: ollama2, provider switch, model fallback
+
+**Key Quarantine**:
+A temporary state where a key that returned Extra Usage Exhaustion is not selected for new requests until the quarantine ends or a teacher clears it in Portal. It does not delete the key from configuration.
+_Avoid_: permanent disable, remove key, circuit breaker (generic)
+
+**Quarantine Release**:
+A teacher action in Portal that ends Key Quarantine for a key early so it can be selected again.
+_Avoid_: delete key, reset pool, restart router
+
 **Readable Upstream Error**:
 The provider's refusal text surfaced to the client (chat choices content or Responses `output_text`) so the user can act on it.
 _Avoid_: Generic "Upstream provider error", "Response contained no choices"
@@ -59,6 +75,14 @@ _Avoid_: session cookie as extension auth, API key in URI, reusable bearer for P
 **Invite Code**:
 A teacher-issued class-session code a signed-in student redeems for a Classroom API Key (`vcr_sk_…`).
 _Avoid_: handoff token, Google OAuth code
+
+**Class Session**:
+A teacher-managed classroom instance under a Class: invite lifecycle, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment.
+_Avoid_: lesson plan, curriculum repo, student workspace
+
+**Course Catalog**:
+The curated list of Install Actions attached to one Class Session. Teachers edit it in Portal; students receive it via the classroom extension after redeem. Same concept as in the classroom-one-click-install context; this router is the authoritative store when the feature is used.
+_Avoid_: install-vscode-models script, BYOK model list, lobby workspace on the server
 
 **Client Setup Card**:
 The Portal surface shown after a successful Invite Code redeem. It presents the Classroom API Key and Router Base URL a student needs to configure a client, plus class-session context for confirmation.

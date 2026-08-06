@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import aclosing
 from typing import Any, AsyncGenerator
 
@@ -14,7 +15,9 @@ from src.domain.errors import (
     SpeechTranscriptionNotSupportedError,
     TtsNotSupportedError,
     UpstreamServiceError,
+    extract_upstream_error_text,
 )
+from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_extra_usage_exhaustion
 from src.infrastructure.config import (
     CAPABILITY_AUDIO_SPEECH,
     CAPABILITY_AUDIO_TRANSCRIPTION,
@@ -31,7 +34,9 @@ from src.infrastructure.gateways.copilot_compat import (
     normalize_chat_completions_sse,
     sanitize_responses_request,
 )
-from src.infrastructure.gateways.upstream_key_pool import UpstreamKeyPool
+from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
+
+logger = logging.getLogger(__name__)
 
 _ollama_thinking_cache = OllamaThinkingCache()
 _IMAGE_API_PROVIDERS = frozenset({"openrouter"})
@@ -54,6 +59,7 @@ class OpenAICompatibleGateway:
             max_concurrent_per_key=self.provider.max_concurrent_per_key,
             queue_timeout_sec=self.provider.queue_timeout_sec,
             acquire_delay_ms=self.provider.acquire_delay_ms,
+            quarantine_ttl_sec=self.provider.quarantine_ttl_sec,
         )
 
     def _ensure_pool(self) -> UpstreamKeyPool | None:
@@ -99,6 +105,8 @@ class OpenAICompatibleGateway:
                 "label": f"{label_prefix} {int(item['index']) + 1}",
                 "in_flight": item["in_flight"],
                 "cap": item["cap"],
+                "quarantined": item.get("quarantined", False),
+                "quarantine_remaining_sec": item.get("quarantine_remaining_sec"),
             }
             for item in raw["keys"]
         ]
@@ -111,6 +119,14 @@ class OpenAICompatibleGateway:
             "busy_total": raw["busy_total"],
             "keys": keys,
         }
+
+    async def release_key_quarantine(self, index: int) -> None:
+        pool = self._ensure_pool()
+        if pool is None:
+            raise KeyError(f"provider「{self.provider.name}」has no upstream key pool")
+        if not (0 <= index < pool.key_count):
+            raise IndexError(f"key index {index} out of range")
+        await pool.release_quarantine(index)
 
     async def health(self) -> dict[str, Any]:
         pool = self.pool_status(limited_only=False)
@@ -236,6 +252,18 @@ class OpenAICompatibleGateway:
                 f"provider「{self.provider.name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
             )
 
+    def _extra_usage_exhausted_error(self, pool: UpstreamKeyPool | None) -> UpstreamServiceError:
+        message = None
+        if pool is not None:
+            message = pool.last_extra_usage_message
+        body = {"error": message or DEFAULT_EXTRA_USAGE_MESSAGE}
+        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+
+    def _quarantine_for_extra_usage(self, pool: UpstreamKeyPool, index: int, body: Any) -> UpstreamServiceError:
+        message = extract_upstream_error_text(body) or DEFAULT_EXTRA_USAGE_MESSAGE
+        pool.quarantine(index, message)
+        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+
     async def _request(
         self,
         method: str,
@@ -247,23 +275,61 @@ class OpenAICompatibleGateway:
         await self.startup()
         assert self._client is not None
         pool = self._ensure_pool() if use_pool else None
-        index: int | None = None
-        try:
-            if pool is not None:
-                index = await pool.acquire()
-                headers = self._headers(api_key=pool.key_at(index))
-            else:
+        if pool is None:
+            index: int | None = None
+            try:
                 headers = self._headers()
-            return await self._client.request(
-                method,
-                f"{self.provider.base_url}{path}",
-                headers=headers,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
-        finally:
-            await self._release_pool_slot(pool, index)
+                return await self._client.request(
+                    method,
+                    f"{self.provider.base_url}{path}",
+                    headers=headers,
+                    **kwargs,
+                )
+            except httpx.RequestError as exc:
+                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+
+        tried: set[int] = set()
+        last_error: UpstreamServiceError | None = None
+        while True:
+            if pool.all_quarantined():
+                raise last_error or self._extra_usage_exhausted_error(pool)
+            index = None
+            try:
+                try:
+                    index = await pool.acquire(exclude=frozenset(tried))
+                except NoSelectableUpstreamKeyError as exc:
+                    raise (last_error or self._extra_usage_exhausted_error(pool)) from exc
+                headers = self._headers(api_key=pool.key_at(index))
+                response = await self._client.request(
+                    method,
+                    f"{self.provider.base_url}{path}",
+                    headers=headers,
+                    **kwargs,
+                )
+                if response.status_code >= 400 and is_extra_usage_exhaustion(
+                    response.status_code, response.text
+                ):
+                    last_error = self._quarantine_for_extra_usage(pool, index, response.text)
+                    tried.add(index)
+                    logger.info(
+                        "key_failover provider=%s failed_index=%s tried=%s",
+                        self.provider.name,
+                        index,
+                        sorted(tried),
+                    )
+                    continue
+                if tried:
+                    logger.info(
+                        "key_failover_success provider=%s index=%s after_tried=%s",
+                        self.provider.name,
+                        index,
+                        sorted(tried),
+                    )
+                return response
+            except httpx.RequestError as exc:
+                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+            finally:
+                await self._release_pool_slot(pool, index)
 
     async def _stream(
         self,
@@ -276,33 +342,88 @@ class OpenAICompatibleGateway:
         await self.startup()
         assert self._client is not None
         pool = self._ensure_pool() if use_pool else None
-        index: int | None = None
-        try:
-            if pool is not None:
-                index = await pool.acquire()
-                headers = self._headers(api_key=pool.key_at(index))
-            else:
-                headers = self._headers()
+        if pool is None:
+            index: int | None = None
             try:
-                async with self._client.stream(
-                    method,
-                    f"{self.provider.base_url}{path}",
-                    headers=headers,
-                    **kwargs,
-                ) as response:
-                    if response.status_code >= 400:
-                        body = await response.aread()
-                        raise UpstreamServiceError(
-                            status_code=response.status_code,
-                            backend=self.provider.name,
-                            body=body.decode("utf-8", errors="replace"),
-                        )
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-            except httpx.RequestError as exc:
-                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
-        finally:
-            await self._release_pool_slot(pool, index)
+                headers = self._headers()
+                try:
+                    async with self._client.stream(
+                        method,
+                        f"{self.provider.base_url}{path}",
+                        headers=headers,
+                        **kwargs,
+                    ) as response:
+                        if response.status_code >= 400:
+                            body = await response.aread()
+                            raise UpstreamServiceError(
+                                status_code=response.status_code,
+                                backend=self.provider.name,
+                                body=body.decode("utf-8", errors="replace"),
+                            )
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                except httpx.RequestError as exc:
+                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+            finally:
+                await self._release_pool_slot(pool, index)
+            return
+
+        tried: set[int] = set()
+        last_error: UpstreamServiceError | None = None
+        while True:
+            if pool.all_quarantined():
+                raise last_error or self._extra_usage_exhausted_error(pool)
+            index = None
+            failover = False
+            try:
+                try:
+                    index = await pool.acquire(exclude=frozenset(tried))
+                except NoSelectableUpstreamKeyError as exc:
+                    raise (last_error or self._extra_usage_exhausted_error(pool)) from exc
+                headers = self._headers(api_key=pool.key_at(index))
+                try:
+                    async with self._client.stream(
+                        method,
+                        f"{self.provider.base_url}{path}",
+                        headers=headers,
+                        **kwargs,
+                    ) as response:
+                        if response.status_code >= 400:
+                            body = await response.aread()
+                            text = body.decode("utf-8", errors="replace")
+                            if is_extra_usage_exhaustion(response.status_code, text):
+                                last_error = self._quarantine_for_extra_usage(pool, index, text)
+                                tried.add(index)
+                                failover = True
+                                logger.info(
+                                    "key_failover provider=%s failed_index=%s tried=%s",
+                                    self.provider.name,
+                                    index,
+                                    sorted(tried),
+                                )
+                            else:
+                                raise UpstreamServiceError(
+                                    status_code=response.status_code,
+                                    backend=self.provider.name,
+                                    body=text,
+                                )
+                        else:
+                            if tried:
+                                logger.info(
+                                    "key_failover_success provider=%s index=%s after_tried=%s",
+                                    self.provider.name,
+                                    index,
+                                    sorted(tried),
+                                )
+                            async for chunk in response.aiter_bytes():
+                                yield chunk
+                            return
+                except httpx.RequestError as exc:
+                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+            finally:
+                await self._release_pool_slot(pool, index)
+            if not failover:
+                return
 
     def _json_or_error(self, response: httpx.Response) -> dict[str, Any]:
         try:

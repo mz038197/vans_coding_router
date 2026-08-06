@@ -44,6 +44,7 @@ class ProviderSettings:
     max_concurrent_per_key: int = 0
     queue_timeout_sec: float = 120.0
     acquire_delay_ms: int = 0
+    quarantine_ttl_sec: float = 3600.0
     enabled: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
     capabilities: tuple[str, ...] = ()
@@ -172,6 +173,7 @@ def _load_providers(raw: dict[str, Any]) -> dict[str, ProviderSettings]:
             max_concurrent_per_key=int(item.get("max_concurrent_per_key", 0)),
             queue_timeout_sec=float(item.get("queue_timeout_sec", 120)),
             acquire_delay_ms=int(item.get("acquire_delay_ms", 0)),
+            quarantine_ttl_sec=float(item.get("quarantine_ttl_sec", 3600)),
             enabled=bool(item.get("enabled", True)),
             extra_headers={str(k): str(v) for k, v in (item.get("extra_headers") or {}).items()},
             capabilities=capabilities,

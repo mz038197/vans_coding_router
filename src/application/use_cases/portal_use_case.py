@@ -58,6 +58,20 @@ class PortalUseCase:
             return {"providers": {}}
         return status_fn(limited_only=True)
 
+    async def release_key_quarantine(self, user_id: int, provider: str, index: int) -> dict[str, Any]:
+        self._assert_teacher(user_id)
+        gateway = self._llm_gateway
+        if gateway is None:
+            raise ValueError("上游 gateway 未設定")
+        release_fn = getattr(gateway, "release_key_quarantine", None)
+        if not callable(release_fn):
+            raise ValueError("此 gateway 不支援解除隔離")
+        try:
+            await release_fn(provider, index)
+        except (KeyError, IndexError) as exc:
+            raise ValueError(str(exc)) from exc
+        return {"ok": True, "provider": provider, "index": index}
+
     def create_class(self, teacher_id: int, name: str, ends_at: str | None, api_key_ttl_hours: int | None) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
         return self.repo.create_class(teacher_id, name, ends_at, api_key_ttl_hours)

@@ -28,6 +28,7 @@ providers:
     max_concurrent_per_key: 3
     queue_timeout_sec: 120
     acquire_delay_ms: 200
+    quarantine_ttl_sec: 3600
     enabled: true
 
   openrouter:

@@ -92,8 +92,20 @@ async def test_status_reports_in_flight_waiting_and_capacity():
     assert status["waiting"] == 1
     assert status["busy_total"] == 0
     assert status["keys"] == [
-        {"index": 0, "in_flight": 1, "cap": 1},
-        {"index": 1, "in_flight": 1, "cap": 1},
+        {
+            "index": 0,
+            "in_flight": 1,
+            "cap": 1,
+            "quarantined": False,
+            "quarantine_remaining_sec": None,
+        },
+        {
+            "index": 1,
+            "in_flight": 1,
+            "cap": 1,
+            "quarantined": False,
+            "quarantine_remaining_sec": None,
+        },
     ]
     assert "key-a" not in str(status)
 
@@ -141,3 +153,112 @@ async def test_release_completes_accounting_when_caller_cancelled():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert pool.in_flight_snapshot() == [0]
+
+
+@pytest.mark.asyncio
+async def test_quarantine_skips_key_on_acquire():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=3600,
+    )
+    pool.quarantine(0, "extra usage balance is empty")
+    index = await pool.acquire()
+    assert index == 1
+    assert pool.last_extra_usage_message == "extra usage balance is empty"
+    status = pool.status()
+    assert status["keys"][0]["quarantined"] is True
+    assert status["keys"][0]["quarantine_remaining_sec"] is not None
+    assert status["keys"][0]["quarantine_remaining_sec"] > 0
+    assert status["keys"][1]["quarantined"] is False
+    await pool.release(index)
+
+
+@pytest.mark.asyncio
+async def test_acquire_exclude_skips_tried_keys():
+    pool = UpstreamKeyPool(["key-a", "key-b"], max_concurrent_per_key=0, acquire_delay_ms=0)
+    first = await pool.acquire(exclude=frozenset({0}))
+    assert first == 1
+    await pool.release(first)
+
+
+@pytest.mark.asyncio
+async def test_all_quarantined_acquire_raises_immediately():
+    from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError
+
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=3600,
+    )
+    pool.quarantine(0, "extra usage on a")
+    pool.quarantine(1, "extra usage on b")
+    with pytest.raises(NoSelectableUpstreamKeyError):
+        await pool.acquire()
+    assert pool.last_extra_usage_message == "extra usage on b"
+
+
+@pytest.mark.asyncio
+async def test_release_quarantine_makes_key_selectable():
+    from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError
+
+    pool = UpstreamKeyPool(
+        ["key-a"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=3600,
+    )
+    pool.quarantine(0, "extra usage balance is empty")
+    with pytest.raises(NoSelectableUpstreamKeyError):
+        await pool.acquire()
+    await pool.release_quarantine(0)
+    index = await pool.acquire()
+    assert index == 0
+    assert pool.status()["keys"][0]["quarantined"] is False
+    await pool.release(index)
+
+
+@pytest.mark.asyncio
+async def test_quarantine_ttl_zero_lasts_until_release():
+    from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError
+
+    pool = UpstreamKeyPool(
+        ["key-a"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=0,
+    )
+    pool.quarantine(0, "extra usage balance is empty")
+    assert pool.status()["keys"][0]["quarantined"] is True
+    assert pool.status()["keys"][0]["quarantine_remaining_sec"] is None
+    with pytest.raises(NoSelectableUpstreamKeyError):
+        await pool.acquire()
+    await pool.release_quarantine(0)
+    index = await pool.acquire()
+    assert index == 0
+    await pool.release(index)
+
+
+@pytest.mark.asyncio
+async def test_quarantine_expires_after_ttl(monkeypatch):
+    pool = UpstreamKeyPool(
+        ["key-a"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=10,
+    )
+    start = 1000.0
+    monkeypatch.setattr(
+        "src.infrastructure.gateways.upstream_key_pool.time.monotonic",
+        lambda: start,
+    )
+    pool.quarantine(0, "extra usage balance is empty")
+    monkeypatch.setattr(
+        "src.infrastructure.gateways.upstream_key_pool.time.monotonic",
+        lambda: start + 11,
+    )
+    index = await pool.acquire()
+    assert index == 0
+    await pool.release(index)

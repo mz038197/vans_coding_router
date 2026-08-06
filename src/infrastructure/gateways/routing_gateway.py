@@ -54,6 +54,15 @@ class RoutingGateway:
             providers[name] = {"pool": pool}
         return {"providers": providers}
 
+    async def release_key_quarantine(self, provider: str, index: int) -> None:
+        gateway = self.gateways.get(provider)
+        if gateway is None:
+            raise ValueError(f"未知 provider：{provider}")
+        release_fn = getattr(gateway, "release_key_quarantine", None)
+        if not callable(release_fn):
+            raise ValueError(f"provider「{provider}」不支援解除隔離")
+        await release_fn(index)
+
     async def models(self) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}
