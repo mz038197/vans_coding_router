@@ -470,18 +470,29 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      background: white;
-      color: #0f172a;
+      background: var(--accent);
+      color: white;
       border: 0;
       padding: 12px 24px;
       border-radius: 12px;
       text-decoration: none;
       font-weight: 700;
       font-size: 1rem;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+      box-shadow: var(--btn-shadow);
     }
 
     .oauth-btn:hover {
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+    }
+
+    html[data-theme="dark"] .oauth-btn {
+      background: white;
+      color: #0f172a;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    html[data-theme="dark"] .oauth-btn:hover {
       background: #eef2ff;
       transform: translateY(-2px);
     }

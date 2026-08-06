@@ -1,3 +1,4 @@
+import re
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -130,6 +131,32 @@ def test_portal_css_defines_light_and_dark_themes(tmp_path):
     assert "--code-text: #d7f5e9" in css
     assert "color: var(--code-text)" in css
     assert "color: #d7f5e9" not in css
+
+
+def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path):
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    light = re.search(r"(?m)^\s*\.oauth-btn\s*\{([^}]+)\}", css)
+    light_hover = re.search(r"(?m)^\s*\.oauth-btn:hover\s*\{([^}]+)\}", css)
+    dark = re.search(
+        r'(?m)^\s*html\[data-theme="dark"\]\s*\.oauth-btn\s*\{([^}]+)\}', css
+    )
+    dark_hover = re.search(
+        r'(?m)^\s*html\[data-theme="dark"\]\s*\.oauth-btn:hover\s*\{([^}]+)\}',
+        css,
+    )
+    assert light, "missing .oauth-btn rule"
+    assert light_hover, "missing .oauth-btn:hover rule"
+    assert "background: var(--accent)" in light.group(1)
+    assert "color: white" in light.group(1)
+    assert "box-shadow: var(--btn-shadow)" in light.group(1)
+    assert "background: var(--accent-hover)" in light_hover.group(1)
+    assert "transform: translateY(-2px)" in light_hover.group(1)
+    assert dark, 'missing html[data-theme="dark"] .oauth-btn rule'
+    assert dark_hover, 'missing html[data-theme="dark"] .oauth-btn:hover rule'
+    assert "background: white" in dark.group(1)
+    assert "color: #0f172a" in dark.group(1)
+    assert "background: #eef2ff" in dark_hover.group(1)
 
 
 def test_portal_login_network_uses_theme_aware_colors(tmp_path):
