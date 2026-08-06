@@ -80,6 +80,10 @@ _Avoid_: handoff token, Google OAuth code
 A teacher-managed classroom instance under a Class: invite lifecycle, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. After the sitting ends, the last saved Course Catalog remains readable for students who still hold a key for that session.
 _Avoid_: lesson plan, curriculum repo, student workspace
 
+**Portal Copy**:
+Teacher- and student-visible Portal UI wording uses Traditional Chinese characters only.
+_Avoid_: Simplified glyphs in Portal copy (e.g. 校验／注册／保存), mixed zh-CN/zh-TW Portal strings
+
 **Course Catalog**:
 The curated list of Install Actions attached to one Class Session, stored and edited as YAML (same shape as `classroom-installs.yaml`). Teachers open a Catalog modal from the session row in Portal (YAML editor, optional `.yaml`/`.yml` upload into the draft, template download, and download of the current draft); new sessions start with an empty catalog (`actions: []`); invalid YAML is rejected on save. Students fetch via a dedicated extension GET authorized by Classroom API Key (on redeem success, on extension startup when a key already exists, and on manual reload), including after the session has ended (last saved version). The extension keeps the fetched catalog in memory only and does not write it into the student workspace file. Same concept as in the classroom-one-click-install context. **Parity requirement:** `pegasi_router` must ship the same catalog capability, API shape, and Portal Catalog modal UX so one extension works against either router via `routerBaseUrl`.
 _Avoid_: install-vscode-models script, BYOK model list, lobby workspace on the server, per-action file-hosting CDN as catalog storage, first-class file-asset install API in this router, draft-invalid catalogs that break every student's Course Lane, bundling catalog only inside redeem with no reload GET, requiring the extension to persist catalog into `classroom-installs.yaml`, inline expandable catalog row as the primary edit surface

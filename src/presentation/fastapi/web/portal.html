@@ -133,7 +133,7 @@
         <div id="keyTab">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
           <button onclick="resetTeacherKey()">重設個人 API Key</button>
-          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製保存。</p>
+          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製儲存。</p>
           <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
@@ -212,8 +212,8 @@
           <input id="settingDeleteAfter" type="number" placeholder="刪除天數（從 archive 刪除）" />
           <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
           <select id="settingRegistration">
-            <option value="true">開放注册</option>
-            <option value="false">關閉開放注册</option>
+            <option value="true">開放註冊</option>
+            <option value="false">關閉開放註冊</option>
           </select>
           <button onclick="saveSettings()">儲存設定</button>
           <input id="adminUserSearch" type="search" placeholder="搜尋姓名或 Email" oninput="filterAdminUsers(this.value)" />
@@ -262,7 +262,7 @@
     <div class="modal-content modal-content-catalog" onclick="event.stopPropagation()">
       <div class="modal-header" id="editCatalogTitle">編輯本課安裝清單</div>
       <div class="modal-body">
-        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校验。學生連線後由擴充拉取。</p>
+        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校驗。學生連線後由擴充拉取。</p>
         <div
           id="catalogDropzone"
           class="catalog-dropzone"
@@ -1503,7 +1503,7 @@
       syncProbeApiKey();
       const display = document.getElementById('teacherKeyDisplay');
       display.textContent =
-        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n\n⚠ 此 key 只會顯示這一次，請立即複製保存。`;
+        `API Key: ${data.api_key}\nOPENAI_BASE_URL=${portalPublicUrl}/v1\n\n⚠ 此 key 只會顯示這一次，請立即複製儲存。`;
       display.classList.remove('hidden');
       document.getElementById('copyTeacherKeyBtn').classList.remove('hidden');
       await refresh();
@@ -2331,7 +2331,7 @@ actions:
         </div>
         <div class="admin-block">
           <h4>系統設定</h4>
-          <table><tr><th>歸檔天數</th><th>刪除天數</th><th>學生預設 TTL</th><th>開放注册</th></tr>
+          <table><tr><th>歸檔天數</th><th>刪除天數</th><th>學生預設 TTL</th><th>開放註冊</th></tr>
           <tr><td>${settings.prompt_logs?.archive_after_days ?? '-'}</td><td>${settings.prompt_logs?.delete_after_days ?? '-'}</td><td>${settings.student_default_ttl_hours ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
         </div>`;
     }
