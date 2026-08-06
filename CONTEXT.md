@@ -13,8 +13,8 @@ A provider response that rejects the request before any model output is produced
 _Avoid_: Copilot bug, no choices, model offline
 
 **Extra Usage Exhaustion**:
-An Upstream Refusal that means the upstream account has no remaining Extra Usage (or equivalent paid entitlement) for that model. It is not a rate-limit queue busy signal and not a router routing mistake.
-_Avoid_: quota full (ambiguous), rate limit, UpstreamBusy
+An Upstream Refusal that means the upstream account cannot continue under its current Extra Usage or plan/session entitlement for that model (for example Extra Usage balance empty, or a session usage limit whose remedy is upgrade / add Extra Usage). Ollama may signal this with different HTTP statuses; it is not a generic rate-limit busy signal and not a router routing mistake.
+_Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (as a separate routing class)
 
 **Key Failover**:
 On Extra Usage Exhaustion, trying the same student request against another key in that provider's key pool before returning to the client. The student still uses one Model ID; key choice stays inside the router.
@@ -77,12 +77,12 @@ A teacher-issued class-session code a signed-in student redeems for a Classroom 
 _Avoid_: handoff token, Google OAuth code
 
 **Class Session**:
-A teacher-managed classroom instance under a Class: invite lifecycle, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment.
+A teacher-managed classroom instance under a Class: invite lifecycle, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. After the sitting ends, the last saved Course Catalog remains readable for students who still hold a key for that session.
 _Avoid_: lesson plan, curriculum repo, student workspace
 
 **Course Catalog**:
-The curated list of Install Actions attached to one Class Session. Teachers edit it in Portal; students receive it via the classroom extension after redeem. Same concept as in the classroom-one-click-install context; this router is the authoritative store when the feature is used.
-_Avoid_: install-vscode-models script, BYOK model list, lobby workspace on the server
+The curated list of Install Actions attached to one Class Session, stored and edited as YAML (same shape as `classroom-installs.yaml`). Teachers edit a YAML textarea in Portal; invalid YAML is rejected on save. The classroom extension fetches the catalog for the Class Session bound to the student's Classroom API Key (including after the session has ended, as the last saved version). Same concept as in the classroom-one-click-install context.
+_Avoid_: install-vscode-models script, BYOK model list, lobby workspace on the server, per-action file-hosting CDN as catalog storage, first-class file-asset install API in this router, draft-invalid catalogs that break every student's Course Lane
 
 **Client Setup Card**:
 The Portal surface shown after a successful Invite Code redeem. It presents the Classroom API Key and Router Base URL a student needs to configure a client, plus class-session context for confirmation.

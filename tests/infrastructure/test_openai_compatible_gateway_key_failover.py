@@ -106,6 +106,42 @@ async def test_request_does_not_failover_on_non_extra_usage_402(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_request_failovers_on_429_session_usage_limit(monkeypatch):
+    gateway = _gateway(monkeypatch)
+    session_limit = (
+        '{"error":{"message":"you (mz038197) have reached your session usage limit, '
+        'upgrade for higher limits or add extra usage: https://ollama.com/settings"}}'
+    )
+    exhausted = _response(429, text=session_limit, json_body={"error": {"message": session_limit}})
+    ok = _response(200, text="{}", json_body={"ok": True})
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(side_effect=[exhausted, ok])
+
+    response = await gateway._request("POST", "/chat/completions", json={"model": "gpt-oss:120b-cloud"})
+    assert response.status_code == 200
+    assert gateway._client.request.await_count == 2
+    assert gateway._pool.status()["keys"][0]["quarantined"] or gateway._pool.status()["keys"][1]["quarantined"]
+
+
+@pytest.mark.asyncio
+async def test_request_does_not_failover_on_generic_429(monkeypatch):
+    gateway = _gateway(monkeypatch)
+    response = _response(
+        429,
+        text='{"error":{"message":"rate limit exceeded, try again later"}}',
+        json_body={"error": {"message": "rate limit exceeded, try again later"}},
+    )
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(return_value=response)
+
+    result = await gateway._request("POST", "/chat/completions", json={"model": "x"})
+    assert result.status_code == 429
+    assert gateway._client.request.await_count == 1
+    assert not gateway._pool.status()["keys"][0]["quarantined"]
+    assert not gateway._pool.status()["keys"][1]["quarantined"]
+
+
+@pytest.mark.asyncio
 async def test_stream_failovers_on_extra_usage(monkeypatch):
     gateway = _gateway(monkeypatch)
 
