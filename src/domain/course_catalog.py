@@ -53,7 +53,50 @@ def normalize_course_catalog_yaml(source: str) -> str:
             action["description"] = description.strip()
         actions.append(action)
 
-    return yaml.safe_dump({"actions": actions}, allow_unicode=True, sort_keys=False)
+    snippets = _parse_snippets(doc.get("snippets"))
+    dumped: dict[str, Any] = {"actions": actions}
+    if snippets:
+        dumped["snippets"] = snippets
+    return yaml.safe_dump(dumped, allow_unicode=True, sort_keys=False)
+
+
+def _parse_snippets(snippets_raw: object) -> list[dict[str, Any]]:
+    if snippets_raw is None:
+        return []
+    if not isinstance(snippets_raw, list):
+        raise ValueError("頂層鍵 snippets 若提供須為陣列")
+
+    snippets: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for i, row in enumerate(snippets_raw):
+        if not isinstance(row, dict):
+            raise ValueError(f"snippets[{i}] 必須是物件")
+        id_value = row.get("id")
+        title = row.get("title")
+        body = row.get("body")
+        paste_hint = row.get("paste_hint")
+
+        if not _non_empty_str(id_value) or not _non_empty_str(title):
+            raise ValueError(f"snippets[{i}] 缺少必填欄位 id／title／body")
+        if not isinstance(body, str) or len(body) == 0:
+            raise ValueError(f"snippets[{i}] 缺少必填欄位 id／title／body")
+
+        snippet_id = id_value.strip()
+        if snippet_id in seen_ids:
+            raise ValueError(f"snippets 內 id 重複：{snippet_id}")
+        seen_ids.add(snippet_id)
+
+        snippet: dict[str, Any] = {
+            "id": snippet_id,
+            "title": title.strip(),
+            "body": body,
+        }
+        if paste_hint is not None:
+            if not _non_empty_str(paste_hint):
+                raise ValueError(f"snippets[{i}].paste_hint 若提供須為非空字串")
+            snippet["paste_hint"] = paste_hint.strip()
+        snippets.append(snippet)
+    return snippets
 
 
 def _non_empty_str(value: object) -> bool:

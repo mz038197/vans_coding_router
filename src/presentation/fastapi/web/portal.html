@@ -262,7 +262,7 @@
     <div class="modal-content modal-content-catalog" onclick="event.stopPropagation()">
       <div class="modal-header" id="editCatalogTitle">編輯本課安裝清單</div>
       <div class="modal-body">
-        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形；儲存前會校驗。學生連線後由擴充拉取。</p>
+        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形（<code>actions</code> 與選填 <code>snippets</code>）；儲存前會校驗。學生連線後由擴充拉取。</p>
         <div
           id="catalogDropzone"
           class="catalog-dropzone"
@@ -1628,7 +1628,7 @@
     }
 
     const COURSE_CATALOG_TEMPLATE_YAML = `# Course Catalog 範本（與擴充 classroom-installs.yaml 同形）
-# 儲存時註解會被正規化移除；請改成你的 Install Actions。
+# 儲存時註解會被正規化移除；請改成你的 Install Actions 與本課片段。
 actions:
 - id: example-skill
   title: 範例 Skill
@@ -1643,6 +1643,13 @@ actions:
   title: 範例 MCP
   kind: mcp
   command: echo "configure your mcp server"
+snippets:
+- id: example-stub
+  title: 範例起步程式
+  paste_hint: example.py
+  body: |
+    def main():
+        pass
 `;
 
     let editCatalogContext = null;
