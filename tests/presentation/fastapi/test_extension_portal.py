@@ -147,6 +147,29 @@ actions:
     assert "demo" in after_end.json()["course_catalog_yaml"]
 
 
+def test_teacher_patch_dumps_multiline_snippet_body_as_block_scalar(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    snippet_yaml = """
+actions: []
+snippets:
+  - id: stub
+    title: Stub
+    body: "def main():\\n    pass\\n"
+"""
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"course_catalog_yaml": snippet_yaml},
+    )
+    assert response.status_code == 200
+    dumped = response.json()["course_catalog_yaml"]
+    assert "body: |" in dumped
+    assert '"def main():' not in dumped
+
+
 def test_google_login_start_sets_extension_client_cookie(tmp_path):
     client, _, _ = _client(tmp_path, google_client_id="cid", google_client_secret="csecret")
     response = client.get("/auth/google/login?client=extension", follow_redirects=False)

@@ -10,6 +10,44 @@ ACTION_KINDS = frozenset({"skill", "package", "mcp"})
 DEFAULT_COURSE_CATALOG_YAML = "actions: []\n"
 
 
+class _CatalogDumper(yaml.SafeDumper):
+    """Dumper that emits multiline strings as literal block scalars."""
+
+
+def _looks_like_yaml_nonstring(data: str) -> bool:
+    stripped = data.strip()
+    if stripped != data or stripped == "":
+        return True
+    lowered = stripped.lower()
+    if lowered in {"true", "false", "null", "yes", "no", "on", "off", "~"}:
+        return True
+    if stripped[:1] in "-?:" and len(stripped) > 1:
+        return True
+    try:
+        float(stripped)
+        return True
+    except ValueError:
+        return False
+
+
+def _literal_str_representer(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    style = '"' if _looks_like_yaml_nonstring(data) else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_CatalogDumper.add_representer(str, _literal_str_representer)
+
+
+def _as_text(value: object) -> object:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    return value
+
+
 def normalize_course_catalog_yaml(source: str) -> str:
     """Parse, validate, and re-dump catalog YAML. Raises ValueError on failure."""
     if not isinstance(source, str):
@@ -30,11 +68,11 @@ def normalize_course_catalog_yaml(source: str) -> str:
     for i, row in enumerate(actions_raw):
         if not isinstance(row, dict):
             raise ValueError(f"actions[{i}] 必須是物件")
-        id_value = row.get("id")
-        title = row.get("title")
-        command = row.get("command")
-        kind = row.get("kind")
-        description = row.get("description")
+        id_value = _as_text(row.get("id"))
+        title = _as_text(row.get("title"))
+        command = _as_text(row.get("command"))
+        kind = _as_text(row.get("kind"))
+        description = _as_text(row.get("description")) if row.get("description") is not None else None
 
         if not _non_empty_str(id_value) or not _non_empty_str(title) or not _non_empty_str(command):
             raise ValueError(f"actions[{i}] 缺少必填欄位 id／title／command")
@@ -57,7 +95,7 @@ def normalize_course_catalog_yaml(source: str) -> str:
     dumped: dict[str, Any] = {"actions": actions}
     if snippets:
         dumped["snippets"] = snippets
-    return yaml.safe_dump(dumped, allow_unicode=True, sort_keys=False)
+    return yaml.dump(dumped, Dumper=_CatalogDumper, allow_unicode=True, sort_keys=False)
 
 
 def _parse_snippets(snippets_raw: object) -> list[dict[str, Any]]:
@@ -71,10 +109,10 @@ def _parse_snippets(snippets_raw: object) -> list[dict[str, Any]]:
     for i, row in enumerate(snippets_raw):
         if not isinstance(row, dict):
             raise ValueError(f"snippets[{i}] 必須是物件")
-        id_value = row.get("id")
-        title = row.get("title")
+        id_value = _as_text(row.get("id"))
+        title = _as_text(row.get("title"))
         body = row.get("body")
-        paste_hint = row.get("paste_hint")
+        paste_hint = _as_text(row.get("paste_hint")) if row.get("paste_hint") is not None else None
 
         if not _non_empty_str(id_value) or not _non_empty_str(title):
             raise ValueError(f"snippets[{i}] 缺少必填欄位 id／title／body")

@@ -18,7 +18,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-  <link rel="stylesheet" href="/portal/static/portal.css?v=login-glass-3" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
+  <link rel="stylesheet" href="/portal/static/portal.css?v=catalog-form-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -258,11 +259,11 @@
     </div>
   </div>
 
-  <div class="modal" id="editCatalogModal" onclick="onEditCatalogBackdropClick(event)">
-    <div class="modal-content modal-content-catalog" onclick="event.stopPropagation()">
+  <div class="modal" id="editCatalogModal">
+    <div class="modal-content modal-content-catalog">
       <div class="modal-header" id="editCatalogTitle">編輯本課安裝清單</div>
       <div class="modal-body">
-        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形（<code>actions</code> 與選填 <code>snippets</code>）；儲存前會校驗。學生連線後由擴充拉取。</p>
+        <p class="hint">與擴充 <code>classroom-installs.yaml</code> 同形。請用表單編輯安裝項目與本課片段；也可上傳或下載 YAML。儲存前會校驗。學生連線後由擴充拉取。</p>
         <div
           id="catalogDropzone"
           class="catalog-dropzone"
@@ -280,9 +281,15 @@
           <p class="hint-inline">或 <button type="button" class="btn-link" id="catalogPickFileBtn">選擇 .yaml／.yml 檔</button></p>
         </div>
         <p id="catalogUploadMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
-        <label class="modal-field-label" for="editCatalogYaml">Course Catalog YAML</label>
-        <textarea id="editCatalogYaml" class="session-catalog-yaml" rows="14" spellcheck="false"></textarea>
-        <p id="catalogSaveMsg" class="hint-inline" aria-live="polite"></p>
+        <div id="catalogFormRoot">
+          <h3 class="catalog-section-title">安裝項目</h3>
+          <div id="catalogActionsList" class="catalog-item-list"></div>
+          <button type="button" class="btn-secondary" id="catalogAddActionBtn">新增安裝項目</button>
+          <h3 class="catalog-section-title">本課片段</h3>
+          <div id="catalogSnippetsList" class="catalog-item-list"></div>
+          <button type="button" class="btn-secondary" id="catalogAddSnippetBtn">新增本課片段</button>
+        </div>
+        <p id="catalogSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
       </div>
       <div class="modal-footer">
         <div class="modal-footer-actions modal-footer-actions-split">
@@ -722,11 +729,24 @@
       return false;
     }
 
+    function catalogHasSnippets(yaml) {
+      const trimmed = String(yaml || '').trim();
+      if (!trimmed) return false;
+      if (/^snippets:\s*\[\s*\]\s*$/m.test(trimmed)) return false;
+      const snippetsIdx = trimmed.search(/^snippets:\s*$/m);
+      if (snippetsIdx >= 0) {
+        const after = trimmed.slice(snippetsIdx).split(/\r?\n/).slice(1);
+        return after.some((line) => /^-\s+\S/.test(line));
+      }
+      if (/^snippets:\s*\[\s*\{/m.test(trimmed)) return true;
+      return false;
+    }
+
     function sessionCatalogCell(classId, session) {
       const yaml = sessionCatalogYaml(session);
-      const hasActions = catalogHasInstallActions(yaml);
-      const title = hasActions ? '編輯本課安裝清單' : '編輯本課安裝清單（尚無項目）';
-      const stateClass = hasActions ? 'has-actions' : 'is-empty';
+      const hasItems = catalogHasInstallActions(yaml) || catalogHasSnippets(yaml);
+      const title = hasItems ? '編輯本課安裝清單' : '編輯本課安裝清單（尚無項目）';
+      const stateClass = hasItems ? 'has-actions' : 'is-empty';
       return `<div class="cell-with-action cell-catalog">
         <button type="button" class="icon-btn catalog-icon ${stateClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" onclick="beginEditSessionCatalog(${classId}, ${session.id})">
           <i class="fas fa-file-code"></i>
@@ -1628,7 +1648,7 @@
     }
 
     const COURSE_CATALOG_TEMPLATE_YAML = `# Course Catalog 範本（與擴充 classroom-installs.yaml 同形）
-# 儲存時註解會被正規化移除；請改成你的 Install Actions 與本課片段。
+# 儲存時註解會被正規化移除；上傳此檔可填入表單。
 actions:
 - id: example-skill
   title: 範例 Skill
@@ -1653,7 +1673,360 @@ snippets:
 `;
 
     let editCatalogContext = null;
+    let catalogDraft = { actions: [], snippets: [] };
+    let catalogFieldErrors = { actions: {}, snippets: {} };
     let catalogDropzoneBound = false;
+    let catalogFormBound = false;
+    let catalogFormLocked = false;
+
+    function emptyCatalogDraft() {
+      return { actions: [], snippets: [] };
+    }
+
+    function yamlScalar(value) {
+      const text = String(value ?? '');
+      if (text === '') return '""';
+      if (
+        /[\n\r:#{}[\],&*?|<>=!%@`'"]/.test(text)
+        || /^\s|\s$/.test(text)
+        || /^(true|false|null|yes|no|on|off|~)$/i.test(text)
+        || /^[-?]/.test(text)
+        || /^-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?$/.test(text)
+      ) {
+        return JSON.stringify(text);
+      }
+      return text;
+    }
+
+    function yamlLiteralBlock(value, indent) {
+      const pad = ' '.repeat(indent);
+      const text = String(value ?? '');
+      const clipped = text.endsWith('\n') ? text.slice(0, -1) : text;
+      const lines = clipped.split('\n');
+      let out = '|\n';
+      for (const line of lines) out += `${pad}${line}\n`;
+      return out;
+    }
+
+    function dumpCatalogDraft(draft) {
+      const actions = Array.isArray(draft.actions) ? draft.actions : [];
+      const snippets = Array.isArray(draft.snippets) ? draft.snippets : [];
+      let out = '';
+      if (!actions.length) {
+        out += 'actions: []\n';
+      } else {
+        out += 'actions:\n';
+        actions.forEach((action) => {
+          out += `- id: ${yamlScalar(action.id)}\n`;
+          out += `  title: ${yamlScalar(action.title)}\n`;
+          out += `  kind: ${yamlScalar(action.kind)}\n`;
+          out += `  command: ${yamlScalar(action.command)}\n`;
+          const description = String(action.description || '').trim();
+          if (description) out += `  description: ${yamlScalar(description)}\n`;
+        });
+      }
+      if (snippets.length) {
+        out += 'snippets:\n';
+        snippets.forEach((snippet) => {
+          out += `- id: ${yamlScalar(snippet.id)}\n`;
+          out += `  title: ${yamlScalar(snippet.title)}\n`;
+          const body = snippet.body == null ? '' : String(snippet.body);
+          if (body.includes('\n')) out += `  body: ${yamlLiteralBlock(body, 4)}`;
+          else out += `  body: ${yamlScalar(body)}\n`;
+          const hint = String(snippet.paste_hint || '').trim();
+          if (hint) out += `  paste_hint: ${yamlScalar(hint)}\n`;
+        });
+      }
+      return out.endsWith('\n') ? out : `${out}\n`;
+    }
+
+    function catalogDraftFromYaml(text) {
+      if (typeof jsyaml === 'undefined' || typeof jsyaml.load !== 'function') {
+        return { error: '無法載入 YAML 解析器，請重新整理頁面後再試。' };
+      }
+      let doc;
+      try {
+        doc = jsyaml.load(text);
+      } catch (err) {
+        return { error: `YAML 無法解析：${err.message || err}` };
+      }
+      if (doc == null || typeof doc !== 'object' || Array.isArray(doc)) {
+        return { error: '根層必須是物件，且含 actions 陣列' };
+      }
+      if (!Array.isArray(doc.actions)) {
+        return { error: '缺少頂層鍵 actions（陣列）' };
+      }
+      if (doc.snippets != null && !Array.isArray(doc.snippets)) {
+        return { error: '頂層鍵 snippets 若提供須為陣列' };
+      }
+      const actions = [];
+      for (let i = 0; i < doc.actions.length; i += 1) {
+        const row = doc.actions[i];
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+          return { error: `actions[${i}] 必須是物件` };
+        }
+        actions.push({
+          id: String(row.id ?? '').trim(),
+          title: String(row.title ?? '').trim(),
+          kind: String(row.kind ?? 'skill').trim() || 'skill',
+          command: String(row.command ?? '').trim(),
+          description: row.description == null ? '' : String(row.description),
+        });
+      }
+      const snippets = [];
+      const rawSnippets = doc.snippets || [];
+      for (let i = 0; i < rawSnippets.length; i += 1) {
+        const row = rawSnippets[i];
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+          return { error: `snippets[${i}] 必須是物件` };
+        }
+        snippets.push({
+          id: String(row.id ?? '').trim(),
+          title: String(row.title ?? '').trim(),
+          paste_hint: row.paste_hint == null ? '' : String(row.paste_hint),
+          body: row.body == null ? '' : String(row.body),
+        });
+      }
+      return { draft: { actions, snippets } };
+    }
+
+    function emptyCatalogAction() {
+      return { id: '', title: '', kind: 'skill', command: '', description: '' };
+    }
+
+    function emptyCatalogSnippet() {
+      return { id: '', title: '', paste_hint: '', body: '' };
+    }
+
+    function catalogKindOptions(selected) {
+      const kinds = ['skill', 'package', 'mcp'];
+      if (selected && !kinds.includes(selected)) kinds.push(selected);
+      return kinds.map((kind) => (
+        `<option value="${escapeHtml(kind)}"${kind === selected ? ' selected' : ''}>${escapeHtml(kind)}</option>`
+      )).join('');
+    }
+
+    function catalogItemToolbar(kind, index, total) {
+      return `<div class="catalog-item-toolbar">
+        <button type="button" class="btn-secondary catalog-item-btn" data-catalog-move="up" data-catalog-kind="${kind}" data-catalog-index="${index}" ${index === 0 ? 'disabled' : ''}>上移</button>
+        <button type="button" class="btn-secondary catalog-item-btn" data-catalog-move="down" data-catalog-kind="${kind}" data-catalog-index="${index}" ${index >= total - 1 ? 'disabled' : ''}>下移</button>
+        <button type="button" class="btn-secondary catalog-item-btn" data-catalog-delete="${kind}" data-catalog-index="${index}">刪除</button>
+      </div>`;
+    }
+
+    function renderCatalogActionCard(action, index, total) {
+      const error = catalogFieldErrors.actions[index] || '';
+      return `<article class="catalog-item${error ? ' is-error' : ''}" data-catalog-kind="actions" data-catalog-index="${index}">
+        <div class="catalog-item-head">
+          <span class="catalog-item-label">安裝項目 ${index + 1}</span>
+          ${catalogItemToolbar('actions', index, total)}
+        </div>
+        <div class="catalog-item-grid">
+          <label class="catalog-field">id
+            <input class="catalog-field-input" data-catalog-field="id" data-catalog-kind="actions" data-catalog-index="${index}" value="${escapeHtml(action.id)}" spellcheck="false" />
+          </label>
+          <label class="catalog-field">title
+            <input class="catalog-field-input" data-catalog-field="title" data-catalog-kind="actions" data-catalog-index="${index}" value="${escapeHtml(action.title)}" />
+          </label>
+          <label class="catalog-field">kind
+            <select class="catalog-field-input" data-catalog-field="kind" data-catalog-kind="actions" data-catalog-index="${index}">
+              ${catalogKindOptions(action.kind)}
+            </select>
+          </label>
+          <label class="catalog-field catalog-field-wide">command
+            <input class="catalog-field-input" data-catalog-field="command" data-catalog-kind="actions" data-catalog-index="${index}" value="${escapeHtml(action.command)}" spellcheck="false" />
+          </label>
+          <label class="catalog-field catalog-field-wide">description（選填）
+            <input class="catalog-field-input" data-catalog-field="description" data-catalog-kind="actions" data-catalog-index="${index}" value="${escapeHtml(action.description || '')}" />
+          </label>
+        </div>
+        <p class="catalog-item-error" data-catalog-error="actions" data-catalog-index="${index}">${escapeHtml(error)}</p>
+      </article>`;
+    }
+
+    function renderCatalogSnippetCard(snippet, index, total) {
+      const error = catalogFieldErrors.snippets[index] || '';
+      return `<article class="catalog-item${error ? ' is-error' : ''}" data-catalog-kind="snippets" data-catalog-index="${index}">
+        <div class="catalog-item-head">
+          <span class="catalog-item-label">本課片段 ${index + 1}</span>
+          ${catalogItemToolbar('snippets', index, total)}
+        </div>
+        <div class="catalog-item-grid">
+          <label class="catalog-field">id
+            <input class="catalog-field-input" data-catalog-field="id" data-catalog-kind="snippets" data-catalog-index="${index}" value="${escapeHtml(snippet.id)}" spellcheck="false" />
+          </label>
+          <label class="catalog-field">title
+            <input class="catalog-field-input" data-catalog-field="title" data-catalog-kind="snippets" data-catalog-index="${index}" value="${escapeHtml(snippet.title)}" />
+          </label>
+          <label class="catalog-field">paste_hint（選填檔名）
+            <input class="catalog-field-input" data-catalog-field="paste_hint" data-catalog-kind="snippets" data-catalog-index="${index}" value="${escapeHtml(snippet.paste_hint || '')}" spellcheck="false" />
+          </label>
+          <label class="catalog-field catalog-field-wide">body
+            <textarea class="catalog-body-input" data-catalog-field="body" data-catalog-kind="snippets" data-catalog-index="${index}" rows="8" spellcheck="false">${escapeHtml(snippet.body || '')}</textarea>
+          </label>
+        </div>
+        <p class="catalog-item-error" data-catalog-error="snippets" data-catalog-index="${index}">${escapeHtml(error)}</p>
+      </article>`;
+    }
+
+    function renderCatalogForms() {
+      const actionsHost = document.getElementById('catalogActionsList');
+      const snippetsHost = document.getElementById('catalogSnippetsList');
+      if (!actionsHost || !snippetsHost) return;
+      const actions = catalogDraft.actions || [];
+      const snippets = catalogDraft.snippets || [];
+      actionsHost.innerHTML = actions.length
+        ? actions.map((row, i) => renderCatalogActionCard(row, i, actions.length)).join('')
+        : '<p class="hint-inline catalog-empty-hint">尚無安裝項目</p>';
+      snippetsHost.innerHTML = snippets.length
+        ? snippets.map((row, i) => renderCatalogSnippetCard(row, i, snippets.length)).join('')
+        : '<p class="hint-inline catalog-empty-hint">尚無本課片段</p>';
+    }
+
+    function setCatalogDraft(draft) {
+      catalogDraft = {
+        actions: Array.isArray(draft.actions) ? draft.actions : [],
+        snippets: Array.isArray(draft.snippets) ? draft.snippets : [],
+      };
+      catalogFieldErrors = { actions: {}, snippets: {} };
+      renderCatalogForms();
+      refreshCatalogSaveEnabled();
+    }
+
+    function validateCatalogDraft(draft) {
+      const actionErrors = {};
+      const snippetErrors = {};
+      const kinds = { skill: true, package: true, mcp: true };
+      (draft.actions || []).forEach((action, i) => {
+        if (!String(action.id || '').trim() || !String(action.title || '').trim() || !String(action.command || '').trim()) {
+          actionErrors[i] = '缺少必填欄位 id／title／command';
+          return;
+        }
+        if (!kinds[String(action.kind || '').trim()]) {
+          actionErrors[i] = 'kind 必須是 skill／package／mcp';
+        }
+      });
+      const seen = {};
+      (draft.snippets || []).forEach((snippet, i) => {
+        const snippetId = String(snippet.id || '').trim();
+        const title = String(snippet.title || '').trim();
+        const body = snippet.body == null ? '' : String(snippet.body);
+        if (!snippetId || !title || !body.length) {
+          snippetErrors[i] = '缺少必填欄位 id／title／body';
+          return;
+        }
+        if (!seen[snippetId]) seen[snippetId] = [];
+        seen[snippetId].push(i);
+        if (snippet.paste_hint != null && String(snippet.paste_hint).length && !String(snippet.paste_hint).trim()) {
+          snippetErrors[i] = 'paste_hint 若提供須為非空字串';
+        }
+      });
+      Object.keys(seen).forEach((snippetId) => {
+        const indexes = seen[snippetId];
+        if (indexes.length < 2) return;
+        indexes.forEach((i) => {
+          snippetErrors[i] = `snippets 內 id 重複：${snippetId}`;
+        });
+      });
+      const firstAction = Object.keys(actionErrors)[0];
+      const firstSnippet = Object.keys(snippetErrors)[0];
+      let summary = '';
+      if (firstAction != null) summary = `安裝項目 ${Number(firstAction) + 1}：${actionErrors[firstAction]}`;
+      else if (firstSnippet != null) summary = `本課片段 ${Number(firstSnippet) + 1}：${snippetErrors[firstSnippet]}`;
+      return {
+        ok: !summary,
+        actionErrors,
+        snippetErrors,
+        summary,
+      };
+    }
+
+    function ensureCatalogFormBound() {
+      if (catalogFormBound) return;
+      const root = document.getElementById('catalogFormRoot');
+      const addActionBtn = document.getElementById('catalogAddActionBtn');
+      const addSnippetBtn = document.getElementById('catalogAddSnippetBtn');
+      if (!root || !addActionBtn || !addSnippetBtn) return;
+      root.addEventListener('input', onCatalogFormFieldEvent);
+      root.addEventListener('change', onCatalogFormFieldEvent);
+      root.addEventListener('click', onCatalogFormClick);
+      root.addEventListener('keydown', onCatalogFormKeydown);
+      addActionBtn.addEventListener('click', () => {
+        if (catalogFormLocked) return;
+        catalogDraft.actions.push(emptyCatalogAction());
+        catalogFieldErrors = { actions: {}, snippets: {} };
+        renderCatalogForms();
+        refreshCatalogSaveEnabled();
+      });
+      addSnippetBtn.addEventListener('click', () => {
+        if (catalogFormLocked) return;
+        catalogDraft.snippets.push(emptyCatalogSnippet());
+        catalogFieldErrors = { actions: {}, snippets: {} };
+        renderCatalogForms();
+        refreshCatalogSaveEnabled();
+      });
+      catalogFormBound = true;
+    }
+
+    function onCatalogFormFieldEvent(event) {
+      if (catalogFormLocked) return;
+      const field = event.target && event.target.getAttribute('data-catalog-field');
+      if (!field) return;
+      const kind = event.target.getAttribute('data-catalog-kind');
+      const index = Number(event.target.getAttribute('data-catalog-index'));
+      const list = kind === 'snippets' ? catalogDraft.snippets : catalogDraft.actions;
+      if (!list || !list[index]) return;
+      list[index][field] = event.target.value;
+      if (catalogFieldErrors[kind] && catalogFieldErrors[kind][index]) {
+        delete catalogFieldErrors[kind][index];
+        const errEl = event.target.closest('.catalog-item')?.querySelector('.catalog-item-error');
+        if (errEl) errEl.textContent = '';
+        event.target.closest('.catalog-item')?.classList.remove('is-error');
+      }
+    }
+
+    function onCatalogFormClick(event) {
+      if (catalogFormLocked) return;
+      const del = event.target.closest('[data-catalog-delete]');
+      if (del) {
+        const kind = del.getAttribute('data-catalog-delete');
+        const index = Number(del.getAttribute('data-catalog-index'));
+        const list = kind === 'snippets' ? catalogDraft.snippets : catalogDraft.actions;
+        if (!list || !list[index]) return;
+        list.splice(index, 1);
+        catalogFieldErrors = { actions: {}, snippets: {} };
+        renderCatalogForms();
+        refreshCatalogSaveEnabled();
+        return;
+      }
+      const move = event.target.closest('[data-catalog-move]');
+      if (!move || move.disabled) return;
+      const kind = move.getAttribute('data-catalog-kind');
+      const index = Number(move.getAttribute('data-catalog-index'));
+      const list = kind === 'snippets' ? catalogDraft.snippets : catalogDraft.actions;
+      if (!list || !list[index]) return;
+      const next = move.getAttribute('data-catalog-move') === 'up' ? index - 1 : index + 1;
+      if (next < 0 || next >= list.length) return;
+      const current = list[index];
+      list[index] = list[next];
+      list[next] = current;
+      catalogFieldErrors = { actions: {}, snippets: {} };
+      renderCatalogForms();
+      refreshCatalogSaveEnabled();
+    }
+
+    function onCatalogFormKeydown(event) {
+      if (event.key !== 'Tab' || event.shiftKey) return;
+      const target = event.target;
+      if (!target || target.getAttribute('data-catalog-field') !== 'body') return;
+      event.preventDefault();
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const spaces = '    ';
+      target.value = `${target.value.slice(0, start)}${spaces}${target.value.slice(end)}`;
+      target.selectionStart = target.selectionEnd = start + spaces.length;
+      onCatalogFormFieldEvent({ target });
+    }
 
     function ensureCatalogDropzoneBound() {
       if (catalogDropzoneBound) return;
@@ -1713,8 +2086,7 @@ snippets:
     }
 
     function loadCatalogYamlFile(file) {
-      const area = document.getElementById('editCatalogYaml');
-      if (!area || !file) return;
+      if (!file) return;
       if (!isYamlCatalogFilename(file.name)) {
         setCatalogUploadMsg('僅接受 .yaml／.yml 檔，編輯器內容未變更。', true);
         return;
@@ -1727,15 +2099,20 @@ snippets:
           setCatalogUploadMsg('檔案是空的，編輯器內容未變更。', true);
           return;
         }
-        // Lightweight client guard; full validation still happens on save.
-        if (!/actions\s*:/m.test(trimmed)) {
-          setCatalogUploadMsg('檔案缺少頂層 actions，編輯器內容未變更。', true);
+        const parsed = catalogDraftFromYaml(trimmed);
+        if (parsed.error) {
+          setCatalogUploadMsg(parsed.error, true);
           return;
         }
-        area.value = text;
+        setCatalogDraft(parsed.draft);
         setCatalogUploadMsg(`已載入 ${file.name}（尚未儲存）`, false);
+        if (editCatalogContext) editCatalogContext.loadFailed = false;
+        refreshCatalogSaveEnabled();
         const saveMsg = document.getElementById('catalogSaveMsg');
-        if (saveMsg) saveMsg.textContent = '';
+        if (saveMsg) {
+          saveMsg.textContent = '';
+          saveMsg.classList.remove('is-error');
+        }
       };
       reader.onerror = () => {
         setCatalogUploadMsg('讀取檔案失敗，編輯器內容未變更。', true);
@@ -1760,8 +2137,7 @@ snippets:
     }
 
     function downloadCurrentCatalogYaml() {
-      const area = document.getElementById('editCatalogYaml');
-      const text = area ? area.value : 'actions: []\n';
+      const text = dumpCatalogDraft(catalogDraft);
       const sessionId = editCatalogContext?.sessionId;
       const name = sessionId ? `course-catalog-session-${sessionId}.yaml` : 'course-catalog.yaml';
       downloadTextFile(name, text.endsWith('\n') ? text : `${text}\n`);
@@ -1769,32 +2145,70 @@ snippets:
 
     function beginEditSessionCatalog(classId, sessionId) {
       const modal = document.getElementById('editCatalogModal');
-      const area = document.getElementById('editCatalogYaml');
       const title = document.getElementById('editCatalogTitle');
       const saveBtn = document.getElementById('catalogSaveBtn');
-      if (!modal || !area) return;
+      const saveMsg = document.getElementById('catalogSaveMsg');
+      if (!modal) return;
       ensureCatalogDropzoneBound();
+      ensureCatalogFormBound();
       const session = window.__sessionById && window.__sessionById[sessionId];
       const yaml = session ? sessionCatalogYaml(session) : 'actions: []\n';
-      editCatalogContext = { classId, sessionId, baselineYaml: yaml };
-      area.value = yaml;
-      area.disabled = false;
-      if (saveBtn) saveBtn.disabled = false;
+      const parsed = catalogDraftFromYaml(yaml);
+      catalogFormLocked = false;
+      if (parsed.error) {
+        setCatalogDraft(emptyCatalogDraft());
+        setCatalogUploadMsg('', false);
+        if (saveMsg) {
+          saveMsg.textContent = parsed.error;
+          saveMsg.classList.add('is-error');
+        }
+        editCatalogContext = {
+          classId,
+          sessionId,
+          baselineYaml: dumpCatalogDraft(catalogDraft),
+          loadFailed: true,
+        };
+      } else {
+        setCatalogDraft(parsed.draft);
+        setCatalogUploadMsg('', false);
+        if (saveMsg) {
+          saveMsg.textContent = '';
+          saveMsg.classList.remove('is-error');
+        }
+        editCatalogContext = {
+          classId,
+          sessionId,
+          baselineYaml: dumpCatalogDraft(catalogDraft),
+          loadFailed: false,
+        };
+      }
       if (title) {
         const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
         title.textContent = `編輯本課安裝清單 · ${label}`;
       }
-      setCatalogUploadMsg('', false);
-      const saveMsg = document.getElementById('catalogSaveMsg');
-      if (saveMsg) saveMsg.textContent = '';
+      refreshCatalogSaveEnabled();
+      if (saveBtn && catalogFormLocked) saveBtn.disabled = true;
       modal.classList.add('show');
-      setTimeout(() => area.focus(), 0);
+    }
+
+    function refreshCatalogSaveEnabled() {
+      const saveBtn = document.getElementById('catalogSaveBtn');
+      if (!saveBtn) return;
+      if (catalogFormLocked) {
+        saveBtn.disabled = true;
+        return;
+      }
+      if (editCatalogContext && editCatalogContext.loadFailed) {
+        const hasItems = (catalogDraft.actions || []).length + (catalogDraft.snippets || []).length > 0;
+        saveBtn.disabled = !hasItems;
+        return;
+      }
+      saveBtn.disabled = false;
     }
 
     function isCatalogModalDirty() {
-      const area = document.getElementById('editCatalogYaml');
-      if (!area || !editCatalogContext) return false;
-      return area.value !== editCatalogContext.baselineYaml;
+      if (!editCatalogContext) return false;
+      return dumpCatalogDraft(catalogDraft) !== editCatalogContext.baselineYaml;
     }
 
     function requestCloseEditCatalogModal() {
@@ -1809,36 +2223,58 @@ snippets:
       const modal = document.getElementById('editCatalogModal');
       if (modal) modal.classList.remove('show');
       editCatalogContext = null;
+      catalogFormLocked = false;
+      catalogDraft = emptyCatalogDraft();
+      catalogFieldErrors = { actions: {}, snippets: {} };
       setCatalogUploadMsg('', false);
     }
 
-    function onEditCatalogBackdropClick(event) {
-      if (event.target && event.target.id === 'editCatalogModal') {
-        requestCloseEditCatalogModal();
-      }
-    }
-
     async function saveEditCatalogModal() {
-      if (!editCatalogContext) return;
-      const area = document.getElementById('editCatalogYaml');
+      if (!editCatalogContext || catalogFormLocked) return;
       const saveMsg = document.getElementById('catalogSaveMsg');
       const saveBtn = document.getElementById('catalogSaveBtn');
-      if (!area || area.disabled) return;
       const { classId, sessionId } = editCatalogContext;
-      if (saveMsg) saveMsg.textContent = '儲存中…';
+      if (editCatalogContext.loadFailed) {
+        const hasItems = (catalogDraft.actions || []).length + (catalogDraft.snippets || []).length > 0;
+        if (!hasItems) {
+          if (saveMsg) {
+            saveMsg.textContent = '無法載入清單，請上傳 YAML 後再儲存。';
+            saveMsg.classList.add('is-error');
+          }
+          return;
+        }
+      }
+      const result = validateCatalogDraft(catalogDraft);
+      if (!result.ok) {
+        catalogFieldErrors = { actions: result.actionErrors, snippets: result.snippetErrors };
+        renderCatalogForms();
+        if (saveMsg) {
+          saveMsg.textContent = result.summary;
+          saveMsg.classList.add('is-error');
+        }
+        return;
+      }
+      const yaml = dumpCatalogDraft(catalogDraft);
+      if (saveMsg) {
+        saveMsg.textContent = '儲存中…';
+        saveMsg.classList.remove('is-error');
+      }
       if (saveBtn) saveBtn.disabled = true;
-      area.disabled = true;
+      catalogFormLocked = true;
       try {
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ course_catalog_yaml: area.value }),
+          body: JSON.stringify({ course_catalog_yaml: yaml }),
         });
         closeEditCatalogModal();
         await reloadSessionViews(classId);
       } catch (err) {
-        if (saveMsg) saveMsg.textContent = err?.message || '儲存失敗';
-        area.disabled = false;
-        if (saveBtn) saveBtn.disabled = false;
+        catalogFormLocked = false;
+        if (saveMsg) {
+          saveMsg.textContent = err?.message || '儲存失敗';
+          saveMsg.classList.add('is-error');
+        }
+        refreshCatalogSaveEnabled();
       }
     }
 
@@ -2086,8 +2522,6 @@ snippets:
       if (event.key !== 'Escape') return;
       const catalogModal = document.getElementById('editCatalogModal');
       if (catalogModal && catalogModal.classList.contains('show')) {
-        event.preventDefault();
-        requestCloseEditCatalogModal();
         return;
       }
       const modal = document.getElementById('editExpiresModal');

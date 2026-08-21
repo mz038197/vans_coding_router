@@ -1,0 +1,3 @@
+# Course Catalog is authored as structured fields
+
+Teachers could not reliably edit Lesson Snippet bodies in a YAML textarea: block-scalar indent is easy to break, and save-time dump turned `|` into quoted `\n` strings. Course Catalog remains YAML on the Class Session and on the extension GET (same shape as `classroom-installs.yaml`). Portal now edits Install Actions and Lesson Snippets as structured fields; YAML is import/export only (upload, template download, draft download). Multiline bodies dump as literal block scalars. The Catalog modal closes only via 取消 or 儲存, not backdrop click or Escape. This replaces the Portal textarea authoring in ADR 0001; storage, reject-on-invalid-save, extension fetch, and pegasi API shape are unchanged.

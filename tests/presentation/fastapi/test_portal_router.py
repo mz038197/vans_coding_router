@@ -119,6 +119,17 @@ def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     assert 'data-theme' in html
 
 
+def test_portal_catalog_modal_uses_structured_fields(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert 'id="catalogFormRoot"' in html
+    assert 'id="catalogActionsList"' in html
+    assert 'id="catalogSnippetsList"' in html
+    assert 'id="editCatalogYaml"' not in html
+    assert "onEditCatalogBackdropClick" not in html
+    assert "js-yaml" in html
+
+
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text

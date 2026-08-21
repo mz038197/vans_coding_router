@@ -34,7 +34,22 @@ actions:
         assert "kind" in str(exc)
 
 
+def test_dumps_multiline_snippet_body_as_block_scalar():
+    raw = """
+actions: []
+snippets:
+  - id: stub
+    title: Stub
+    body: "def main():\\n    pass\\n"
+"""
+    out = normalize_course_catalog_yaml(raw)
+    assert "body: |" in out
+    assert "def main():" in out
+    assert '"def main():' not in out
+
+
 def test_round_trips_snippets_and_keeps_body_whitespace():
+
     raw = """
 actions: []
 snippets:
@@ -56,6 +71,22 @@ snippets:
 def test_omits_empty_snippets_from_dump():
     out = normalize_course_catalog_yaml("actions: []\nsnippets: []\n")
     assert "snippets" not in out
+
+
+def test_accepts_unquoted_numeric_snippet_id_as_string():
+    raw = """
+actions: []
+snippets:
+  - id: 1
+    title: Stub
+    body: hi
+"""
+    out = normalize_course_catalog_yaml(raw)
+    import yaml
+
+    doc = yaml.safe_load(out)
+    assert doc["snippets"][0]["id"] == "1"
+    assert isinstance(doc["snippets"][0]["id"], str)
 
 
 def test_rejects_duplicate_snippet_ids():
