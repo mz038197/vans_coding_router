@@ -282,12 +282,22 @@
         </div>
         <p id="catalogUploadMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
         <div id="catalogFormRoot">
-          <h3 class="catalog-section-title">安裝項目</h3>
-          <div id="catalogActionsList" class="catalog-item-list"></div>
-          <button type="button" class="btn-secondary" id="catalogAddActionBtn">新增安裝項目</button>
-          <h3 class="catalog-section-title">本課片段</h3>
-          <div id="catalogSnippetsList" class="catalog-item-list"></div>
-          <button type="button" class="btn-secondary" id="catalogAddSnippetBtn">新增本課片段</button>
+          <div class="tabs catalog-editor-tabs" role="tablist" aria-label="本課安裝清單">
+            <button type="button" class="tab-active" id="catalogActionsTab" role="tab" aria-selected="true" aria-controls="catalogActionsPanel" onclick="showCatalogEditorTab('actions')">
+              安裝項目 (<span id="catalogActionsTabCount">0</span>)
+            </button>
+            <button type="button" id="catalogSnippetsTab" role="tab" aria-selected="false" aria-controls="catalogSnippetsPanel" onclick="showCatalogEditorTab('snippets')">
+              本課片段 (<span id="catalogSnippetsTabCount">0</span>)
+            </button>
+          </div>
+          <div id="catalogActionsPanel" class="catalog-tab-panel" role="tabpanel" aria-labelledby="catalogActionsTab">
+            <div id="catalogActionsList" class="catalog-item-list"></div>
+            <button type="button" class="btn-secondary" id="catalogAddActionBtn">新增安裝項目</button>
+          </div>
+          <div id="catalogSnippetsPanel" class="catalog-tab-panel hidden" role="tabpanel" aria-labelledby="catalogSnippetsTab">
+            <div id="catalogSnippetsList" class="catalog-item-list"></div>
+            <button type="button" class="btn-secondary" id="catalogAddSnippetBtn">新增本課片段</button>
+          </div>
         </div>
         <p id="catalogSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
       </div>
@@ -1869,6 +1879,31 @@ snippets:
       </article>`;
     }
 
+    function showCatalogEditorTab(kind) {
+      const isActions = kind !== 'snippets';
+      const actionsTab = document.getElementById('catalogActionsTab');
+      const snippetsTab = document.getElementById('catalogSnippetsTab');
+      const actionsPanel = document.getElementById('catalogActionsPanel');
+      const snippetsPanel = document.getElementById('catalogSnippetsPanel');
+      if (actionsTab) {
+        actionsTab.classList.toggle('tab-active', isActions);
+        actionsTab.setAttribute('aria-selected', isActions ? 'true' : 'false');
+      }
+      if (snippetsTab) {
+        snippetsTab.classList.toggle('tab-active', !isActions);
+        snippetsTab.setAttribute('aria-selected', isActions ? 'false' : 'true');
+      }
+      if (actionsPanel) actionsPanel.classList.toggle('hidden', !isActions);
+      if (snippetsPanel) snippetsPanel.classList.toggle('hidden', isActions);
+    }
+
+    function refreshCatalogTabCounts() {
+      const actionsCount = document.getElementById('catalogActionsTabCount');
+      const snippetsCount = document.getElementById('catalogSnippetsTabCount');
+      if (actionsCount) actionsCount.textContent = String((catalogDraft.actions || []).length);
+      if (snippetsCount) snippetsCount.textContent = String((catalogDraft.snippets || []).length);
+    }
+
     function renderCatalogForms() {
       const actionsHost = document.getElementById('catalogActionsList');
       const snippetsHost = document.getElementById('catalogSnippetsList');
@@ -1881,6 +1916,7 @@ snippets:
       snippetsHost.innerHTML = snippets.length
         ? snippets.map((row, i) => renderCatalogSnippetCard(row, i, snippets.length)).join('')
         : '<p class="hint-inline catalog-empty-hint">尚無本課片段</p>';
+      refreshCatalogTabCounts();
     }
 
     function setCatalogDraft(draft) {
@@ -2186,6 +2222,7 @@ snippets:
         const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
         title.textContent = `編輯本課安裝清單 · ${label}`;
       }
+      showCatalogEditorTab('actions');
       refreshCatalogSaveEnabled();
       if (saveBtn && catalogFormLocked) saveBtn.disabled = true;
       modal.classList.add('show');
@@ -2248,6 +2285,8 @@ snippets:
       if (!result.ok) {
         catalogFieldErrors = { actions: result.actionErrors, snippets: result.snippetErrors };
         renderCatalogForms();
+        if (Object.keys(result.actionErrors).length) showCatalogEditorTab('actions');
+        else if (Object.keys(result.snippetErrors).length) showCatalogEditorTab('snippets');
         if (saveMsg) {
           saveMsg.textContent = result.summary;
           saveMsg.classList.add('is-error');

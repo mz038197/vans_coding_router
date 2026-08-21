@@ -686,11 +686,12 @@
 
     .hint-inline { margin: 0; }
 
-    .catalog-section-title {
-      margin: 16px 0 8px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--text-primary);
+    .catalog-editor-tabs {
+      margin: 4px 0 12px;
+    }
+
+    .catalog-tab-panel {
+      min-height: 4rem;
     }
 
     .catalog-item-list {

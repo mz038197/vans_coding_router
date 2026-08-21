@@ -130,6 +130,26 @@ def test_portal_catalog_modal_uses_structured_fields(tmp_path):
     assert "js-yaml" in html
 
 
+def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert html.index('id="catalogDropzone"') < html.index('id="catalogFormRoot"')
+    assert html.index('id="catalogFormRoot"') < html.index('id="catalogSaveMsg"')
+    assert 'id="catalogActionsTab"' in html
+    assert 'id="catalogSnippetsTab"' in html
+    assert 'id="catalogActionsTabCount"' in html
+    assert 'id="catalogSnippetsTabCount"' in html
+    assert 'id="catalogActionsPanel"' in html
+    assert 'id="catalogSnippetsPanel"' in html
+    assert 'id="catalogAddActionBtn"' in html
+    assert 'id="catalogAddSnippetBtn"' in html
+    assert 'class="catalog-section-title"' not in html
+    assert "showCatalogEditorTab('actions')" in html
+    assert "showCatalogEditorTab('snippets')" in html
+    assert 'id="catalogSnippetsPanel" class="catalog-tab-panel hidden"' in html
+    assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
+
+
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
