@@ -71,6 +71,208 @@ def derive_ollama_native_base(openai_base_url: str) -> str | None:
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
+def _summary_has_text(summary: Any) -> bool:
+    if isinstance(summary, str) and summary.strip():
+        return True
+    if not isinstance(summary, list):
+        return False
+    for part in summary:
+        if isinstance(part, str) and part.strip():
+            return True
+        if isinstance(part, dict):
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                return True
+    return False
+
+
+def _reasoning_text_to_summary(content: Any) -> list[dict[str, str]]:
+    if not isinstance(content, list):
+        return []
+    parts: list[dict[str, str]] = []
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "reasoning_text":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text:
+            parts.append({"type": "summary_text", "text": text})
+    return parts
+
+
+def _project_reasoning_item(item: dict[str, Any]) -> dict[str, Any]:
+    if item.get("type") != "reasoning":
+        return item
+    if _summary_has_text(item.get("summary")):
+        return item
+    summary_parts = _reasoning_text_to_summary(item.get("content"))
+    if not summary_parts:
+        return item
+    out = dict(item)
+    out["summary"] = summary_parts
+    return out
+
+
+def _project_output_list(output: Any) -> Any:
+    if not isinstance(output, list):
+        return output
+    return [_project_reasoning_item(item) if isinstance(item, dict) else item for item in output]
+
+
+def project_responses_reasoning(body: dict[str, Any]) -> dict[str, Any]:
+    """Fill OpenAI reasoning summaries from raw reasoning_text when summary is empty."""
+    out = dict(body)
+    if "output" in out:
+        out["output"] = _project_output_list(out.get("output"))
+    nested = out.get("response")
+    if isinstance(nested, dict) and "output" in nested:
+        nested_out = dict(nested)
+        nested_out["output"] = _project_output_list(nested.get("output"))
+        out["response"] = nested_out
+    return out
+
+
+_REASONING_TEXT_EVENT_TYPES = {
+    "response.reasoning_text.delta": "response.reasoning_summary_text.delta",
+    "response.reasoning_text.done": "response.reasoning_summary_text.done",
+}
+_REASONING_CONTENT_PART_EVENT_TYPES = {
+    "response.content_part.added": "response.reasoning_summary_part.added",
+    "response.content_part.done": "response.reasoning_summary_part.done",
+}
+
+
+def _encode_responses_sse(payload: dict[str, Any], *, with_event_line: bool) -> bytes:
+    data = _encode_sse_data(payload)
+    if not with_event_line:
+        return data
+    event_type = payload.get("type", "message")
+    return f"event: {event_type}\n".encode("utf-8") + data
+
+
+def _item_id_from_payload(payload: dict[str, Any]) -> str | None:
+    item_id = payload.get("item_id")
+    if isinstance(item_id, str) and item_id:
+        return item_id
+    item = payload.get("item")
+    if isinstance(item, dict):
+        nested_id = item.get("id")
+        if isinstance(nested_id, str) and nested_id:
+            return nested_id
+    return None
+
+
+def _should_skip_reasoning_projection(skip_ids: set[str], payload: dict[str, Any]) -> bool:
+    event_type = payload.get("type")
+    if isinstance(event_type, str) and event_type.startswith("response.reasoning_summary"):
+        item_id = _item_id_from_payload(payload)
+        if item_id:
+            skip_ids.add(item_id)
+        return True
+    item = payload.get("item")
+    if isinstance(item, dict) and item.get("type") == "reasoning" and _summary_has_text(item.get("summary")):
+        item_id = item.get("id")
+        if isinstance(item_id, str) and item_id:
+            skip_ids.add(item_id)
+    item_id = _item_id_from_payload(payload)
+    return bool(item_id and item_id in skip_ids)
+
+
+def _rewrite_index_to_summary(payload: dict[str, Any], mapped_type: str) -> dict[str, Any]:
+    out = dict(payload)
+    out["type"] = mapped_type
+    if "content_index" in out:
+        out["summary_index"] = out.pop("content_index")
+    return out
+
+
+def _rewrite_reasoning_text_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = payload.get("type")
+    mapped = _REASONING_TEXT_EVENT_TYPES.get(event_type) if isinstance(event_type, str) else None
+    if not mapped:
+        return payload
+    return _rewrite_index_to_summary(payload, mapped)
+
+
+def _is_raw_reasoning_text_event(payload: dict[str, Any]) -> bool:
+    event_type = payload.get("type")
+    if event_type in _REASONING_TEXT_EVENT_TYPES:
+        return True
+    if event_type in _REASONING_CONTENT_PART_EVENT_TYPES:
+        part = payload.get("part")
+        return isinstance(part, dict) and part.get("type") == "reasoning_text"
+    return False
+
+
+def _rewrite_reasoning_content_part(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = payload.get("type")
+    mapped = _REASONING_CONTENT_PART_EVENT_TYPES.get(event_type) if isinstance(event_type, str) else None
+    if not mapped:
+        return payload
+    part = payload.get("part")
+    if not isinstance(part, dict) or part.get("type") != "reasoning_text":
+        return payload
+    out = _rewrite_index_to_summary(payload, mapped)
+    rewritten_part = dict(part)
+    rewritten_part["type"] = "summary_text"
+    out["part"] = rewritten_part
+    return out
+
+
+def _project_payload_items(payload: dict[str, Any]) -> dict[str, Any]:
+    out = dict(payload)
+    item = out.get("item")
+    if isinstance(item, dict):
+        out["item"] = _project_reasoning_item(item)
+    nested = out.get("response")
+    if isinstance(nested, dict):
+        out["response"] = project_responses_reasoning(nested)
+    if "output" in out:
+        out["output"] = _project_output_list(out.get("output"))
+    return out
+
+
+async def project_responses_reasoning_sse(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
+    """Rewrite Responses reasoning_text events into OpenAI reasoning_summary events."""
+    buffer = b""
+    skip_ids: set[str] = set()
+    async with aclosing(chunks) as source:
+        async for chunk in source:
+            buffer += chunk
+            while b"\n\n" in buffer:
+                event, buffer = buffer.split(b"\n\n", 1)
+                if not event.strip():
+                    continue
+                lines = event.split(b"\n")
+                has_event_line = any(line.startswith(b"event:") for line in lines)
+                data_lines = [line[5:].strip() for line in lines if line.startswith(b"data:")]
+                if not data_lines:
+                    yield event + b"\n\n"
+                    continue
+                raw_data = b"\n".join(data_lines).decode("utf-8", errors="replace").strip()
+                if raw_data == "[DONE]":
+                    yield event + b"\n\n"
+                    continue
+                try:
+                    payload = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    yield event + b"\n\n"
+                    continue
+                if not isinstance(payload, dict):
+                    yield event + b"\n\n"
+                    continue
+                skip = _should_skip_reasoning_projection(skip_ids, payload)
+                if skip and _is_raw_reasoning_text_event(payload):
+                    continue
+                if not skip:
+                    payload = _rewrite_reasoning_text_event(payload)
+                    payload = _rewrite_reasoning_content_part(payload)
+                payload = _project_payload_items(payload)
+                yield _encode_responses_sse(payload, with_event_line=has_event_line)
+
+    if buffer.strip():
+        yield buffer
+
+
 def sanitize_responses_request(body: dict[str, Any], supports_thinking: bool) -> dict[str, Any]:
     """Strip reasoning when the upstream model cannot think."""
     out = deepcopy(body)

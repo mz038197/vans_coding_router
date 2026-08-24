@@ -32,6 +32,8 @@ from src.infrastructure.gateways.copilot_compat import (
     strip_ollama_cloud_inference_suffix,
     normalize_chat_completions_response,
     normalize_chat_completions_sse,
+    project_responses_reasoning,
+    project_responses_reasoning_sse,
     sanitize_responses_request,
 )
 from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
@@ -160,13 +162,14 @@ class OpenAICompatibleGateway:
         payload = await self._prepare_responses_body(body)
         payload["stream"] = False
         response = await self._request("POST", "/responses", json=payload)
-        return self._json_or_error(response)
+        return project_responses_reasoning(self._json_or_error(response))
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         payload = await self._prepare_responses_body(body)
         payload["stream"] = True
         payload.setdefault("stream_options", {"include_usage": True})
-        async with aclosing(self._stream("POST", "/responses", json=payload)) as stream:
+        upstream = self._stream("POST", "/responses", json=payload)
+        async with aclosing(project_responses_reasoning_sse(upstream)) as stream:
             async for chunk in stream:
                 yield chunk
 

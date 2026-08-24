@@ -36,6 +36,10 @@ _Avoid_: delete key, reset pool, restart router
 The provider's refusal text surfaced to the client (chat choices content or Responses `output_text`) so the user can act on it.
 _Avoid_: Generic "Upstream provider error", "Response contained no choices"
 
+**Responses Reasoning Projection**:
+A router rewrite of Responses API thinking so the student client always sees OpenAI reasoning summaries, even when the upstream placed that thinking in raw reasoning text. It does not change Model ID, provider, or whether the model thinks.
+_Avoid_: include_reasoning, thinking toggle, OpenRouter-specific hack, client-side parser
+
 **Speech** (Portal: 語音):
 A class-session permission for text-to-speech. It does not grant speech-to-text.
 _Avoid_: Voice, 語音轉寫, transcription

@@ -172,3 +172,77 @@ async def test_chat_completions_forwards_resolved_max_tokens(ollama_gateway):
 
     forwarded = mock_client.request.call_args.kwargs["json"]
     assert forwarded["max_tokens"] == 256
+
+
+@pytest.fixture
+def openrouter_gateway():
+    provider = ProviderSettings(
+        name="openrouter",
+        type="openai_compatible",
+        base_url="https://openrouter.ai/api/v1",
+        api_key_env="OPENROUTER_API_KEY",
+    )
+    gateway = OpenAICompatibleGateway(provider, timeout=30.0)
+    mock_client = AsyncMock()
+    gateway._client = mock_client
+    return gateway, mock_client
+
+
+@pytest.mark.asyncio
+async def test_responses_create_projects_reasoning_summary(openrouter_gateway):
+    gateway, mock_client = openrouter_gateway
+    thinking = "raw thinking"
+    responses_response = MagicMock()
+    responses_response.status_code = 200
+    responses_response.json.return_value = {
+        "id": "resp_or",
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": thinking}],
+            }
+        ],
+    }
+    mock_client.request = AsyncMock(return_value=responses_response)
+
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
+        result = await gateway.responses_create({"model": "minimax/minimax-m3", "input": "hi"})
+
+    assert result["output"][0]["summary"] == [{"type": "summary_text", "text": thinking}]
+    assert result["output"][0]["content"] == [{"type": "reasoning_text", "text": thinking}]
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_rewrites_reasoning_text_events(openrouter_gateway):
+    gateway, mock_client = openrouter_gateway
+    event = (
+        b"event: response.reasoning_text.delta\n"
+        b'data: {"type":"response.reasoning_text.delta","item_id":"rs_1",'
+        b'"output_index":0,"content_index":0,"delta":"Thinking"}\n\n'
+    )
+
+    class FakeStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aiter_bytes(self):
+            yield event
+
+    mock_client.stream = MagicMock(return_value=FakeStream())
+
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
+        parts: list[bytes] = []
+        async for chunk in gateway.responses_create_stream({"model": "minimax/minimax-m3", "input": "hi"}):
+            parts.append(chunk)
+
+    text = b"".join(parts).decode("utf-8")
+    assert "event: response.reasoning_summary_text.delta" in text
+    assert "response.reasoning_text.delta" not in text.replace("reasoning_summary_text", "")
+    assert "Thinking" in text

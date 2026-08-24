@@ -6,6 +6,8 @@ from src.infrastructure.gateways.copilot_compat import (
     derive_ollama_native_base,
     normalize_chat_completions_response,
     normalize_chat_completions_sse,
+    project_responses_reasoning,
+    project_responses_reasoning_sse,
     sanitize_responses_request,
     strip_ollama_cloud_inference_suffix,
     to_ollama_cloud_inference_id,
@@ -19,6 +21,17 @@ async def _collect_sse(chunks: list[bytes]) -> bytes:
 
     parts: list[bytes] = []
     async for chunk in normalize_chat_completions_sse(_gen()):
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+async def _collect_responses_sse(chunks: list[bytes]) -> bytes:
+    async def _gen():
+        for chunk in chunks:
+            yield chunk
+
+    parts: list[bytes] = []
+    async for chunk in project_responses_reasoning_sse(_gen()):
         parts.append(chunk)
     return b"".join(parts)
 
@@ -222,6 +235,215 @@ def test_sanitize_drops_invalid_reasoning_effort():
     body = {"model": "qwen3-coder-next", "input": "hello", "reasoning": {"effort": "turbo"}}
     out = sanitize_responses_request(body, supports_thinking=True)
     assert "reasoning" not in out
+
+
+def test_project_responses_reasoning_fills_summary_and_keeps_content():
+    thinking = 'The user asked how many r letters are in "strawberry".'
+    body = {
+        "id": "resp_1",
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "status": "completed",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": thinking}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "3"}],
+            },
+        ],
+    }
+
+    out = project_responses_reasoning(body)
+
+    reasoning = out["output"][0]
+    assert reasoning["content"] == [{"type": "reasoning_text", "text": thinking}]
+    assert reasoning["summary"] == [{"type": "summary_text", "text": thinking}]
+    assert out["output"][1]["content"][0]["text"] == "3"
+    assert body["output"][0]["summary"] == []
+
+
+def test_project_responses_reasoning_skips_when_summary_already_present():
+    body = {
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "already summarized"}],
+                "content": [{"type": "reasoning_text", "text": "raw thinking"}],
+            }
+        ]
+    }
+
+    out = project_responses_reasoning(body)
+
+    assert out["output"][0]["summary"] == [{"type": "summary_text", "text": "already summarized"}]
+    assert out["output"][0]["content"] == [{"type": "reasoning_text", "text": "raw thinking"}]
+
+
+def test_project_responses_reasoning_skips_when_no_reasoning_text():
+    body = {
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [],
+                "content": [],
+            }
+        ]
+    }
+
+    out = project_responses_reasoning(body)
+    assert out["output"][0]["summary"] == []
+
+
+def test_project_responses_reasoning_projects_nested_response_output():
+    thinking = "nested thinking"
+    body = {
+        "type": "response.completed",
+        "response": {
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": thinking}],
+                }
+            ]
+        },
+    }
+
+    out = project_responses_reasoning(body)
+    assert out["response"]["output"][0]["summary"] == [{"type": "summary_text", "text": thinking}]
+    assert out["response"]["output"][0]["content"][0]["text"] == thinking
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_rewrites_reasoning_text_delta():
+    event = (
+        b'event: response.reasoning_text.delta\n'
+        b'data: {"type":"response.reasoning_text.delta","item_id":"rs_1",'
+        b'"output_index":0,"content_index":0,"delta":"Thinking"}\n\n'
+    )
+    text = (await _collect_responses_sse([event])).decode("utf-8")
+    compact = text.replace(" ", "")
+    assert "event: response.reasoning_summary_text.delta" in text
+    assert "response.reasoning_text.delta" not in compact
+    assert '"summary_index":0' in compact
+    assert '"content_index"' not in compact
+    assert "Thinking" in text
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_rewrites_reasoning_text_done():
+    event = (
+        b'event: response.reasoning_text.done\n'
+        b'data: {"type":"response.reasoning_text.done","item_id":"rs_1",'
+        b'"output_index":0,"content_index":0,"text":"Thinking done"}\n\n'
+    )
+    text = (await _collect_responses_sse([event])).decode("utf-8")
+    compact = text.replace(" ", "")
+    assert "event: response.reasoning_summary_text.done" in text
+    assert "response.reasoning_text.done" not in compact
+    assert '"summary_index":0' in compact
+    assert "Thinking done" in text
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_rewrites_reasoning_content_part():
+    added = (
+        b'event: response.content_part.added\n'
+        b'data: {"type":"response.content_part.added","item_id":"rs_1","output_index":0,'
+        b'"content_index":0,"part":{"type":"reasoning_text","text":""}}\n\n'
+    )
+    done = (
+        b'event: response.content_part.done\n'
+        b'data: {"type":"response.content_part.done","item_id":"rs_1","output_index":0,'
+        b'"content_index":0,"part":{"type":"reasoning_text","text":"Thinking"}}\n\n'
+    )
+    text = (await _collect_responses_sse([added, done])).decode("utf-8")
+    compact = text.replace(" ", "")
+    assert "event: response.reasoning_summary_part.added" in text
+    assert "event: response.reasoning_summary_part.done" in text
+    assert '"type":"summary_text"' in compact
+    assert "response.content_part.added" not in compact
+    assert '"content_index"' not in compact
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_keeps_output_text_content_part():
+    event = (
+        b'event: response.content_part.added\n'
+        b'data: {"type":"response.content_part.added","item_id":"msg_1","output_index":1,'
+        b'"content_index":0,"part":{"type":"output_text","text":""}}\n\n'
+    )
+    text = (await _collect_responses_sse([event])).decode("utf-8")
+    assert "event: response.content_part.added" in text
+    assert "output_text" in text
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_drops_reasoning_text_when_summary_present():
+    added = (
+        b'event: response.output_item.added\n'
+        b'data: {"type":"response.output_item.added","output_index":0,'
+        b'"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"shown"}]}}\n\n'
+    )
+    delta = (
+        b'event: response.reasoning_text.delta\n'
+        b'data: {"type":"response.reasoning_text.delta","item_id":"rs_1",'
+        b'"output_index":0,"content_index":0,"delta":"raw"}\n\n'
+    )
+    text = (await _collect_responses_sse([added, delta])).decode("utf-8")
+    compact = text.replace(" ", "")
+    assert "shown" in text
+    assert "response.reasoning_text.delta" not in compact
+    assert "response.reasoning_summary_text.delta" not in compact
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_projects_completed_item():
+    event = (
+        b'event: response.output_item.done\n'
+        b'data: {"type":"response.output_item.done","output_index":0,'
+        b'"item":{"id":"rs_1","type":"reasoning","summary":[],'
+        b'"content":[{"type":"reasoning_text","text":"raw think"}]}}\n\n'
+    )
+    text = (await _collect_responses_sse([event])).decode("utf-8")
+    payload = json.loads(text.split("data:", 1)[1].strip())
+    item = payload["item"]
+    assert item["summary"] == [{"type": "summary_text", "text": "raw think"}]
+    assert item["content"] == [{"type": "reasoning_text", "text": "raw think"}]
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_projects_completed_response():
+    event = (
+        b"event: response.completed\n"
+        b'data: {"type":"response.completed","response":{"output":['
+        b'{"type":"reasoning","id":"rs_1","summary":[],'
+        b'"content":[{"type":"reasoning_text","text":"done think"}]}]}}\n\n'
+    )
+    text = (await _collect_responses_sse([event])).decode("utf-8")
+    payload = json.loads(text.split("data:", 1)[1].strip())
+    item = payload["response"]["output"][0]
+    assert item["summary"] == [{"type": "summary_text", "text": "done think"}]
+    assert item["content"][0]["text"] == "done think"
+
+
+@pytest.mark.asyncio
+async def test_project_responses_sse_handles_split_events():
+    event = (
+        b"event: response.reasoning_text.delta\n"
+        b'data: {"type":"response.reasoning_text.delta","item_id":"rs_1",'
+        b'"output_index":0,"content_index":0,"delta":"Hi"}\n\n'
+    )
+    text = (await _collect_responses_sse([event[:40], event[40:]])).decode("utf-8")
+    assert "event: response.reasoning_summary_text.delta" in text
+    assert "Hi" in text
 
 
 @pytest.mark.asyncio

@@ -78,12 +78,15 @@ async def test_stream_releases_pool_slot_with_aclosing_break(gateway):
 @pytest.mark.asyncio
 async def test_responses_create_stream_releases_pool_on_early_aclose(gateway):
     mock_client = MagicMock()
-    mock_client.stream = MagicMock(return_value=_mock_stream_response([b"a", b"b"]))
+    first = b'event: response.created\ndata: {"type":"response.created"}\n\n'
+    rest = b'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+    mock_client.stream = MagicMock(return_value=_mock_stream_response([first, rest]))
     gateway._client = mock_client
 
     with patch.object(gateway, "_prepare_responses_body", AsyncMock(side_effect=lambda body: dict(body))):
         stream = gateway.responses_create_stream({"model": "m", "input": "hi"})
-        assert await stream.__anext__() == b"a"
+        chunk = await stream.__anext__()
+        assert chunk
         assert gateway._pool.in_flight_snapshot() == [1]
         await stream.aclose()
 
