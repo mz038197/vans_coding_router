@@ -62,6 +62,39 @@ async def test_request_failovers_to_second_key_on_extra_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_request_failovers_to_second_key_on_credit_exhaustion(monkeypatch):
+    gateway = _gateway(monkeypatch)
+    exhausted = _response(
+        402,
+        text=(
+            '{"error":{"code":402,"message":"Insufficient credits. Add more using '
+            'https://openrouter.ai/credits","metadata":{"error_type":"payment_required"}}}'
+        ),
+        json_body={
+            "error": {
+                "code": 402,
+                "message": "Insufficient credits. Add more using https://openrouter.ai/credits",
+                "metadata": {"error_type": "payment_required"},
+            }
+        },
+    )
+    ok = _response(200, text="{}", json_body={"ok": True})
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(side_effect=[exhausted, ok])
+
+    response = await gateway._request("POST", "/chat/completions", json={"model": "x"})
+    assert response.status_code == 200
+    assert gateway._client.request.await_count == 2
+    auth_headers = [call.kwargs["headers"]["Authorization"] for call in gateway._client.request.await_args_list]
+    assert auth_headers == ["Bearer key-a", "Bearer key-b"] or auth_headers == [
+        "Bearer key-b",
+        "Bearer key-a",
+    ]
+    assert gateway._pool.status()["keys"][0]["quarantined"] or gateway._pool.status()["keys"][1]["quarantined"]
+    assert gateway._pool.in_flight_snapshot() == [0, 0]
+
+
+@pytest.mark.asyncio
 async def test_request_raises_when_all_keys_extra_usage(monkeypatch):
     gateway = _gateway(monkeypatch)
     body = {"error": "extra usage balance is empty, add extra usage"}
@@ -171,4 +204,40 @@ async def test_stream_failovers_on_extra_usage(monkeypatch):
         chunks.append(chunk)
     assert chunks == [b"data: ok\n\n"]
     assert gateway._client.stream.call_count == 2
+    assert gateway._pool.in_flight_snapshot() == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_stream_failovers_on_credit_exhaustion(monkeypatch):
+    gateway = _gateway(monkeypatch)
+
+    failed = MagicMock()
+    failed.status_code = 402
+    failed.aread = AsyncMock(
+        return_value=b'{"error":{"code":402,"message":"Insufficient credits. Add more using https://openrouter.ai/credits"}}'
+    )
+    failed.__aenter__ = AsyncMock(return_value=failed)
+    failed.__aexit__ = AsyncMock(return_value=None)
+
+    class _OkStream:
+        status_code = 200
+
+        async def aiter_bytes(self):
+            yield b"data: ok\n\n"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    gateway._client = MagicMock()
+    gateway._client.stream = MagicMock(side_effect=[failed, _OkStream()])
+
+    chunks = []
+    async for chunk in gateway._stream("POST", "/responses", json={}):
+        chunks.append(chunk)
+    assert chunks == [b"data: ok\n\n"]
+    assert gateway._client.stream.call_count == 2
+    assert gateway._pool.status()["keys"][0]["quarantined"] or gateway._pool.status()["keys"][1]["quarantined"]
     assert gateway._pool.in_flight_snapshot() == [0, 0]

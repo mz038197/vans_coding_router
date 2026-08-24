@@ -13,15 +13,19 @@ A provider response that rejects the request before any model output is produced
 _Avoid_: Copilot bug, no choices, model offline
 
 **Extra Usage Exhaustion**:
-An Upstream Refusal that means the upstream account cannot continue under its current Extra Usage or plan/session entitlement for that model (for example Extra Usage balance empty, or a session usage limit whose remedy is upgrade / add Extra Usage). Ollama may signal this with different HTTP statuses; it is not a generic rate-limit busy signal and not a router routing mistake.
-_Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (as a separate routing class)
+An Upstream Refusal that means the upstream account cannot continue under its current Extra Usage or plan/session entitlement for that model (for example Extra Usage balance empty, or a session usage limit whose remedy is upgrade / add Extra Usage). Ollama may signal this with different HTTP statuses; it is not a generic rate-limit busy signal, not Credit Exhaustion, and not a router routing mistake.
+_Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (as a separate routing class), Credit Exhaustion
+
+**Credit Exhaustion**:
+An Upstream Refusal that means the upstream account or that key has insufficient credits (account balance or per-key spending cap). It is not Extra Usage Exhaustion and not a rate-limit busy signal.
+_Avoid_: Extra Usage Exhaustion, quota full, rate limit, payment required (as a routing class)
 
 **Key Failover**:
-On Extra Usage Exhaustion, trying the same student request against another key in that provider's key pool before returning to the client. The student still uses one Model ID; key choice stays inside the router.
+On Extra Usage Exhaustion or Credit Exhaustion, trying the same student request against another key in that provider's key pool before returning to the client. The student still uses one Model ID; key choice stays inside the router.
 _Avoid_: ollama2, provider switch, model fallback
 
 **Key Quarantine**:
-A temporary state where a key that returned Extra Usage Exhaustion is not selected for new requests until the quarantine ends or a teacher clears it in Portal. It does not delete the key from configuration.
+A temporary state where a key that returned Extra Usage Exhaustion or Credit Exhaustion is not selected for new requests until the quarantine ends or a teacher clears it in Portal. It does not delete the key from configuration.
 _Avoid_: permanent disable, remove key, circuit breaker (generic)
 
 **Quarantine Release**:

@@ -38,8 +38,11 @@ providers:
   openrouter:
     type: openai_compatible
     base_url: "https://openrouter.ai/api/v1"
-    api_key_env: "OPENROUTER_API_KEY"
-    max_concurrent_per_key: 5
+    # Dual-account least-in-flight; second env optional (single-account if unset).
+    api_key_envs:
+      - OPENROUTER_API_KEY
+      - OPENROUTER_API_KEY_2
+    max_concurrent_per_key: 6
     queue_timeout_sec: 120
     acquire_delay_ms: 200
     quarantine_ttl_sec: 3600

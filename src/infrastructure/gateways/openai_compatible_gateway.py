@@ -17,7 +17,7 @@ from src.domain.errors import (
     UpstreamServiceError,
     extract_upstream_error_text,
 )
-from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_extra_usage_exhaustion
+from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_key_failover_exhaustion
 from src.infrastructure.config import (
     CAPABILITY_AUDIO_SPEECH,
     CAPABILITY_AUDIO_TRANSCRIPTION,
@@ -252,14 +252,14 @@ class OpenAICompatibleGateway:
                 f"provider「{self.provider.name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
             )
 
-    def _extra_usage_exhausted_error(self, pool: UpstreamKeyPool | None) -> UpstreamServiceError:
+    def _exhausted_keys_error(self, pool: UpstreamKeyPool | None) -> UpstreamServiceError:
         message = None
         if pool is not None:
             message = pool.last_extra_usage_message
         body = {"error": message or DEFAULT_EXTRA_USAGE_MESSAGE}
         return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
 
-    def _quarantine_for_extra_usage(self, pool: UpstreamKeyPool, index: int, body: Any) -> UpstreamServiceError:
+    def _quarantine_exhausted_key(self, pool: UpstreamKeyPool, index: int, body: Any) -> UpstreamServiceError:
         message = extract_upstream_error_text(body) or DEFAULT_EXTRA_USAGE_MESSAGE
         pool.quarantine(index, message)
         return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
@@ -292,13 +292,13 @@ class OpenAICompatibleGateway:
         last_error: UpstreamServiceError | None = None
         while True:
             if pool.all_quarantined():
-                raise last_error or self._extra_usage_exhausted_error(pool)
+                raise last_error or self._exhausted_keys_error(pool)
             index = None
             try:
                 try:
                     index = await pool.acquire(exclude=frozenset(tried))
                 except NoSelectableUpstreamKeyError as exc:
-                    raise (last_error or self._extra_usage_exhausted_error(pool)) from exc
+                    raise (last_error or self._exhausted_keys_error(pool)) from exc
                 headers = self._headers(api_key=pool.key_at(index))
                 response = await self._client.request(
                     method,
@@ -306,10 +306,10 @@ class OpenAICompatibleGateway:
                     headers=headers,
                     **kwargs,
                 )
-                if response.status_code >= 400 and is_extra_usage_exhaustion(
+                if response.status_code >= 400 and is_key_failover_exhaustion(
                     response.status_code, response.text
                 ):
-                    last_error = self._quarantine_for_extra_usage(pool, index, response.text)
+                    last_error = self._quarantine_exhausted_key(pool, index, response.text)
                     tried.add(index)
                     logger.info(
                         "key_failover provider=%s failed_index=%s tried=%s",
@@ -372,14 +372,14 @@ class OpenAICompatibleGateway:
         last_error: UpstreamServiceError | None = None
         while True:
             if pool.all_quarantined():
-                raise last_error or self._extra_usage_exhausted_error(pool)
+                raise last_error or self._exhausted_keys_error(pool)
             index = None
             failover = False
             try:
                 try:
                     index = await pool.acquire(exclude=frozenset(tried))
                 except NoSelectableUpstreamKeyError as exc:
-                    raise (last_error or self._extra_usage_exhausted_error(pool)) from exc
+                    raise (last_error or self._exhausted_keys_error(pool)) from exc
                 headers = self._headers(api_key=pool.key_at(index))
                 try:
                     async with self._client.stream(
@@ -391,8 +391,8 @@ class OpenAICompatibleGateway:
                         if response.status_code >= 400:
                             body = await response.aread()
                             text = body.decode("utf-8", errors="replace")
-                            if is_extra_usage_exhaustion(response.status_code, text):
-                                last_error = self._quarantine_for_extra_usage(pool, index, text)
+                            if is_key_failover_exhaustion(response.status_code, text):
+                                last_error = self._quarantine_exhausted_key(pool, index, text)
                                 tried.add(index)
                                 failover = True
                                 logger.info(

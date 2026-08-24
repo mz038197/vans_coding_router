@@ -1,4 +1,4 @@
-from src.domain.extra_usage import is_extra_usage_exhaustion
+from src.domain.extra_usage import is_credit_exhaustion, is_extra_usage_exhaustion
 
 
 def test_detects_402_with_extra_usage_balance_empty():
@@ -52,3 +52,46 @@ def test_rejects_500_even_with_extra_usage_text():
 def test_accepts_json_string_body():
     raw = '{"error":"extra usage balance is empty, add extra usage"}'
     assert is_extra_usage_exhaustion(402, raw) is True
+
+
+def test_detects_402_with_insufficient_credits():
+    body = {
+        "error": {
+            "code": 402,
+            "message": "Insufficient credits. Add more using https://openrouter.ai/credits",
+        }
+    }
+    assert is_credit_exhaustion(402, body) is True
+    assert is_extra_usage_exhaustion(402, body) is False
+
+
+def test_detects_402_with_payment_required_error_type():
+    body = {
+        "error": {
+            "code": 402,
+            "message": "Payment required",
+            "metadata": {"error_type": "payment_required"},
+        }
+    }
+    assert is_credit_exhaustion(402, body) is True
+    assert is_extra_usage_exhaustion(402, body) is False
+
+
+def test_rejects_429_even_with_insufficient_credits():
+    body = {"error": {"message": "Insufficient credits. Add more using https://openrouter.ai/credits"}}
+    assert is_credit_exhaustion(429, body) is False
+
+
+def test_rejects_402_payment_required_without_credit_markers():
+    assert is_credit_exhaustion(402, {"error": "payment required"}) is False
+
+
+def test_detects_402_with_insufficient_credits_in_metadata_only():
+    body = {
+        "error": {
+            "code": 402,
+            "message": "Payment required",
+            "metadata": {"reason": "insufficient credits"},
+        }
+    }
+    assert is_credit_exhaustion(402, body) is True

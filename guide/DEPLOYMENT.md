@@ -65,11 +65,13 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 | `SESSION_SECRET` | 強隨機字串 |
 | `OLLAMA_CLOUD_API_KEY` | 必要（Ollama Cloud 帳號 A） |
 | `OLLAMA_CLOUD_API_KEY_2` | 選填（帳號 B；與 A 為不同訂閱時可內部分流） |
-| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | 選填 |
+| `OPENROUTER_API_KEY` | 選填（OpenRouter 帳號 A） |
+| `OPENROUTER_API_KEY_2` | 選填（帳號 B；與 A 為不同帳號時可內部分流） |
+| `OPENAI_API_KEY` | 選填 |
 
 `ollama_cloud` 在 [`config/router.prod.yaml`](../config/router.prod.yaml) 使用 `api_key_envs` 掛兩把 key：學生仍用同一把 `vcr_sk_` 與 `ollama_cloud@...`，router 以 least-in-flight 分流，並以 `max_concurrent_per_key`（預設 3）在打上游前排隊，降低 Ollama Cloud rate limit。只設第一把 key 時行為與單帳號相同。
 
-`openrouter` 同樣走 UpstreamKeyPool：單 key `OPENROUTER_API_KEY`，`max_concurrent_per_key` 為 5（搭配 `queue_timeout_sec` / `acquire_delay_ms` / `quarantine_ttl_sec`），在打上游前排隊以降低突發並發。
+`openrouter` 同樣走 UpstreamKeyPool 與 `api_key_envs`（`OPENROUTER_API_KEY`、`OPENROUTER_API_KEY_2`），`max_concurrent_per_key` 為 6。兩把鑰應來自不同 OpenRouter 帳號才有額度分流；只設第一把時行為與單帳號相同。Credit Exhaustion（帳號或該鑰 credit 不夠）時 Key Failover；一般 429 rate limit 不換鑰。
 
 非機密設定在 image 內 [`config/router.prod.yaml`](../config/router.prod.yaml)。`PUBLIC_URL` 在 [`fly.toml`](../fly.toml) 設為 `https://ai.vanscoding.com`。
 

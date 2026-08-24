@@ -78,6 +78,7 @@ providers:
 
 def test_shipped_openrouter_configs_limit_concurrency(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_2", "or-key-2")
     root = Path(__file__).resolve().parents[2]
     for relative in (
         "config/router.example.yaml",
@@ -86,8 +87,17 @@ def test_shipped_openrouter_configs_limit_concurrency(monkeypatch):
     ):
         settings = load_router_settings(str(root / relative))
         provider = settings.providers["openrouter"]
-        assert provider.api_key_env == "OPENROUTER_API_KEY"
-        assert provider.max_concurrent_per_key == 5
+        assert provider.api_key_envs == ("OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2")
+        assert provider.max_concurrent_per_key == 6
         assert provider.queue_timeout_sec == 120
         assert provider.acquire_delay_ms == 200
         assert provider.quarantine_ttl_sec == 3600
+        assert resolve_provider_api_keys(provider) == ["or-key", "or-key-2"]
+
+
+def test_shipped_openrouter_second_key_optional(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY_2", raising=False)
+    root = Path(__file__).resolve().parents[2]
+    settings = load_router_settings(str(root / "config/router.prod.yaml"))
+    assert resolve_provider_api_keys(settings.providers["openrouter"]) == ["or-key"]

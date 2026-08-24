@@ -30,7 +30,7 @@ Settings load from YAML first, then environment variables override matching fiel
 | Public URL | `public_url` | `PUBLIC_URL` | Environment |
 | Google OAuth | leave empty | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Environment |
 | Session secret | optional | `SESSION_SECRET` | Environment |
-| API keys | use `api_key_env` | `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY` | Environment |
+| API keys | use `api_key_env` / `api_key_envs` | `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`（第二把 `_2` 選填） | Environment |
 | Routing, admin emails, providers | primary source | — | YAML |
 
 After Google login, users land on `{PUBLIC_URL}/portal`. Session cookies are not shared across different hostnames.
@@ -46,6 +46,7 @@ SESSION_SECRET=<strong-random-secret>
 DATABASE_URL=<neon-postgres-url>
 OLLAMA_CLOUD_API_KEY=xxx
 OPENROUTER_API_KEY=xxx
+OPENROUTER_API_KEY_2=xxx
 OPENAI_API_KEY=xxx
 ```
 
@@ -61,7 +62,9 @@ providers:
   openrouter:
     type: openai_compatible
     base_url: "https://openrouter.ai/api/v1"
-    api_key_env: "OPENROUTER_API_KEY"
+    api_key_envs:
+      - OPENROUTER_API_KEY
+      - OPENROUTER_API_KEY_2
 
   openai:
     type: openai_compatible
