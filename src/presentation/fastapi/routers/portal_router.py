@@ -70,6 +70,7 @@ class SessionPatchRequest(BaseModel):
     prompt_logging_enabled: bool | None = None
     status: str | None = None
     course_catalog_yaml: str | None = None
+    seat_limit: int | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -362,6 +363,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 prompt_logging_enabled=data.prompt_logging_enabled,
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,
+                seat_limit=data.seat_limit,
             )
         )
 

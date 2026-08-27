@@ -195,6 +195,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []\n'"
             )
+            conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS seat_limit INTEGER NOT NULL DEFAULT 60"
+            )
             conn.execute("ALTER TABLE class_members ADD COLUMN IF NOT EXISTS classroom_nickname TEXT")
             conn.execute(
                 """

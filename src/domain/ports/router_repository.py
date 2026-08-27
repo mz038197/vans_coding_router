@@ -86,6 +86,7 @@ class RouterRepositoryPort(Protocol):
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
+        seat_limit: int | None = None,
     ) -> dict[str, Any] | None:
         ...
 

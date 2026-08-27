@@ -114,12 +114,19 @@ class PortalUseCase:
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
+        seat_limit: int | None = None,
     ) -> dict[str, Any] | None:
         # Class owner or admin may update any session fields (privileged and non-privileged).
         # Admins must be allowed for non-privileged-only updates too, so permission stays consistent.
         self._assert_class_owner_or_admin(user_id, class_id)
         if status is not None and status not in _VALID_SESSION_STATUSES:
             raise ValueError("invalid session status")
+        if seat_limit is not None and (
+            not isinstance(seat_limit, int)
+            or isinstance(seat_limit, bool)
+            or seat_limit < 1
+        ):
+            raise ValueError("座位上限必須為正整數")
         return self.repo.update_class_session(
             class_id,
             session_id,
@@ -131,6 +138,7 @@ class PortalUseCase:
             prompt_logging_enabled=prompt_logging_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
+            seat_limit=seat_limit,
         )
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:

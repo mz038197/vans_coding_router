@@ -718,6 +718,32 @@
       </div>`;
     }
 
+    function sessionSeatLimit(session) {
+      const value = session.seat_limit;
+      if (value === undefined || value === null || value === '') return 60;
+      const n = Number(value);
+      return Number.isFinite(n) && n >= 1 ? n : 60;
+    }
+
+    function sessionNicknameSeatCount(session) {
+      const n = Number(session.nickname_seat_count || 0);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function sessionSeatLimitCell(classId, session) {
+      const occupied = sessionNicknameSeatCount(session);
+      const limit = sessionSeatLimit(session);
+      const edit = iconBtn(
+        'fas fa-pen',
+        '編輯座位上限',
+        `beginEditSessionSeatLimit(${classId}, ${session.id}, this)`,
+      );
+      return `<div class="cell-with-action" data-session-id="${session.id}" data-seat-limit="${limit}">
+        <div class="cell-main"><span class="seat-limit-label">${occupied} / ${limit}</span></div>
+        ${edit}
+      </div>`;
+    }
+
     function sessionCatalogYaml(session) {
       const value = session.course_catalog_yaml;
       if (typeof value === 'string' && value.trim()) return value;
@@ -1627,7 +1653,7 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 5 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
+      const colCount = 6 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
       window.__sessionById = window.__sessionById || {};
       sessions.forEach((s) => { window.__sessionById[s.id] = s; });
       box.innerHTML = `<table class="session-table">
@@ -1638,6 +1664,7 @@
           <th>邀請碼</th>
           <th>key 到期</th>
           ${allowOwnerActions ? '<th>安裝清單</th>' : ''}
+          <th>暱稱座位</th>
           ${showRedemptions ? '<th>已領取</th>' : ''}
         </tr>
         ${sessions.map(s => `
@@ -1648,6 +1675,7 @@
             <td>${sessionInviteCell(s, allowOwnerActions)}</td>
             <td>${sessionExpiresCell(classId, s)}</td>
             ${allowOwnerActions ? `<td>${sessionCatalogCell(classId, s)}</td>` : ''}
+            <td>${sessionSeatLimitCell(classId, s)}</td>
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
           ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
@@ -2482,6 +2510,56 @@ snippets:
           await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
             method: 'PATCH',
             body: JSON.stringify({ name }),
+          });
+          await reloadSessionViews(classId);
+        } catch (err) {
+          finished = false;
+          input.disabled = false;
+          alert(err.message || String(err));
+          input.focus();
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); restore(); }
+      });
+      input.addEventListener('blur', () => { setTimeout(save, 0); });
+      input.focus();
+      input.select();
+    }
+
+    function beginEditSessionSeatLimit(classId, sessionId, buttonEl) {
+      const cell = buttonEl?.closest('.cell-with-action');
+      if (!cell || cell.querySelector('input.inline-edit')) return;
+      const current = Number(cell.dataset.seatLimit || 60);
+      const main = cell.querySelector('.cell-main');
+      const original = main.innerHTML;
+      main.innerHTML = `<input type="number" class="inline-edit" min="1" step="1" value="${current}" />`;
+      const input = main.querySelector('input');
+      let finished = false;
+      const restore = () => {
+        if (finished) return;
+        finished = true;
+        main.innerHTML = original;
+      };
+      const save = async () => {
+        if (finished) return;
+        const limit = Number(input.value);
+        if (!Number.isInteger(limit) || limit < 1) {
+          alert('座位上限必須為正整數');
+          input.focus();
+          return;
+        }
+        if (limit === current) {
+          restore();
+          return;
+        }
+        finished = true;
+        input.disabled = true;
+        try {
+          await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ seat_limit: limit }),
           });
           await reloadSessionViews(classId);
         } catch (err) {

@@ -111,3 +111,21 @@ def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
     user_a = repo.verify_api_key_context(first["api_key"]).user_id
     user_b = repo.verify_api_key_context(other_redeem["api_key"]).user_id
     assert user_a != user_b
+
+
+def test_postgres_session_seat_limit_blocks_new_nickname(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    assert session["seat_limit"] == 60
+    repo.update_class_session(klass["id"], session["id"], seat_limit=1)
+    first = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
+    assert first["api_key"].startswith("vcr_sk_")
+    with pytest.raises(ValueError, match="座位已滿"):
+        repo.redeem_invite_with_nickname(session["invite_code"], "Bob")
+    again = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
+    assert again["api_key"] == first["api_key"]
+    items = repo.list_class_sessions(klass["id"])
+    assert items[0]["nickname_seat_count"] == 1
+    assert items[0]["seat_limit"] == 1

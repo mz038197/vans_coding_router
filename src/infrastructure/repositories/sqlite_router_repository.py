@@ -171,6 +171,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 "course_catalog_yaml",
                 "TEXT NOT NULL DEFAULT 'actions: []\n'",
             )
+            self._ensure_column(
+                conn,
+                "class_sessions",
+                "seat_limit",
+                "INTEGER NOT NULL DEFAULT 60",
+            )
             self._ensure_column(conn, "class_members", "classroom_nickname", "TEXT")
             conn.execute(
                 """

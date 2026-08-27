@@ -150,6 +150,17 @@ def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
     assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
 
 
+def test_portal_session_row_shows_occupied_nickname_seats_versus_limit(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert "<th>暱稱座位</th>" in html
+    assert "sessionSeatLimitCell" in html
+    assert "beginEditSessionSeatLimit" in html
+    assert "nickname_seat_count" in html
+    assert "seat_limit" in html
+    assert '{"seat_limit"' in html or "{ seat_limit" in html
+
+
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
@@ -646,6 +657,87 @@ def test_list_and_create_class_sessions(tmp_path):
     )
     assert patch.status_code == 200
     assert patch.json()["name"] == "第二堂"
+
+
+def test_new_class_session_has_seat_limit_60(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = {"session_user_id": str(teacher["id"])}
+
+    created = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    )
+    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
+
+    assert created.status_code == 200
+    assert created.json()["seat_limit"] == 60
+    assert listing.json()["items"][0]["seat_limit"] == 60
+    assert listing.json()["items"][0]["nickname_seat_count"] == 0
+
+
+def test_owner_and_admin_can_change_session_seat_limit(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    admin = repo.upsert_google_user("admin@school.edu", "Admin")
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    teacher_cookies = {"session_user_id": str(teacher["id"])}
+    admin_cookies = {"session_user_id": str(admin["id"])}
+    other_cookies = {"session_user_id": str(other["id"])}
+
+    by_owner = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=teacher_cookies,
+        json={"seat_limit": 12},
+    )
+    assert by_owner.status_code == 200
+    assert by_owner.json()["seat_limit"] == 12
+
+    by_admin = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=admin_cookies,
+        json={"seat_limit": 8},
+    )
+    assert by_admin.status_code == 200
+    assert by_admin.json()["seat_limit"] == 8
+
+    listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=teacher_cookies)
+    assert listing.json()["items"][0]["seat_limit"] == 8
+
+    forbidden = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=other_cookies,
+        json={"seat_limit": 99},
+    )
+    assert forbidden.status_code == 403
+
+
+def test_session_seat_limit_rejects_non_positive_values(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    cookies = {"session_user_id": str(teacher["id"])}
+
+    zero = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=cookies,
+        json={"seat_limit": 0},
+    )
+    negative = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=cookies,
+        json={"seat_limit": -1},
+    )
+
+    assert zero.status_code == 400
+    assert zero.json()["detail"] == "座位上限必須為正整數"
+    assert negative.status_code == 400
+    assert negative.json()["detail"] == "座位上限必須為正整數"
 
 
 def test_session_image_generation_toggle(tmp_path):

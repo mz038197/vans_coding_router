@@ -545,7 +545,15 @@ class RouterRepositoryBase(ABC):
                                SELECT COUNT(*)
                                FROM session_redemptions r
                                WHERE r.session_id = s.id
-                           ) AS redemption_count
+                           ) AS redemption_count,
+                           (
+                               SELECT COUNT(*)
+                               FROM session_redemptions r
+                               JOIN class_members m
+                                 ON m.user_id = r.user_id AND m.class_id = s.class_id
+                               WHERE r.session_id = s.id
+                                 AND m.classroom_nickname IS NOT NULL
+                           ) AS nickname_seat_count
                     FROM class_sessions s
                     WHERE s.class_id = ?
                     ORDER BY COALESCE(s.session_at, s.created_at) DESC
@@ -592,6 +600,7 @@ class RouterRepositoryBase(ABC):
         prompt_logging_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
+        seat_limit: int | None = None,
     ) -> dict[str, Any] | None:
         if (
             expires_at is None
@@ -602,6 +611,7 @@ class RouterRepositoryBase(ABC):
             and prompt_logging_enabled is None
             and status is None
             and course_catalog_yaml is None
+            and seat_limit is None
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -660,6 +670,11 @@ class RouterRepositoryBase(ABC):
                 conn.execute(
                     self._sql("UPDATE class_sessions SET course_catalog_yaml = ? WHERE id = ?"),
                     (normalized, session_id),
+                )
+            if seat_limit is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET seat_limit = ? WHERE id = ?"),
+                    (int(seat_limit), session_id),
                 )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
@@ -833,13 +848,64 @@ class RouterRepositoryBase(ABC):
         key = self.issue_session_key(user_id, int(session["id"]))
         return {"api_key": key, "session": session}
 
+    def _nickname_seat_count(self, conn: Any, session_id: int, class_id: int) -> int:
+        row = conn.execute(
+            self._sql(
+                """
+                SELECT COUNT(*) AS n
+                FROM session_redemptions r
+                JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ?
+                WHERE r.session_id = ? AND m.classroom_nickname IS NOT NULL
+                """
+            ),
+            (class_id, session_id),
+        ).fetchone()
+        return int(row["n"] if row else 0)
+
+    def _has_session_redemption(self, conn: Any, session_id: int, user_id: int) -> bool:
+        row = conn.execute(
+            self._sql("SELECT 1 AS n FROM session_redemptions WHERE session_id = ? AND user_id = ?"),
+            (session_id, user_id),
+        ).fetchone()
+        return row is not None
+
+    def _lock_class_session(self, conn: Any, session_id: int) -> int:
+        if self.dialect == "postgres":
+            row = conn.execute(
+                self._sql("SELECT seat_limit FROM class_sessions WHERE id = ? FOR UPDATE"),
+                (session_id,),
+            ).fetchone()
+        else:
+            conn.execute(
+                self._sql("UPDATE class_sessions SET seat_limit = seat_limit WHERE id = ?"),
+                (session_id,),
+            )
+            row = conn.execute(
+                self._sql("SELECT seat_limit FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+        if row is None or row["seat_limit"] is None:
+            return 60
+        return int(row["seat_limit"])
+
     def redeem_invite_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
         with self._connect() as conn:
             session = self._live_session_by_invite(conn, invite_code)
-            user_id = self._get_or_create_nickname_user(conn, int(session["class_id"]), nickname)
+            class_id = int(session["class_id"])
+            session_id = int(session["id"])
+            seat_limit = self._lock_class_session(conn, session_id)
+            existing_user_id = self._nickname_user_id(conn, class_id, nickname)
+            already_seated = existing_user_id is not None and self._has_session_redemption(
+                conn, session_id, existing_user_id
+            )
+            if not already_seated:
+                occupied = self._nickname_seat_count(conn, session_id, class_id)
+                if occupied >= seat_limit:
+                    raise ValueError("此課堂座位已滿，無法以新暱稱領取")
+            user_id = self._get_or_create_nickname_user(conn, class_id, nickname)
             now = dt(utc_now())
-            self._insert_or_ignore_redemption(conn, int(session["id"]), user_id, now or "")
-        key = self.issue_session_key(user_id, int(session["id"]))
+            self._insert_or_ignore_redemption(conn, session_id, user_id, now or "")
+        key = self.issue_session_key(user_id, session_id)
         return {"api_key": key, "session": session}
 
     def try_consume_handoff_nonce(self, nonce: str) -> bool:
