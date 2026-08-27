@@ -175,8 +175,19 @@ class PortalUseCase:
         )
 
     def redemptions(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
-        self._assert_class_owner(teacher_id, class_id)
+        self._assert_class_owner_or_admin(teacher_id, class_id)
         return self.repo.list_session_redemptions(class_id)
+
+    def update_class_member_status(
+        self, actor_id: int, class_id: int, user_id: int, status: str
+    ) -> dict[str, Any]:
+        self._assert_class_owner_or_admin(actor_id, class_id)
+        if status not in _VALID_STATUSES:
+            raise ValueError("狀態無效")
+        updated = self.repo.set_class_member_user_status(class_id, user_id, status)
+        if updated is None:
+            raise ValueError("此學生不在本課程中")
+        return updated
 
     def prompt_logs(
         self,

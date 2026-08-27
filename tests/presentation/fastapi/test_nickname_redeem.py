@@ -353,3 +353,189 @@ def test_extension_handoff_redeem_still_works(tmp_path):
     )
     assert redeem.status_code == 200
     assert redeem.json()["api_key"].startswith("vcr_sk_")
+
+
+def test_class_redemptions_show_classroom_nickname_not_synthetic_email(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+
+    redeem = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert redeem.status_code == 200
+    assert listing.status_code == 200
+    items = [item for item in listing.json()["items"] if item.get("redeemed_at")]
+    assert len(items) == 1
+    assert items[0]["name"] == "Ada"
+    email = items[0].get("email")
+    assert email in (None, "", "—") or "@" not in str(email)
+
+
+def test_class_redemptions_keep_google_student_email(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    google = client.post(
+        "/sessions/redeem",
+        json={"invite_code": session["invite_code"]},
+        cookies={"session_user_id": str(student["id"])},
+    )
+
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert google.status_code == 200
+    items = [item for item in listing.json()["items"] if item.get("redeemed_at")]
+    assert len(items) == 1
+    assert items[0]["name"] == "Student"
+    assert items[0]["email"] == "student@gmail.com"
+    assert not items[0].get("classroom_nickname")
+
+
+def test_class_owner_can_inactivate_student_and_key_stops_working(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    redeem = _redeem(client, session["invite_code"], "Ada")
+    api_key = redeem.json()["api_key"]
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+
+    disable = client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"status": "inactive"},
+    )
+    after = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert disable.status_code == 200
+    assert disable.json()["status"] == "inactive"
+    assert repo.verify_api_key_context(api_key) is None
+    item = [row for row in after.json()["items"] if row.get("redeemed_at")][0]
+    assert item["status"] == "inactive"
+    assert item["name"] == "Ada"
+    assert item["user_id"] == student_id
+
+
+def test_inactive_student_cannot_nickname_redeem(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    first = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+    client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"status": "inactive"},
+    )
+
+    again = _redeem(client, session["invite_code"], "Ada")
+
+    assert first.status_code == 200
+    assert again.status_code == 400
+    assert again.json()["detail"] == "此暱稱已被停用，無法領取"
+
+
+def test_admin_can_inactivate_class_member(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    admin = repo.upsert_google_user("admin@school.edu", "Admin")
+    redeem = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(admin["id"])},
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+
+    disable = client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies={"session_user_id": str(admin["id"])},
+        json={"status": "inactive"},
+    )
+
+    assert redeem.status_code == 200
+    assert listing.status_code == 200
+    assert disable.status_code == 200
+    assert disable.json()["status"] == "inactive"
+    assert repo.verify_api_key_context(redeem.json()["api_key"]) is None
+
+
+def test_other_teacher_cannot_inactivate_class_member(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+
+    forbidden = client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies={"session_user_id": str(other["id"])},
+        json={"status": "inactive"},
+    )
+
+    assert forbidden.status_code == 403
+    assert repo.verify_api_key_context(
+        _redeem(client, session["invite_code"], "Ada").json()["api_key"]
+    ) is not None
+
+
+def test_cannot_inactivate_student_from_another_class(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    other_class = repo.create_class(teacher["id"], "Other", None, 2)
+    first = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+
+    rejected = client.patch(
+        f"/teacher/classes/{other_class['id']}/members/{student_id}",
+        cookies={"session_user_id": str(teacher["id"])},
+        json={"status": "inactive"},
+    )
+
+    assert first.status_code == 200
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "此學生不在本課程中"
+    assert repo.verify_api_key_context(first.json()["api_key"]) is not None
+
+
+def test_collided_nicknames_remain_one_user_on_roster(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+
+    first = _redeem(client, session["invite_code"], "Ada")
+    second = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    items = [item for item in listing.json()["items"] if item.get("redeemed_at")]
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["api_key"] == second.json()["api_key"]
+    assert len(items) == 1
+    assert items[0]["name"] == "Ada"
+    user_a = repo.verify_api_key_context(first.json()["api_key"]).user_id
+    user_b = repo.verify_api_key_context(second.json()["api_key"]).user_id
+    assert user_a == user_b == items[0]["user_id"]

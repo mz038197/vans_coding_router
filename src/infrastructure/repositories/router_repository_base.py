@@ -895,6 +895,13 @@ class RouterRepositoryBase(ABC):
             session_id = int(session["id"])
             seat_limit = self._lock_class_session(conn, session_id)
             existing_user_id = self._nickname_user_id(conn, class_id, nickname)
+            if existing_user_id is not None:
+                status_row = conn.execute(
+                    self._sql("SELECT status FROM users WHERE id = ?"),
+                    (existing_user_id,),
+                ).fetchone()
+                if status_row is not None and status_row["status"] != "active":
+                    raise ValueError("此暱稱已被停用，無法領取")
             already_seated = existing_user_id is not None and self._has_session_redemption(
                 conn, session_id, existing_user_id
             )
@@ -936,17 +943,40 @@ class RouterRepositoryBase(ABC):
             rows = conn.execute(
                 self._sql(
                     """
-                    SELECT s.id AS session_id, s.invite_code, s.expires_at, r.redeemed_at, u.name, u.email
+                    SELECT s.id AS session_id, s.invite_code, s.expires_at, r.redeemed_at,
+                           u.id AS user_id, u.name, u.email, u.status,
+                           m.classroom_nickname
                     FROM class_sessions s
                     LEFT JOIN session_redemptions r ON r.session_id = s.id
                     LEFT JOIN users u ON u.id = r.user_id
+                    LEFT JOIN class_members m ON m.user_id = r.user_id AND m.class_id = s.class_id
                     WHERE s.class_id = ?
                     ORDER BY s.created_at DESC, r.redeemed_at DESC
                     """
                 ),
                 (class_id,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            items = []
+            for row in rows:
+                item = dict(row)
+                nickname = item.get("classroom_nickname")
+                if nickname:
+                    item["name"] = nickname
+                    item["email"] = None
+                items.append(item)
+            return items
+
+    def set_class_member_user_status(
+        self, class_id: int, user_id: int, status: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT 1 AS n FROM class_members WHERE class_id = ? AND user_id = ?"),
+                (class_id, user_id),
+            ).fetchone()
+            if row is None:
+                return None
+        return self.update_user(user_id, status=status)
 
     def log_prompt(
         self,

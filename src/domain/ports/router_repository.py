@@ -124,6 +124,12 @@ class RouterRepositoryPort(Protocol):
     def list_session_redemptions(self, class_id: int) -> list[dict[str, Any]]:
         ...
 
+    def set_class_member_user_status(
+        self, class_id: int, user_id: int, status: str
+    ) -> dict[str, Any] | None:
+        """Set users.status for a class member. Returns None if the user is not in the class."""
+        ...
+
     def log_prompt(
         self,
         auth: AuthContext | None,

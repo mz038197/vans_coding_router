@@ -79,6 +79,10 @@ class UserPatchRequest(BaseModel):
     status: str | None = None
 
 
+class MemberPatchRequest(BaseModel):
+    status: str
+
+
 class ClassPatchRequest(BaseModel):
     status: str
 
@@ -370,6 +374,22 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.get("/teacher/classes/{class_id}/redemptions")
     async def class_redemptions(class_id: int, session_user_id: str | None = Cookie(default=None)):
         return portal_call(lambda: {"items": portal_use_case.redemptions(current_user_id(session_user_id), class_id)})
+
+    @router.patch("/teacher/classes/{class_id}/members/{user_id}")
+    async def class_member_status(
+        class_id: int,
+        user_id: int,
+        data: MemberPatchRequest,
+        session_user_id: str | None = Cookie(default=None),
+    ):
+        return portal_call(
+            lambda: portal_use_case.update_class_member_status(
+                current_user_id(session_user_id),
+                class_id,
+                user_id,
+                data.status,
+            )
+        )
 
     @router.get("/teacher/classes/{class_id}/usage")
     async def class_usage(class_id: int, session_user_id: str | None = Cookie(default=None)):

@@ -1678,8 +1678,8 @@
             <td>${sessionSeatLimitCell(classId, s)}</td>
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
-          ${showRedemptions ? `<tr id="redemption-row-${s.id}" class="hidden">
-            <td colspan="${colCount}"><div id="redemption-body-${s.id}"></div></td>
+          ${showRedemptions ? `<tr id="redemption-row-${classId}-${s.id}" class="hidden">
+            <td colspan="${colCount}"><div id="redemption-body-${classId}-${s.id}"></div></td>
           </tr>` : ''}
         `).join('')}
       </table>`;
@@ -2429,39 +2429,69 @@ snippets:
       }
     }
 
-    function renderRedemptionSubtable(items) {
+    function redemptionIdentityCell(item) {
+      if (item.classroom_nickname) return '暱稱';
+      return escapeHtml(item.email || '—');
+    }
+
+    function redemptionActionCell(classId, sessionId, item) {
+      if (!item.user_id) return '';
+      if (item.status === 'inactive') return '<span class="hint">已停用</span>';
+      return `<button type="button" class="btn-danger btn-sm" onclick="disableClassMember(${classId}, ${sessionId}, ${item.user_id})">停用</button>`;
+    }
+
+    function renderRedemptionSubtable(classId, items) {
       if (!items.length) return '<p class="hint">尚無人領取</p>';
       return `<table class="subtable">
-        <tr><th>學生</th><th>Email</th><th>領取時間</th></tr>
+        <tr><th>學生</th><th>身分</th><th>狀態</th><th>領取時間</th><th></th></tr>
         ${items.map(item => `
           <tr>
             <td>${escapeHtml(item.name || '—')}</td>
-            <td>${escapeHtml(item.email || '—')}</td>
+            <td>${redemptionIdentityCell(item)}</td>
+            <td>${renderStatusTag('user', item.status === 'inactive' ? 'inactive' : 'active')}</td>
             <td>${escapeHtml(formatLocalDateTime(item.redeemed_at))}</td>
+            <td>${redemptionActionCell(classId, item.session_id, item)}</td>
           </tr>
         `).join('')}
       </table>`;
     }
 
+    function fillRedemptionBody(classId, sessionId) {
+      const body = document.getElementById(`redemption-body-${classId}-${sessionId}`);
+      if (!body) return;
+      const items = (redemptionsCache[classId] || []).filter(
+        item => item.session_id === sessionId && item.redeemed_at
+      );
+      body.innerHTML = renderRedemptionSubtable(classId, items);
+    }
+
     function toggleRedemptions(classId, sessionId, buttonEl) {
-      const row = document.getElementById(`redemption-row-${sessionId}`);
-      const body = document.getElementById(`redemption-body-${sessionId}`);
+      const row = document.getElementById(`redemption-row-${classId}-${sessionId}`);
+      const body = document.getElementById(`redemption-body-${classId}-${sessionId}`);
       if (!row || !body) return;
       const count = (redemptionsCache[classId] || []).filter(
         item => item.session_id === sessionId && item.redeemed_at
       ).length;
       const opening = row.classList.contains('hidden');
       if (opening) {
-        const items = (redemptionsCache[classId] || []).filter(
-          item => item.session_id === sessionId && item.redeemed_at
-        );
-        body.innerHTML = renderRedemptionSubtable(items);
+        fillRedemptionBody(classId, sessionId);
         row.classList.remove('hidden');
         buttonEl.textContent = `${count} 人 ▲`;
       } else {
         row.classList.add('hidden');
         buttonEl.textContent = `${count} 人`;
       }
+    }
+
+    async function disableClassMember(classId, sessionId, userId) {
+      const ok = window.confirm('停用後該學生的 Classroom API Key 會立即失效，且無法再以同一暱稱領取。確定停用？');
+      if (!ok) return;
+      await api(`/teacher/classes/${classId}/members/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'inactive' }),
+      });
+      redemptionsCache[classId] = (await api(`/teacher/classes/${classId}/redemptions`)).items || [];
+      fillRedemptionBody(classId, sessionId);
     }
 
     async function createSession(classId) {
@@ -2680,11 +2710,12 @@ snippets:
       host.innerHTML = '<p class="hint">載入中…</p>';
       try {
         const payload = await api(`/teacher/classes/${classId}/sessions`);
+        redemptionsCache[classId] = (await api(`/teacher/classes/${classId}/redemptions`)).items || [];
         const course = (adminData?.classes?.items || []).find(c => c.id === classId);
         renderSessionTable(classId, payload.items || [], {
           host,
           allowOwnerActions: false,
-          showRedemptions: false,
+          showRedemptions: true,
           courseStatus: course?.status || 'active',
         });
       } catch (err) {
