@@ -9,6 +9,7 @@ from src.infrastructure.vscode.merge_chat_language_models import load_vans_templ
 _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
 _VALID_SESSION_STATUSES = frozenset({"active", "ended"})
+_NICKNAME_MAX_LEN = 64
 
 
 class PortalUseCase:
@@ -147,6 +148,14 @@ class PortalUseCase:
     def redeem_with_handoff(self, handoff_token: str, invite_code: str) -> dict[str, Any]:
         user_id = self._handoff_service().consume_token(handoff_token)
         return self.repo.redeem_invite(invite_code, user_id)
+
+    def redeem_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
+        cleaned = (nickname or "").strip()
+        if not cleaned:
+            raise ValueError("classroom nickname is required")
+        if len(cleaned) > _NICKNAME_MAX_LEN:
+            raise ValueError("classroom nickname is too long")
+        return self.repo.redeem_invite_with_nickname(invite_code, cleaned)
 
     def chat_language_models_template(self) -> list[dict[str, Any]]:
         return load_vans_template()

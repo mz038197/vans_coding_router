@@ -94,3 +94,20 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     assert cleared["deleted"] == 1
     with repo._connect() as conn:
         assert conn.execute("SELECT COUNT(*) AS n FROM prompt_logs_archive").fetchone()["n"] == 0
+
+
+def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    first = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
+    again = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
+    assert first["api_key"] == again["api_key"]
+
+    other = repo.create_class(teacher["id"], "Other", None, 2)
+    other_session = repo.create_class_session(other["id"], teacher["id"], "Week 1")
+    other_redeem = repo.redeem_invite_with_nickname(other_session["invite_code"], "Ada")
+    user_a = repo.verify_api_key_context(first["api_key"]).user_id
+    user_b = repo.verify_api_key_context(other_redeem["api_key"]).user_id
+    assert user_a != user_b

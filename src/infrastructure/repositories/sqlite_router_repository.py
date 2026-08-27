@@ -101,6 +101,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     role TEXT NOT NULL DEFAULT 'student',
                     status TEXT NOT NULL DEFAULT 'active',
                     joined_at TEXT NOT NULL,
+                    classroom_nickname TEXT,
                     PRIMARY KEY(class_id, user_id)
                 );
                 CREATE TABLE IF NOT EXISTS prompt_logs (
@@ -169,6 +170,14 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 "class_sessions",
                 "course_catalog_yaml",
                 "TEXT NOT NULL DEFAULT 'actions: []\n'",
+            )
+            self._ensure_column(conn, "class_members", "classroom_nickname", "TEXT")
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
+                ON class_members(class_id, classroom_nickname)
+                WHERE classroom_nickname IS NOT NULL
+                """
             )
             self._backfill_user_roles(conn)
             self._backfill_ended_session_expires(conn)

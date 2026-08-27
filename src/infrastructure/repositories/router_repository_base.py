@@ -754,28 +754,93 @@ class RouterRepositoryBase(ABC):
                 return value
             return bool(int(value or 0))
 
+    def _live_session_by_invite(self, conn: Any, invite_code: str) -> dict[str, Any]:
+        session = conn.execute(
+            self._sql(
+                """
+                SELECT s.*, c.name AS class_name, c.status AS class_status
+                FROM class_sessions s JOIN classes c ON c.id = s.class_id
+                WHERE s.invite_code = ?
+                """
+            ),
+            (invite_code.strip().upper(),),
+        ).fetchone()
+        if not session or session["class_status"] != "active":
+            raise ValueError("invalid invite")
+        expires = parse_dt(session["expires_at"])
+        if expires is None or utc_now() >= expires:
+            raise ValueError("expired invite")
+        return dict(session)
+
+    def _synthetic_nickname_email(self, class_id: int, nickname: str) -> str:
+        digest = hashlib.sha256(f"{class_id}\0{nickname}".encode("utf-8")).hexdigest()[:32]
+        return f"nn.{class_id}.{digest}@nickname.invalid"
+
+    def _nickname_user_id(self, conn: Any, class_id: int, nickname: str) -> int | None:
+        row = conn.execute(
+            self._sql(
+                "SELECT user_id FROM class_members WHERE class_id = ? AND classroom_nickname = ?"
+            ),
+            (class_id, nickname),
+        ).fetchone()
+        return int(row["user_id"]) if row else None
+
+    def _is_unique_violation(self, exc: BaseException) -> bool:
+        if type(exc).__name__ in {"IntegrityError", "UniqueViolation"}:
+            return True
+        orig = getattr(exc, "orig", None)
+        return orig is not None and type(orig).__name__ in {"IntegrityError", "UniqueViolation"}
+
+    def _get_or_create_nickname_user(self, conn: Any, class_id: int, nickname: str) -> int:
+        existing = self._nickname_user_id(conn, class_id, nickname)
+        if existing is not None:
+            return existing
+        now = dt(utc_now())
+        conn.execute("SAVEPOINT nickname_create")
+        try:
+            user_id = self._insert_returning_id(
+                conn,
+                "INSERT INTO users(email, name, role, status, google_sub, created_at, updated_at) "
+                "VALUES (?, ?, 'student', 'active', NULL, ?, ?)",
+                (self._synthetic_nickname_email(class_id, nickname), nickname, now, now),
+            )
+            self._set_roles(conn, user_id, ("student",))
+            conn.execute(
+                self._sql(
+                    "INSERT INTO class_members(class_id, user_id, role, status, joined_at, classroom_nickname) "
+                    "VALUES (?, ?, 'student', 'active', ?, ?)"
+                ),
+                (class_id, user_id, now, nickname),
+            )
+            conn.execute("RELEASE SAVEPOINT nickname_create")
+            return user_id
+        except Exception as exc:
+            conn.execute("ROLLBACK TO SAVEPOINT nickname_create")
+            conn.execute("RELEASE SAVEPOINT nickname_create")
+            if not self._is_unique_violation(exc):
+                raise
+            raced = self._nickname_user_id(conn, class_id, nickname)
+            if raced is None:
+                raise
+            return raced
+
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:
         with self._connect() as conn:
-            session = conn.execute(
-                self._sql(
-                    """
-                    SELECT s.*, c.name AS class_name, c.status AS class_status
-                    FROM class_sessions s JOIN classes c ON c.id = s.class_id
-                    WHERE s.invite_code = ?
-                    """
-                ),
-                (invite_code.strip().upper(),),
-            ).fetchone()
-            if not session or session["class_status"] != "active":
-                raise ValueError("invalid invite")
-            expires = parse_dt(session["expires_at"])
-            if expires is None or utc_now() >= expires:
-                raise ValueError("expired invite")
+            session = self._live_session_by_invite(conn, invite_code)
             now = dt(utc_now())
             self._insert_or_ignore_redemption(conn, int(session["id"]), user_id, now or "")
             self._insert_or_ignore_class_member(conn, int(session["class_id"]), user_id, now or "")
         key = self.issue_session_key(user_id, int(session["id"]))
-        return {"api_key": key, "session": dict(session)}
+        return {"api_key": key, "session": session}
+
+    def redeem_invite_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            session = self._live_session_by_invite(conn, invite_code)
+            user_id = self._get_or_create_nickname_user(conn, int(session["class_id"]), nickname)
+            now = dt(utc_now())
+            self._insert_or_ignore_redemption(conn, int(session["id"]), user_id, now or "")
+        key = self.issue_session_key(user_id, int(session["id"]))
+        return {"api_key": key, "session": session}
 
     def try_consume_handoff_nonce(self, nonce: str) -> bool:
         cleaned = (nonce or "").strip()

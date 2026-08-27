@@ -112,6 +112,10 @@ class RouterRepositoryPort(Protocol):
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:
         ...
 
+    def redeem_invite_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
+        """Exchange an Invite Code plus Classroom Nickname for a session key."""
+        ...
+
     def try_consume_handoff_nonce(self, nonce: str) -> bool:
         """Mark a Sign-in Handoff nonce as used. Returns False if already used."""
         ...

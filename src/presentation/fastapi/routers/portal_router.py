@@ -40,6 +40,11 @@ class ExtensionRedeemRequest(BaseModel):
     invite_code: str
 
 
+class NicknameRedeemRequest(BaseModel):
+    invite_code: str
+    nickname: str
+
+
 class ClassRequest(BaseModel):
     name: str
     ends_at: str | None = None
@@ -262,6 +267,12 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     async def extension_redeem(data: ExtensionRedeemRequest):
         return portal_call(
             lambda: portal_use_case.redeem_with_handoff(data.handoff_token, data.invite_code)
+        )
+
+    @router.post("/extension/sessions/nickname-redeem")
+    async def extension_nickname_redeem(data: NicknameRedeemRequest):
+        return portal_call(
+            lambda: portal_use_case.redeem_with_nickname(data.invite_code, data.nickname)
         )
 
     @router.get("/extension/course-catalog")

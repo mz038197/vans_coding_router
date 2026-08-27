@@ -127,6 +127,7 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     role TEXT NOT NULL DEFAULT 'student',
                     status TEXT NOT NULL DEFAULT 'active',
                     joined_at TEXT NOT NULL,
+                    classroom_nickname TEXT,
                     PRIMARY KEY(class_id, user_id)
                 )
                 """
@@ -193,6 +194,14 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []\n'"
+            )
+            conn.execute("ALTER TABLE class_members ADD COLUMN IF NOT EXISTS classroom_nickname TEXT")
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
+                ON class_members(class_id, classroom_nickname)
+                WHERE classroom_nickname IS NOT NULL
+                """
             )
             conn.commit()
             conn.execute(
