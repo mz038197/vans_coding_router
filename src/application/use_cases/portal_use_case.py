@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any
 
+from src.domain.entities.auth import PortalSessionContext
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
@@ -33,6 +34,60 @@ class PortalUseCase:
         if not existing and not self.settings.auth.open_registration:
             raise ValueError("尚未開放註冊")
         return self.repo.upsert_google_user(email=email, name=name, google_sub=google_sub)
+
+    def authenticate_portal_session(
+        self,
+        token: str,
+        *,
+        refresh_activity: bool = True,
+    ) -> PortalSessionContext | None:
+        return self.repo.authenticate_portal_session(
+            token,
+            refresh_activity=refresh_activity,
+        )
+
+    def create_portal_session(
+        self,
+        user_id: int,
+        browser_description: str,
+    ) -> tuple[str, PortalSessionContext]:
+        return self.repo.create_portal_session(user_id, browser_description)
+
+    def revoke_current_portal_session(self, token: str) -> bool:
+        context = self.repo.authenticate_portal_session(token)
+        if context is None:
+            return False
+        return self.repo.revoke_portal_session(
+            context.user_id,
+            context.session_id,
+            "user_logout",
+        )
+
+    def portal_sessions(
+        self,
+        user_id: int,
+        current_session_id: int,
+    ) -> list[dict[str, Any]]:
+        sessions = self.repo.list_portal_sessions(user_id)
+        return [
+            {**session, "current": int(session["id"]) == current_session_id}
+            for session in sessions
+        ]
+
+    def revoke_portal_session(self, user_id: int, session_id: int) -> None:
+        if not self.repo.revoke_portal_session(
+            user_id,
+            session_id,
+            "user_device_revoke",
+        ):
+            raise ValueError("找不到登入裝置")
+
+    def revoke_other_portal_sessions(self, user_id: int, current_session_id: int) -> int:
+        return self.repo.revoke_other_portal_sessions(
+            user_id,
+            current_session_id,
+            "user_revoke_others",
+        )
 
     def me(self, user_id: int) -> dict[str, Any] | None:
         user = self.repo.get_user(user_id)

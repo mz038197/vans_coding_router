@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field, replace
 import os
 from pathlib import Path
+from ipaddress import ip_address
+from urllib.parse import urlparse
 from typing import Any
 
 import yaml
@@ -14,6 +16,7 @@ class AuthSettings:
     google_client_id: str = ""
     google_client_secret: str = ""
     open_registration: bool = True
+    dev_auth_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,27 @@ class RouterSettings:
     routing: RoutingSettings = field(default_factory=RoutingSettings)
 
 
+def is_loopback_url(url: str) -> bool:
+    host = urlparse(url).hostname
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_portal_auth_settings(settings: RouterSettings) -> None:
+    if is_loopback_url(settings.public_url):
+        return
+    if settings.auth.dev_auth_enabled:
+        raise ValueError("Development login is only allowed on a loopback public URL")
+    if not (settings.auth.google_client_id and settings.auth.google_client_secret):
+        raise ValueError("Google OAuth configuration is required for public deployment")
+
+
 def _parse_prompt_log_settings(raw: dict[str, Any] | None) -> PromptLogSettings:
     data = raw or {}
     if "archive_after_days" in data:
@@ -140,6 +164,7 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
             google_client_id=str(auth.get("google_client_id", "")),
             google_client_secret=str(auth.get("google_client_secret", "")),
             open_registration=bool(auth.get("open_registration", True)),
+            dev_auth_enabled=bool(auth.get("dev_auth_enabled", False)),
         ),
         database=DatabaseSettings(
             path=str(database.get("path", "~/.vans_coding_router/router.db")),
@@ -185,6 +210,13 @@ def _env(name: str, current: str = "") -> str:
     return os.getenv(name) or current
 
 
+def _env_bool(name: str, current: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return current
+    return value.strip().lower() in {"true", "1", "yes"}
+
+
 def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
     auth = AuthSettings(
         teacher_domain=settings.auth.teacher_domain,
@@ -193,6 +225,7 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
         google_client_id=_env("GOOGLE_CLIENT_ID", settings.auth.google_client_id),
         google_client_secret=_env("GOOGLE_CLIENT_SECRET", settings.auth.google_client_secret),
         open_registration=settings.auth.open_registration,
+        dev_auth_enabled=_env_bool("DEV_AUTH_ENABLED", settings.auth.dev_auth_enabled),
     )
     database = DatabaseSettings(
         path=settings.database.path,

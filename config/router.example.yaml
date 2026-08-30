@@ -8,6 +8,7 @@ auth:
   google_client_id: ""
   google_client_secret: ""
   session_secret: "change-me"
+  dev_auth_enabled: true  # 僅限 loopback 本機開發
   open_registration: true
 
 database:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
-from src.domain.entities.auth import AuthContext
+from src.domain.entities.auth import AuthContext, PortalSessionContext
 
 
 class RouterRepositoryPort(Protocol):
@@ -23,6 +23,64 @@ class RouterRepositoryPort(Protocol):
         ...
 
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        ...
+
+    def create_portal_session(
+        self,
+        user_id: int,
+        browser_description: str,
+        now: datetime | None = None,
+    ) -> tuple[str, PortalSessionContext]:
+        ...
+
+    def authenticate_portal_session(
+        self,
+        token: str,
+        now: datetime | None = None,
+        refresh_activity: bool = True,
+    ) -> PortalSessionContext | None:
+        ...
+
+    def list_portal_sessions(
+        self,
+        user_id: int,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    def revoke_portal_session(
+        self,
+        user_id: int,
+        session_id: int,
+        reason: str,
+        actor_user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        ...
+
+    def revoke_other_portal_sessions(
+        self,
+        user_id: int,
+        current_session_id: int,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        ...
+
+    def revoke_all_portal_sessions(
+        self,
+        user_id: int,
+        reason: str,
+        actor_user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        ...
+
+    def purge_portal_sessions(
+        self,
+        now: datetime | None = None,
+        retention_days: int = 30,
+    ) -> int:
         ...
 
     def list_users(self) -> list[dict[str, Any]]:

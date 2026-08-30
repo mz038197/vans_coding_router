@@ -26,6 +26,7 @@ def _settings(tmp_path, *, google_client_id: str = "", google_client_secret: str
             session_secret="test-session-secret",
             google_client_id=google_client_id,
             google_client_secret=google_client_secret,
+            dev_auth_enabled=True,
         ),
     )
 
@@ -35,7 +36,16 @@ def _client(tmp_path, **settings_kwargs):
     repo = SqliteRouterRepository(settings.database.path, settings)
     app = FastAPI()
     app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
-    return TestClient(app), repo, settings
+    return TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        headers={"Origin": settings.public_url},
+    ), repo, settings
+
+
+def _portal_cookie(repo, user_id: int) -> dict[str, str]:
+    token, _ = repo.create_portal_session(user_id, "Test browser")
+    return {"vcr_portal_session": token}
 
 
 def test_chat_language_models_template_is_public(tmp_path):
@@ -121,7 +131,7 @@ actions:
 """
     patch = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"course_catalog_yaml": yaml_body},
     )
     assert patch.status_code == 200
@@ -129,14 +139,14 @@ actions:
 
     bad = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"course_catalog_yaml": "actions:\n  - id: x\n"},
     )
     assert bad.status_code == 400
 
     client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"status": "ended"},
     )
     after_end = client.get(
@@ -161,7 +171,7 @@ snippets:
 """
     response = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"course_catalog_yaml": snippet_yaml},
     )
     assert response.status_code == 200

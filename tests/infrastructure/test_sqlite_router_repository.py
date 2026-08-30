@@ -7,6 +7,156 @@ from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogS
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 
 
+def _settings(tmp_path) -> RouterSettings:
+    return RouterSettings(
+        database=DatabaseSettings(
+            path=str(tmp_path / "router.db"),
+            archive_dir=str(tmp_path / "archive"),
+        )
+    )
+
+
+def test_portal_session_authenticates_with_server_issued_opaque_token(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(
+            path=str(tmp_path / "router.db"),
+            archive_dir=str(tmp_path / "archive"),
+        )
+    )
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("teacher@example.com", "Teacher")
+
+    token, issued = repo.create_portal_session(user["id"], "Chrome on Windows")
+
+    authenticated = repo.authenticate_portal_session(token)
+    assert authenticated is not None
+    assert authenticated.session_id == issued.session_id
+    assert authenticated.user_id == user["id"]
+    assert authenticated.browser_description == "Chrome on Windows"
+    assert repo.authenticate_portal_session(str(user["id"])) is None
+
+
+def test_user_can_list_and_revoke_one_portal_session(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(
+            path=str(tmp_path / "router.db"),
+            archive_dir=str(tmp_path / "archive"),
+        )
+    )
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("teacher@example.com", "Teacher")
+    first_token, first = repo.create_portal_session(user["id"], "Chrome on Windows")
+    second_token, second = repo.create_portal_session(user["id"], "Safari on macOS")
+
+    sessions = repo.list_portal_sessions(user["id"])
+    assert {item["id"] for item in sessions} == {first.session_id, second.session_id}
+    assert all("token" not in item and "token_hash" not in item for item in sessions)
+
+    assert repo.revoke_portal_session(user["id"], first.session_id, "user_logout")
+    assert repo.authenticate_portal_session(first_token) is None
+    assert repo.authenticate_portal_session(second_token) is not None
+
+
+def test_eleventh_portal_session_revokes_least_recently_active(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(
+            path=str(tmp_path / "router.db"),
+            archive_dir=str(tmp_path / "archive"),
+        )
+    )
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("teacher@example.com", "Teacher")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    issued = [
+        repo.create_portal_session(
+            user["id"],
+            f"Browser {index}",
+            now=start + timedelta(minutes=index),
+        )
+        for index in range(11)
+    ]
+
+    assert repo.authenticate_portal_session(issued[0][0], now=start + timedelta(minutes=11)) is None
+    assert len(repo.list_portal_sessions(user["id"], now=start + timedelta(minutes=11))) == 10
+
+
+def test_portal_session_has_idle_and_absolute_expiry_and_throttled_activity(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("student@gmail.com", "Student")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    token, _ = repo.create_portal_session(user["id"], "Firefox on Linux", now=start)
+
+    assert repo.authenticate_portal_session(token, now=start + timedelta(minutes=4)) is not None
+    unchanged = repo.list_portal_sessions(user["id"], now=start + timedelta(minutes=4))[0]
+    assert unchanged["last_seen_at"] == start.isoformat()
+
+    assert repo.authenticate_portal_session(token, now=start + timedelta(minutes=5)) is not None
+    refreshed = repo.list_portal_sessions(user["id"], now=start + timedelta(minutes=5))[0]
+    assert refreshed["last_seen_at"] == (start + timedelta(minutes=5)).isoformat()
+    assert repo.authenticate_portal_session(token, now=start + timedelta(hours=12, minutes=5)) is None
+
+    absolute_token, _ = repo.create_portal_session(user["id"], "Firefox on Linux", now=start)
+    assert repo.authenticate_portal_session(
+        absolute_token,
+        now=start + timedelta(days=7),
+    ) is None
+
+
+def test_non_activity_validation_does_not_refresh_last_seen(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("student@gmail.com", "Student")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    token, _ = repo.create_portal_session(user["id"], "Chrome", now=start)
+
+    assert repo.authenticate_portal_session(
+        token,
+        now=start + timedelta(minutes=10),
+        refresh_activity=False,
+    ) is not None
+    session = repo.list_portal_sessions(user["id"], now=start + timedelta(minutes=10))[0]
+    assert session["last_seen_at"] == start.isoformat()
+
+
+def test_suspending_user_revokes_sessions_and_disables_keys(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    token, _ = repo.create_portal_session(user["id"], "Chrome")
+    api_key = repo.issue_long_lived_key(user["id"])
+
+    repo.update_user(user["id"], status="inactive")
+
+    assert repo.authenticate_portal_session(token) is None
+    assert repo.verify_api_key(api_key)[0] is False
+
+
+def test_portal_session_events_exclude_secrets_and_old_sessions_are_purged(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    user = repo.upsert_google_user("student@gmail.com", "Student")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    token, session = repo.create_portal_session(user["id"], "Safari", now=start)
+    repo.revoke_portal_session(
+        user["id"],
+        session.session_id,
+        "user_logout",
+        now=start + timedelta(hours=1),
+    )
+
+    with sqlite3.connect(settings.database.path) as conn:
+        conn.row_factory = sqlite3.Row
+        events = [dict(row) for row in conn.execute("SELECT * FROM portal_session_events")]
+        assert [event["event_type"] for event in events] == [
+            "session_created",
+            "session_revoked_user_logout",
+        ]
+        assert all(token not in str(event) for event in events)
+
+    assert repo.purge_portal_sessions(now=start + timedelta(days=31, hours=2)) == 1
+
+
 def test_sqlite_session_key_redeem_verify_and_prompt_log(tmp_path):
     settings = RouterSettings(
         auth=AuthSettings(

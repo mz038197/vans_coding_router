@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -17,3 +18,13 @@ class AuthContext:
     @property
     def teacher_name(self) -> str | None:
         return self.name or self.email
+
+
+@dataclass(frozen=True)
+class PortalSessionContext:
+    session_id: int
+    user_id: int
+    browser_description: str
+    created_at: datetime
+    last_seen_at: datetime
+    absolute_expires_at: datetime

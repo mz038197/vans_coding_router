@@ -8,7 +8,7 @@ import hmac
 import secrets
 from typing import Any, Iterator
 
-from src.domain.entities.auth import AuthContext
+from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
 
@@ -47,6 +47,259 @@ class RouterRepositoryBase(ABC):
         if self.dialect == "postgres":
             return enabled
         return 1 if enabled else 0
+
+    def _portal_session_context(self, row: Any) -> PortalSessionContext:
+        return PortalSessionContext(
+            session_id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            browser_description=str(row["browser_description"]),
+            created_at=parse_dt(row["created_at"]) or utc_now(),
+            last_seen_at=parse_dt(row["last_seen_at"]) or utc_now(),
+            absolute_expires_at=parse_dt(row["absolute_expires_at"]) or utc_now(),
+        )
+
+    def _record_portal_session_event(
+        self,
+        conn: Any,
+        user_id: int,
+        session_id: int | None,
+        event_type: str,
+        occurred_at: datetime,
+        actor_user_id: int | None = None,
+    ) -> None:
+        conn.execute(
+            self._sql(
+                "INSERT INTO portal_session_events(user_id, session_id, event_type, actor_user_id, occurred_at) "
+                "VALUES (?, ?, ?, ?, ?)"
+            ),
+            (user_id, session_id, event_type, actor_user_id, dt(occurred_at)),
+        )
+
+    def create_portal_session(
+        self,
+        user_id: int,
+        browser_description: str,
+        now: datetime | None = None,
+    ) -> tuple[str, PortalSessionContext]:
+        current = now or utc_now()
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        absolute_expires_at = current + timedelta(days=7)
+        with self._connect() as conn:
+            active_rows = conn.execute(
+                self._sql(
+                    "SELECT id FROM portal_sessions "
+                    "WHERE user_id = ? AND revoked_at IS NULL "
+                    "AND last_seen_at > ? AND absolute_expires_at > ? "
+                    "ORDER BY last_seen_at ASC, created_at ASC"
+                ),
+                (user_id, dt(current - timedelta(hours=12)), dt(current)),
+            ).fetchall()
+            for stale in active_rows[: max(0, len(active_rows) - 9)]:
+                conn.execute(
+                    self._sql(
+                        "UPDATE portal_sessions SET revoked_at = ?, revocation_reason = ? "
+                        "WHERE id = ?"
+                    ),
+                    (dt(current), "session_limit", stale["id"]),
+                )
+                self._record_portal_session_event(
+                    conn, user_id, int(stale["id"]), "session_revoked_session_limit", current
+                )
+            session_id = self._insert_returning_id(
+                conn,
+                "INSERT INTO portal_sessions("
+                "user_id, token_hash, browser_description, created_at, last_seen_at, absolute_expires_at"
+                ") VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    user_id,
+                    token_hash,
+                    browser_description,
+                    dt(current),
+                    dt(current),
+                    dt(absolute_expires_at),
+                ),
+            )
+            row = conn.execute(
+                self._sql("SELECT * FROM portal_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            self._record_portal_session_event(
+                conn, user_id, session_id, "session_created", current, user_id
+            )
+            return token, self._portal_session_context(row)
+
+    def authenticate_portal_session(
+        self,
+        token: str,
+        now: datetime | None = None,
+        refresh_activity: bool = True,
+    ) -> PortalSessionContext | None:
+        if not token:
+            return None
+        current = now or utc_now()
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql(
+                    "SELECT p.* FROM portal_sessions p "
+                    "JOIN users u ON u.id = p.user_id "
+                    "WHERE p.token_hash = ? AND p.revoked_at IS NULL AND u.status = 'active'"
+                ),
+                (token_hash,),
+            ).fetchone()
+            if not row:
+                return None
+            last_seen_at = parse_dt(row["last_seen_at"])
+            absolute_expires_at = parse_dt(row["absolute_expires_at"])
+            if last_seen_at is None or absolute_expires_at is None:
+                return None
+            if current >= absolute_expires_at or current - last_seen_at >= timedelta(hours=12):
+                conn.execute(
+                    self._sql(
+                        "UPDATE portal_sessions SET revoked_at = ?, revocation_reason = ? "
+                        "WHERE id = ? AND revoked_at IS NULL"
+                    ),
+                    (dt(current), "expired", row["id"]),
+                )
+                self._record_portal_session_event(
+                    conn, int(row["user_id"]), int(row["id"]), "session_expired", current
+                )
+                return None
+            if refresh_activity and current - last_seen_at >= timedelta(minutes=5):
+                conn.execute(
+                    self._sql("UPDATE portal_sessions SET last_seen_at = ? WHERE id = ?"),
+                    (dt(current), row["id"]),
+                )
+                row = dict(row)
+                row["last_seen_at"] = dt(current)
+            return self._portal_session_context(row)
+
+    def list_portal_sessions(
+        self,
+        user_id: int,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        current = now or utc_now()
+        idle_cutoff = current - timedelta(hours=12)
+        with self._connect() as conn:
+            rows = conn.execute(
+                self._sql(
+                    "SELECT id, browser_description, created_at, last_seen_at, absolute_expires_at "
+                    "FROM portal_sessions "
+                    "WHERE user_id = ? AND revoked_at IS NULL "
+                    "AND last_seen_at > ? AND absolute_expires_at > ? "
+                    "ORDER BY last_seen_at DESC"
+                ),
+                (user_id, dt(idle_cutoff), dt(current)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def revoke_portal_session(
+        self,
+        user_id: int,
+        session_id: int,
+        reason: str,
+        actor_user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        current = now or utc_now()
+        with self._connect() as conn:
+            cur = conn.execute(
+                self._sql(
+                    "UPDATE portal_sessions SET revoked_at = ?, revoked_by = ?, revocation_reason = ? "
+                    "WHERE id = ? AND user_id = ? AND revoked_at IS NULL"
+                ),
+                (dt(current), actor_user_id or user_id, reason, session_id, user_id),
+            )
+            if cur.rowcount:
+                self._record_portal_session_event(
+                    conn,
+                    user_id,
+                    session_id,
+                    f"session_revoked_{reason}",
+                    current,
+                    actor_user_id or user_id,
+                )
+            return bool(cur.rowcount)
+
+    def revoke_other_portal_sessions(
+        self,
+        user_id: int,
+        current_session_id: int,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        current = now or utc_now()
+        with self._connect() as conn:
+            rows = conn.execute(
+                self._sql(
+                    "SELECT id FROM portal_sessions WHERE user_id = ? AND id != ? AND revoked_at IS NULL"
+                ),
+                (user_id, current_session_id),
+            ).fetchall()
+            cur = conn.execute(
+                self._sql(
+                    "UPDATE portal_sessions SET revoked_at = ?, revoked_by = ?, revocation_reason = ? "
+                    "WHERE user_id = ? AND id != ? AND revoked_at IS NULL"
+                ),
+                (dt(current), user_id, reason, user_id, current_session_id),
+            )
+            for row in rows:
+                self._record_portal_session_event(
+                    conn, user_id, int(row["id"]), f"session_revoked_{reason}", current, user_id
+                )
+            return int(cur.rowcount or 0)
+
+    def revoke_all_portal_sessions(
+        self,
+        user_id: int,
+        reason: str,
+        actor_user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        current = now or utc_now()
+        with self._connect() as conn:
+            rows = conn.execute(
+                self._sql("SELECT id FROM portal_sessions WHERE user_id = ? AND revoked_at IS NULL"),
+                (user_id,),
+            ).fetchall()
+            cur = conn.execute(
+                self._sql(
+                    "UPDATE portal_sessions SET revoked_at = ?, revoked_by = ?, revocation_reason = ? "
+                    "WHERE user_id = ? AND revoked_at IS NULL"
+                ),
+                (dt(current), actor_user_id, reason, user_id),
+            )
+            for row in rows:
+                self._record_portal_session_event(
+                    conn,
+                    user_id,
+                    int(row["id"]),
+                    f"session_revoked_{reason}",
+                    current,
+                    actor_user_id,
+                )
+            return int(cur.rowcount or 0)
+
+    def purge_portal_sessions(
+        self,
+        now: datetime | None = None,
+        retention_days: int = 30,
+    ) -> int:
+        current = now or utc_now()
+        cutoff = current - timedelta(days=retention_days)
+        with self._connect() as conn:
+            cur = conn.execute(
+                self._sql(
+                    "DELETE FROM portal_sessions WHERE "
+                    "(revoked_at IS NOT NULL AND revoked_at < ?) OR "
+                    "(revoked_at IS NULL AND absolute_expires_at < ?) OR "
+                    "(revoked_at IS NULL AND last_seen_at < ?)"
+                ),
+                (dt(cutoff), dt(cutoff), dt(cutoff - timedelta(hours=12))),
+            )
+            return int(cur.rowcount or 0)
 
     def _executemany(self, conn: Any, query: str, params: list[tuple[Any, ...]]) -> None:
         sql = self._sql(query)
@@ -288,6 +541,39 @@ class RouterRepositoryBase(ABC):
                 self._set_roles(conn, user_id, roles)
             elif role:
                 self._set_roles(conn, user_id, self._roles_for_legacy_role(role))
+            if status == "inactive":
+                conn.execute(
+                    self._sql("UPDATE api_keys SET enabled = ? WHERE user_id = ?"),
+                    (self._disabled_enabled_value(), user_id),
+                )
+            if status == "inactive" or roles is not None or role is not None:
+                session_rows = conn.execute(
+                    self._sql(
+                        "SELECT id FROM portal_sessions WHERE user_id = ? AND revoked_at IS NULL"
+                    ),
+                    (user_id,),
+                ).fetchall()
+                reason = "user_suspended" if status == "inactive" else "roles_changed"
+                changed_at = utc_now()
+                conn.execute(
+                    self._sql(
+                        "UPDATE portal_sessions SET revoked_at = ?, revocation_reason = ? "
+                        "WHERE user_id = ? AND revoked_at IS NULL"
+                    ),
+                    (
+                        dt(changed_at),
+                        reason,
+                        user_id,
+                    ),
+                )
+                for session_row in session_rows:
+                    self._record_portal_session_event(
+                        conn,
+                        user_id,
+                        int(session_row["id"]),
+                        f"session_revoked_{reason}",
+                        changed_at,
+                    )
         return self.get_user(user_id)
 
     def _hash_key(self, api_key: str) -> str:

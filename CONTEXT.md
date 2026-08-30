@@ -96,6 +96,10 @@ _Avoid_: shared class-wide API key quota, open_registration, capping Google user
 A short-lived, single-use proof issued after Google login for the classroom extension. Delivered via `vscode://` / `cursor://` deep link or a one-time paste code. It authorizes one Invite Code redeem only; it is not a long-lived Portal session and must never carry a Classroom API Key. On this router it is a secondary Google fallback in the VS Code extension, not the default student path.
 _Avoid_: session cookie as extension auth, API key in URI, reusable bearer for Portal admin APIs, requiring handoff for Nickname Redeem, a primary Google button beside Nickname Redeem
 
+**Portal Session**:
+A browser login state established after verified Google authentication, authorizing one user's Portal and lobby access until expiry or revocation. One user may hold multiple Portal Sessions; it is distinct from a Class Session and Sign-in Handoff.
+_Avoid_: session cookie, login cookie, Class Session, Sign-in Handoff
+
 **Invite Code**:
 A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_…`). In the Vans VS Code extension the default redeem is Nickname Redeem; Google users may still redeem with Sign-in Handoff (extension, secondary) or a Portal session (website). Portal web redeem stays Google-only.
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname

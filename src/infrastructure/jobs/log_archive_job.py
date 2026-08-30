@@ -21,7 +21,12 @@ async def run_archive_once(
         now=now,
         delete_after_days=delete_after_days,
     )
-    return {"archived": archived.get("archived", 0), "deleted": purged.get("deleted", 0)}
+    sessions_deleted = await asyncio.to_thread(repo.purge_portal_sessions, now=now)
+    return {
+        "archived": archived.get("archived", 0),
+        "deleted": purged.get("deleted", 0),
+        "portal_sessions_deleted": sessions_deleted,
+    }
 
 
 async def run_daily_archive_job(repo: Any, stop_event: asyncio.Event) -> None:

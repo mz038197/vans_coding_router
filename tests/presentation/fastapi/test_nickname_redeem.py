@@ -22,6 +22,7 @@ def _settings(tmp_path, **auth_kwargs) -> RouterSettings:
             teacher_domain="school.edu",
             admin_emails=("admin@school.edu",),
             session_secret="test-session-secret",
+            dev_auth_enabled=True,
             **auth_kwargs,
         ),
     )
@@ -32,7 +33,16 @@ def _client(tmp_path, **auth_kwargs):
     repo = SqliteRouterRepository(settings.database.path, settings)
     app = FastAPI()
     app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
-    return TestClient(app), repo
+    return TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        headers={"Origin": settings.public_url},
+    ), repo
+
+
+def _portal_cookie(repo, user_id: int) -> dict[str, str]:
+    token, _ = repo.create_portal_session(user_id, "Test browser")
+    return {"vcr_portal_session": token}
 
 
 def _live_session(repo):
@@ -206,7 +216,7 @@ def test_portal_google_redeem_still_requires_session(tmp_path):
     google = client.post(
         "/sessions/redeem",
         json={"invite_code": session["invite_code"]},
-        cookies={"session_user_id": str(student["id"])},
+        cookies=_portal_cookie(repo, student["id"]),
     )
     assert google.status_code == 200
     assert google.json()["api_key"].startswith("vcr_sk_")
@@ -215,7 +225,7 @@ def test_portal_google_redeem_still_requires_session(tmp_path):
 def test_session_list_counts_nickname_seats_not_google_redemptions(tmp_path):
     client, repo = _client(tmp_path)
     teacher, klass, session = _live_session(repo)
-    cookies = {"session_user_id": str(teacher["id"])}
+    cookies = _portal_cookie(repo, teacher["id"])
 
     first = _redeem(client, session["invite_code"], "Ada")
     again = _redeem(client, session["invite_code"], "Ada")
@@ -223,7 +233,7 @@ def test_session_list_counts_nickname_seats_not_google_redemptions(tmp_path):
     google = client.post(
         "/sessions/redeem",
         json={"invite_code": session["invite_code"]},
-        cookies={"session_user_id": str(student["id"])},
+        cookies=_portal_cookie(repo, student["id"]),
     )
     listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
 
@@ -278,7 +288,7 @@ def test_lowering_seat_limit_does_not_kick_existing_nicknames(tmp_path):
     charlie = _redeem(client, session["invite_code"], "Charlie")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/sessions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     assert ada.status_code == 200
@@ -306,11 +316,11 @@ def test_google_redeem_succeeds_when_nickname_seats_are_full(tmp_path):
     google = client.post(
         "/sessions/redeem",
         json={"invite_code": session["invite_code"]},
-        cookies={"session_user_id": str(student["id"])},
+        cookies=_portal_cookie(repo, student["id"]),
     )
     listing = client.get(
         f"/teacher/classes/{klass['id']}/sessions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     assert seated.status_code == 200
@@ -362,7 +372,7 @@ def test_class_redemptions_show_classroom_nickname_not_synthetic_email(tmp_path)
     redeem = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     assert redeem.status_code == 200
@@ -381,12 +391,12 @@ def test_class_redemptions_keep_google_student_email(tmp_path):
     google = client.post(
         "/sessions/redeem",
         json={"invite_code": session["invite_code"]},
-        cookies={"session_user_id": str(student["id"])},
+        cookies=_portal_cookie(repo, student["id"]),
     )
 
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     assert google.status_code == 200
@@ -404,18 +414,18 @@ def test_class_owner_can_inactivate_student_and_key_stops_working(tmp_path):
     api_key = redeem.json()["api_key"]
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
     student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
 
     disable = client.patch(
         f"/teacher/classes/{klass['id']}/members/{student_id}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"status": "inactive"},
     )
     after = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     assert disable.status_code == 200
@@ -433,12 +443,12 @@ def test_inactive_student_cannot_nickname_redeem(tmp_path):
     first = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
     student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
     client.patch(
         f"/teacher/classes/{klass['id']}/members/{student_id}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"status": "inactive"},
     )
 
@@ -456,13 +466,13 @@ def test_admin_can_inactivate_class_member(tmp_path):
     redeem = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(admin["id"])},
+        cookies=_portal_cookie(repo, admin["id"]),
     )
     student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
 
     disable = client.patch(
         f"/teacher/classes/{klass['id']}/members/{student_id}",
-        cookies={"session_user_id": str(admin["id"])},
+        cookies=_portal_cookie(repo, admin["id"]),
         json={"status": "inactive"},
     )
 
@@ -480,13 +490,13 @@ def test_other_teacher_cannot_inactivate_class_member(tmp_path):
     _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
     student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
 
     forbidden = client.patch(
         f"/teacher/classes/{klass['id']}/members/{student_id}",
-        cookies={"session_user_id": str(other["id"])},
+        cookies=_portal_cookie(repo, other["id"]),
         json={"status": "inactive"},
     )
 
@@ -503,13 +513,13 @@ def test_cannot_inactivate_student_from_another_class(tmp_path):
     first = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
     student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
 
     rejected = client.patch(
         f"/teacher/classes/{other_class['id']}/members/{student_id}",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
         json={"status": "inactive"},
     )
 
@@ -527,7 +537,7 @@ def test_collided_nicknames_remain_one_user_on_roster(tmp_path):
     second = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",
-        cookies={"session_user_id": str(teacher["id"])},
+        cookies=_portal_cookie(repo, teacher["id"]),
     )
 
     items = [item for item in listing.json()["items"] if item.get("redeemed_at")]

@@ -7,6 +7,7 @@ auth:
     - "mz038197@gmail.com"
   google_client_id: ""
   google_client_secret: ""
+  dev_auth_enabled: false
   open_registration: true
 
 database:

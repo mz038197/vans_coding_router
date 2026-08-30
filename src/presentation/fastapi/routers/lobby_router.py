@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Cookie, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -40,7 +40,7 @@ class BroadcastRequest(BaseModel):
     text: str
 
 
-async def _admin_keepalive(ws: WebSocket, stop: asyncio.Event) -> None:
+async def _admin_keepalive(ws: WebSocket, stop: asyncio.Event, session_is_valid) -> None:
     payload = json.dumps({"type": "keepalive"}, ensure_ascii=False)
     while not stop.is_set():
         try:
@@ -48,6 +48,9 @@ async def _admin_keepalive(ws: WebSocket, stop: asyncio.Event) -> None:
             break
         except TimeoutError:
             pass
+        if not session_is_valid():
+            await ws.close(code=1008)
+            break
         try:
             await ws.send_text(payload)
         except Exception:
@@ -60,14 +63,19 @@ def create_lobby_router(
     settings: RouterSettings,
 ) -> APIRouter:
     router = APIRouter(tags=["Lobby"])
+    secure_cookie = settings.public_url.startswith("https://")
+    portal_session_cookie = (
+        "__Host-vcr_portal_session" if secure_cookie else "vcr_portal_session"
+    )
 
-    def _user(session_user_id: str | None) -> dict[str, Any] | None:
-        if not session_user_id:
+    def _user(portal_session_token: str | None) -> dict[str, Any] | None:
+        if not portal_session_token:
             return None
-        return portal_use_case.me(int(session_user_id))
+        context = portal_use_case.authenticate_portal_session(portal_session_token)
+        return portal_use_case.me(context.user_id) if context else None
 
-    def _require_host(session_user_id: str | None) -> dict[str, Any]:
-        user = _user(session_user_id)
+    def _require_host(portal_session_token: str | None) -> dict[str, Any]:
+        user = _user(portal_session_token)
         try:
             return lobby_use_case.assert_host(user)
         except PermissionError as exc:
@@ -78,8 +86,16 @@ def create_lobby_router(
             return HTTPException(status_code=404, detail=str(exc))
         return HTTPException(status_code=400, detail=str(exc))
 
+    async def _enforce_lobby_origin(request: Request) -> None:
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return
+        if (request.headers.get("origin") or "").rstrip("/") != settings.public_url.rstrip("/"):
+            raise HTTPException(status_code=403, detail="不允許的請求來源")
+
+    router.dependencies.append(Depends(_enforce_lobby_origin))
+
     @router.get("/lobby", response_class=HTMLResponse)
-    async def lobby_page(session_user_id: str | None = Cookie(default=None)):
+    async def lobby_page(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         _require_host(session_user_id)
         return HTMLResponse(LOBBY_HTML_PATH.read_text(encoding="utf-8"))
 
@@ -102,14 +118,14 @@ def create_lobby_router(
         }
 
     @router.get("/lobby/api/rooms")
-    async def list_rooms(session_user_id: str | None = Cookie(default=None)):
+    async def list_rooms(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         user = _require_host(session_user_id)
         return {"items": lobby_use_case.list_rooms(user)}
 
     @router.post("/lobby/api/rooms")
     async def create_room(
         body: CreateRoomRequest,
-        session_user_id: str | None = Cookie(default=None),
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         user = _require_host(session_user_id)
         try:
@@ -120,7 +136,7 @@ def create_lobby_router(
             raise _handle_value_error(exc) from None
 
     @router.get("/lobby/api/rooms/{room_id}")
-    async def get_room(room_id: str, session_user_id: str | None = Cookie(default=None)):
+    async def get_room(room_id: str, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         user = _require_host(session_user_id)
         try:
             return lobby_use_case.get_room(user, room_id)
@@ -133,7 +149,7 @@ def create_lobby_router(
     async def patch_room_config(
         room_id: str,
         body: RoomConfigPatch,
-        session_user_id: str | None = Cookie(default=None),
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         user = _require_host(session_user_id)
         try:
@@ -144,7 +160,7 @@ def create_lobby_router(
             raise _handle_value_error(exc) from None
 
     @router.post("/lobby/api/rooms/{room_id}/start")
-    async def start_room(room_id: str, session_user_id: str | None = Cookie(default=None)):
+    async def start_room(room_id: str, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         user = _require_host(session_user_id)
         try:
             return await lobby_use_case.start_discussion(user, room_id)
@@ -157,7 +173,7 @@ def create_lobby_router(
     async def broadcast_room(
         room_id: str,
         body: BroadcastRequest,
-        session_user_id: str | None = Cookie(default=None),
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         user = _require_host(session_user_id)
         try:
@@ -169,7 +185,7 @@ def create_lobby_router(
             raise _handle_value_error(exc) from None
 
     @router.delete("/lobby/api/rooms/{room_id}")
-    async def delete_room_api(room_id: str, session_user_id: str | None = Cookie(default=None)):
+    async def delete_room_api(room_id: str, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         user = _require_host(session_user_id)
         try:
             await lobby_use_case.delete_room(user, room_id)
@@ -213,8 +229,11 @@ def create_lobby_router(
 
     @router.websocket("/lobby/admin/ws/{room_id}")
     async def admin_websocket(ws: WebSocket, room_id: str):
-        session_user_id = ws.cookies.get("session_user_id")
-        user = _user(session_user_id)
+        if (ws.headers.get("origin") or "").rstrip("/") != settings.public_url.rstrip("/"):
+            await ws.close(code=1008)
+            return
+        portal_session_token = ws.cookies.get(portal_session_cookie)
+        user = _user(portal_session_token)
         try:
             lobby_use_case.assert_host(user)
             config = lobby_use_case.assert_room_access(user, room_id)
@@ -231,7 +250,17 @@ def create_lobby_router(
         connection_id = uuid.uuid4().hex
         lobby_use_case.hub.add_admin(room_id, connection_id, ws)
         stop = asyncio.Event()
-        keepalive_task = asyncio.create_task(_admin_keepalive(ws, stop))
+        keepalive_task = asyncio.create_task(
+            _admin_keepalive(
+                ws,
+                stop,
+                lambda: portal_use_case.authenticate_portal_session(
+                    portal_session_token or "",
+                    refresh_activity=False,
+                )
+                is not None,
+            )
+        )
         try:
             await _send_admin_snapshot(ws, room)
             while True:

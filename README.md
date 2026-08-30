@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
 
 Open `http://127.0.0.1:8000/portal` (or `http://127.0.0.1:8000/` — root redirects to `/portal`).
 
-If Google OAuth is not configured, the portal allows dev login through `POST /auth/google`. Once `google_client_id` and `google_client_secret` are configured, dev login is disabled.
+Dev login through `POST /auth/google` is available only when Google OAuth is not configured, `DEV_AUTH_ENABLED=true` (or `auth.dev_auth_enabled: true`), and the request host is loopback. Public deployments fail startup unless Google OAuth is configured.
 
 ## Configuration
 
@@ -29,6 +29,7 @@ Settings load from YAML first, then environment variables override matching fiel
 |---------|----------------------------|-------------|------------------|
 | Public URL | `public_url` | `PUBLIC_URL` | Environment |
 | Google OAuth | leave empty | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Environment |
+| Local dev login | `auth.dev_auth_enabled` | `DEV_AUTH_ENABLED` | Disabled by default; loopback only |
 | Session secret | optional | `SESSION_SECRET` | Environment |
 | API keys | use `api_key_env` / `api_key_envs` | `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`（第二把 `_2` 選填） | Environment |
 | Routing, admin emails, providers | primary source | — | YAML |

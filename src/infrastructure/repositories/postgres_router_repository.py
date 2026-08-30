@@ -209,6 +209,38 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.commit()
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS portal_sessions (
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    token_hash TEXT NOT NULL UNIQUE,
+                    browser_description TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    absolute_expires_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    revoked_by INTEGER REFERENCES users(id),
+                    revocation_reason TEXT
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS portal_sessions_user_id ON portal_sessions(user_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS portal_session_events (
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    session_id INTEGER REFERENCES portal_sessions(id) ON DELETE SET NULL,
+                    event_type TEXT NOT NULL,
+                    actor_user_id INTEGER REFERENCES users(id),
+                    occurred_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS portal_session_events_user_id ON portal_session_events(user_id)"
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,

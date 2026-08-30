@@ -2,7 +2,11 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.infrastructure.config import apply_runtime_settings, load_router_settings
+from src.infrastructure.config import (
+    apply_runtime_settings,
+    load_router_settings,
+    validate_portal_auth_settings,
+)
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.lobby.paths import resolve_lobby_workspace
@@ -17,6 +21,7 @@ def build_container(
     config_path: str | None = None,
 ) -> AppContainer:
     settings = load_router_settings(config_path)
+    validate_portal_auth_settings(settings)
     api_key_repo = build_router_repository(settings)
     effective_settings = apply_runtime_settings(settings, api_key_repo.get_runtime_settings())
     api_key_repo.settings = effective_settings

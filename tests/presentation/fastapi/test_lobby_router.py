@@ -38,18 +38,20 @@ def _lobby_client(tmp_path: Path):
     app = FastAPI()
     app.include_router(create_portal_router(portal, settings))
     app.include_router(create_lobby_router(lobby, portal, settings))
-    return TestClient(app), repo
+    return TestClient(app, headers={"Origin": settings.public_url}), repo
 
 
 def _teacher_cookie(client: TestClient, repo) -> dict[str, str]:
     user = repo.upsert_google_user(email="teacher@school.edu", name="Teacher")
     repo.update_user(user["id"], roles=["teacher"])
-    return {"session_user_id": str(user["id"])}
+    token, _ = repo.create_portal_session(user["id"], "Test browser")
+    return {"vcr_portal_session": token}
 
 
 def _student_cookie(client: TestClient, repo) -> dict[str, str]:
     user = repo.upsert_google_user(email="student@gmail.com", name="Student")
-    return {"session_user_id": str(user["id"])}
+    token, _ = repo.create_portal_session(user["id"], "Test browser")
+    return {"vcr_portal_session": token}
 
 
 def test_lobby_page_requires_teacher(tmp_path):
@@ -65,6 +67,31 @@ def test_lobby_page_requires_teacher(tmp_path):
     assert "portal-theme" in response.text
 
 
+def test_lobby_rejects_legacy_user_id_cookie(tmp_path):
+    client, repo = _lobby_client(tmp_path)
+    teacher = repo.upsert_google_user(email="teacher@school.edu", name="Teacher")
+    repo.update_user(teacher["id"], roles=["teacher"])
+
+    response = client.get(
+        "/lobby/api/rooms",
+        cookies={"session_user_id": str(teacher["id"])},
+    )
+
+    assert response.status_code == 403
+
+
+def test_lobby_mutation_rejects_cross_site_origin(tmp_path):
+    client, repo = _lobby_client(tmp_path)
+    response = client.post(
+        "/lobby/api/rooms",
+        json={"room_id": "ROOM-EVIL"},
+        cookies=_teacher_cookie(client, repo),
+        headers={"Origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_create_and_list_rooms_creator_only(tmp_path):
     client, repo = _lobby_client(tmp_path)
     teacher_cookies = _teacher_cookie(client, repo)
@@ -78,7 +105,8 @@ def test_create_and_list_rooms_creator_only(tmp_path):
     assert listed.status_code == 200
     assert [r["room_id"] for r in listed.json()["items"]] == ["ROOM-A"]
 
-    other_list = client.get("/lobby/api/rooms", cookies={"session_user_id": str(other["id"])})
+    other_token, _ = repo.create_portal_session(other["id"], "Test browser")
+    other_list = client.get("/lobby/api/rooms", cookies={"vcr_portal_session": other_token})
     assert other_list.json()["items"] == []
 
 
@@ -88,7 +116,8 @@ def test_admin_sees_all_rooms(tmp_path):
     client.post("/lobby/api/rooms", json={"room_id": "ROOM-X"}, cookies=teacher_cookies)
 
     admin = repo.upsert_google_user(email="admin@school.edu", name="Admin")
-    admin_list = client.get("/lobby/api/rooms", cookies={"session_user_id": str(admin["id"])})
+    admin_token, _ = repo.create_portal_session(admin["id"], "Test browser")
+    admin_list = client.get("/lobby/api/rooms", cookies={"vcr_portal_session": admin_token})
     assert admin_list.status_code == 200
     assert [r["room_id"] for r in admin_list.json()["items"]] == ["ROOM-X"]
 

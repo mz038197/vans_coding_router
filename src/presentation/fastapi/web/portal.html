@@ -66,6 +66,7 @@
       </div>
       <div class="nav-user">
         <span id="navWho"></span>
+        <button class="nav-logout" onclick="toggleDeviceSessions()">登入裝置</button>
         <button type="button" class="nav-theme-toggle" data-theme-toggle aria-label="切換 Theme" title="切換 Theme">
           <i class="fas fa-moon theme-icon-light" aria-hidden="true"></i>
           <i class="fas fa-sun theme-icon-dark" aria-hidden="true"></i>
@@ -74,6 +75,14 @@
       </div>
     </header>
     <main class="page-main neural-grid">
+      <section id="deviceSessions" class="glass-card hidden">
+        <div class="cell-with-action">
+          <h2>登入裝置</h2>
+          <button class="btn-secondary" onclick="revokeOtherDeviceSessions()">登出其他裝置</button>
+        </div>
+        <p class="hint">只顯示瀏覽器類型與最近活動時間，不儲存完整 IP。</p>
+        <div id="deviceSessionList" class="table-wrap"><p class="hint">載入中…</p></div>
+      </section>
       <section id="student" class="glass-card hidden">
         <h2>課堂邀請碼</h2>
         <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
@@ -1010,6 +1019,34 @@
     }
 
     async function logout() { await api('/auth/logout', {method:'POST'}); location.reload(); }
+
+    async function toggleDeviceSessions() {
+      const panel = document.getElementById('deviceSessions');
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) await loadDeviceSessions();
+    }
+
+    async function loadDeviceSessions() {
+      const payload = await api('/auth/sessions');
+      const items = payload.items || [];
+      document.getElementById('deviceSessionList').innerHTML = items.length ? `<table>
+        <thead><tr><th>裝置</th><th>最近活動</th><th></th></tr></thead>
+        <tbody>${items.map(item => `<tr>
+          <td>${escapeHtml(item.browser_description)}${item.current ? '（目前裝置）' : ''}</td>
+          <td>${escapeHtml(formatLocalDateTime(item.last_seen_at))}</td>
+          <td>${item.current ? '' : `<button class="btn-danger btn-sm" onclick="revokeDeviceSession(${item.id})">登出</button>`}</td>
+        </tr>`).join('')}</tbody></table>` : '<p class="hint">沒有其他登入裝置。</p>';
+    }
+
+    async function revokeDeviceSession(sessionId) {
+      await api(`/auth/sessions/${sessionId}`, {method:'DELETE'});
+      await loadDeviceSessions();
+    }
+
+    async function revokeOtherDeviceSessions() {
+      await api('/auth/sessions/revoke-others', {method:'POST'});
+      await loadDeviceSessions();
+    }
 
     let upstreamPoolsTimer = null;
 

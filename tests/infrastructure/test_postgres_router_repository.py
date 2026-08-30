@@ -37,6 +37,17 @@ def postgres_repo():
         )
 
 
+def test_postgres_portal_session_roundtrip(postgres_repo):
+    user = postgres_repo.upsert_google_user("student@gmail.com", "Student")
+    token, issued = postgres_repo.create_portal_session(user["id"], "Chrome on Linux")
+
+    authenticated = postgres_repo.authenticate_portal_session(token)
+
+    assert authenticated is not None
+    assert authenticated.session_id == issued.session_id
+    assert postgres_repo.list_portal_sessions(user["id"])[0]["browser_description"] == "Chrome on Linux"
+
+
 def test_postgres_session_key_redeem_verify_and_prompt_log(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
