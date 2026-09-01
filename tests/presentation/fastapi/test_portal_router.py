@@ -955,6 +955,71 @@ def test_get_class_session_enforces_portal_authorization_and_missing_target(tmp_
     assert missing.status_code == 404
 
 
+def test_webmcp_session_write_http_contracts_are_explicit_authorized_and_partial(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    target_class = repo.create_class(teacher["id"], "指定班級", None, 2)
+    teacher_cookie = _portal_cookie(repo, teacher)
+
+    created = client.post(
+        f"/teacher/classes/{target_class['id']}/sessions",
+        cookies=teacher_cookie,
+        json={"name": "指定課堂", "ttl_hours": 3},
+    )
+    assert created.status_code == 200
+    session_id = created.json()["id"]
+
+    capabilities = client.patch(
+        f"/teacher/classes/{target_class['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        json={
+            "image_generation_enabled": False,
+            "speech_transcription_enabled": True,
+        },
+    )
+    assert capabilities.status_code == 200
+    assert capabilities.json()["image_generation_enabled"] == 0
+    assert capabilities.json()["speech_transcription_enabled"] == 1
+    assert capabilities.json()["tts_enabled"] == 1
+    assert capabilities.json()["prompt_logging_enabled"] == 1
+
+    expiry = client.patch(
+        f"/teacher/classes/{target_class['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        json={"expires_at": "2026-09-30T16:00:00+00:00"},
+    )
+    seat_limit = client.patch(
+        f"/teacher/classes/{target_class['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        json={"seat_limit": 75},
+    )
+    assert expiry.status_code == 200
+    assert expiry.json()["expires_at"] == "2026-09-30T16:00:00+00:00"
+    assert seat_limit.status_code == 200
+    assert seat_limit.json()["seat_limit"] == 75
+
+    path = f"/teacher/classes/{target_class['id']}/sessions/{session_id}"
+    assert client.patch(path, json={"seat_limit": 80}).status_code == 401
+    assert client.patch(
+        path,
+        cookies=_portal_cookie(repo, student),
+        json={"seat_limit": 80},
+    ).status_code == 403
+    assert client.patch(
+        f"/teacher/classes/{target_class['id']}/sessions/999999",
+        cookies=teacher_cookie,
+        json={"seat_limit": 80},
+    ).status_code == 404
+    invalid = client.patch(
+        path,
+        cookies=teacher_cookie,
+        json={"seat_limit": 0},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json() == {"detail": "座位上限必須為正整數"}
+
+
 def test_read_only_class_session_and_usage_http_contracts(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")

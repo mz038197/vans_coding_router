@@ -500,7 +500,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         data: SessionPatchRequest,
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
-        return portal_call(
+        session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
                 class_id,
@@ -516,6 +516,9 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 seat_limit=data.seat_limit,
             )
         )
+        if session is None:
+            raise HTTPException(status_code=404, detail="找不到課堂")
+        return session
 
     @router.get("/teacher/classes/{class_id}/redemptions")
     async def class_redemptions(class_id: int, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):

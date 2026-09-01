@@ -50,9 +50,9 @@
     ]);
   }
 
-  async function requestResult(request, path, normalize) {
+  async function requestResult(request, path, normalize, options) {
     try {
-      const response = await request(path);
+      const response = await request(path, options);
       const payload = await response.json();
       if (!response.ok) {
         const detail = payload && payload.detail;
@@ -70,6 +70,14 @@
         "Portal service is temporarily unavailable",
       );
     }
+  }
+
+  function jsonRequest(method, body) {
+    return {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    };
   }
 
   function readWorkingContext({ document, classes = [], sessions = [], getSessionName }) {
@@ -107,6 +115,43 @@
       return { supported: false, registration: null };
     }
 
+    function resolveClassId(input) {
+      return input.class_id || getWorkingContext().class_id;
+    }
+
+    function resolveSessionTarget(input) {
+      const context = getWorkingContext();
+      const classMatchesContext =
+        !input.class_id || Number(input.class_id) === Number(context.class_id);
+      return {
+        classId: input.class_id || context.class_id,
+        sessionId: input.session_id || (classMatchesContext ? context.session_id : null),
+      };
+    }
+
+    function missingSessionTarget() {
+      return structuredError(
+        "missing_target",
+        null,
+        "class_id and session_id are required",
+      );
+    }
+
+    function updateSession(input, changes) {
+      const { classId, sessionId } = resolveSessionTarget(input);
+      if (!classId || !sessionId) return missingSessionTarget();
+      return requestResult(
+        request,
+        `/teacher/classes/${classId}/sessions/${sessionId}`,
+        (payload) => ({ class_session: normalizeSession(payload) }),
+        jsonRequest("PATCH", changes),
+      );
+    }
+
+    const sessionTargetProperties = {
+      class_id: { type: "integer", minimum: 1 },
+      session_id: { type: "integer", minimum: 1 },
+    };
     const tools = [{
       name: "get_portal_working_context",
       title: "Get Portal Working Context",
@@ -169,21 +214,106 @@
         additionalProperties: false,
       },
       async execute(input = {}) {
-        const context = getWorkingContext();
-        const classId = input.class_id || context.class_id;
-        const sessionId = input.session_id || (input.class_id ? null : context.session_id);
-        if (!classId || !sessionId) {
-          return structuredError(
-            "missing_target",
-            null,
-            "class_id and session_id are required",
-          );
-        }
+        const { classId, sessionId } = resolveSessionTarget(input);
+        if (!classId || !sessionId) return missingSessionTarget();
         return requestResult(
           request,
           `/teacher/classes/${classId}/sessions/${sessionId}`,
           (payload) => ({ class_session: normalizeSession(payload) }),
         );
+      },
+    }, {
+      name: "create_class_session",
+      title: "Create Class Session",
+      description: "Create a Class Session in an explicit Class or the current Portal Class.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          class_id: { type: "integer", minimum: 1 },
+          name: { type: "string", minLength: 1 },
+          session_at: { type: "string" },
+          ttl_hours: { type: "integer", minimum: 1 },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        const classId = resolveClassId(input);
+        if (!classId) {
+          return structuredError("missing_target", null, "class_id is required");
+        }
+        const body = selectFields(input, ["name", "session_at", "ttl_hours"]);
+        return requestResult(
+          request,
+          `/teacher/classes/${classId}/sessions`,
+          (payload) => ({ class_session: normalizeSession(payload) }),
+          jsonRequest("POST", body),
+        );
+      },
+    }, {
+      name: "update_session_capabilities",
+      title: "Update Session Capabilities",
+      description: "Update one or more capabilities for an explicit Class Session or the current Portal Class Session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...sessionTargetProperties,
+          image_generation_enabled: { type: "boolean" },
+          tts_enabled: { type: "boolean" },
+          speech_transcription_enabled: { type: "boolean" },
+          prompt_logging_enabled: { type: "boolean" },
+        },
+        anyOf: [
+          { required: ["image_generation_enabled"] },
+          { required: ["tts_enabled"] },
+          { required: ["speech_transcription_enabled"] },
+          { required: ["prompt_logging_enabled"] },
+        ],
+        additionalProperties: false,
+      },
+      async execute(input = {}) {
+        const changes = selectFields(input, [
+          "image_generation_enabled",
+          "tts_enabled",
+          "speech_transcription_enabled",
+          "prompt_logging_enabled",
+        ]);
+        if (Object.keys(changes).length === 0) {
+          return structuredError("validation", null, "at least one capability is required");
+        }
+        return updateSession(input, changes);
+      },
+    }, {
+      name: "change_session_expiry",
+      title: "Change Session Expiry",
+      description: "Change expiry for an explicit Class Session or the current Portal Class Session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...sessionTargetProperties,
+          expires_at: { type: "string", minLength: 1 },
+        },
+        required: ["expires_at"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        return updateSession(input, { expires_at: input.expires_at });
+      },
+    }, {
+      name: "change_session_seat_limit",
+      title: "Change Session Seat Limit",
+      description: "Change the Session Seat Limit for an explicit Class Session or the current Portal Class Session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...sessionTargetProperties,
+          seat_limit: { type: "integer", minimum: 1 },
+        },
+        required: ["seat_limit"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        return updateSession(input, { seat_limit: input.seat_limit });
       },
     }, {
       name: "get_class_usage",
