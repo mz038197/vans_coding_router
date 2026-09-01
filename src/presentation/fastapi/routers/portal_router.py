@@ -25,6 +25,7 @@ from src.infrastructure.vscode.install_vscode_models_script import (
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 PORTAL_HTML_PATH = WEB_DIR / "portal.html"
 PORTAL_CSS_PATH = WEB_DIR / "portal.css"
+PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,15 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return Response(
             content=PORTAL_CSS_PATH.read_text(encoding="utf-8"),
             media_type="text/css",
+        )
+
+    @router.get("/portal/static/portal_webmcp.js")
+    async def portal_webmcp():
+        if not PORTAL_WEBMCP_PATH.is_file():
+            raise HTTPException(status_code=404, detail="portal_webmcp.js not found")
+        return Response(
+            content=PORTAL_WEBMCP_PATH.read_text(encoding="utf-8"),
+            media_type="text/javascript",
         )
 
     @router.get("/portal/static/brand-logo.png")

@@ -140,6 +140,20 @@ def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     assert 'data-theme' in html
 
 
+def test_portal_serves_and_bootstraps_webmcp_progressive_enhancement(tmp_path):
+    client, _, _ = _client(tmp_path)
+
+    script = client.get("/portal/static/portal_webmcp.js")
+    html = client.get("/portal").text
+
+    assert script.status_code == 200
+    assert "javascript" in script.headers.get("content-type", "")
+    assert 'src="/portal/static/portal_webmcp.js"' in html
+    assert "function getPortalWorkingContext()" in html
+    assert "VansPortalWebMcp.enhance" in html
+    assert html.index("const me = await api('/auth/me')") < html.index("enhancePortalWithWebMcp();")
+
+
 def test_portal_catalog_modal_uses_structured_fields(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text

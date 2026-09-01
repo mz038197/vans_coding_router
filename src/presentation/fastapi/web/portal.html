@@ -19,6 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
+  <script src="/portal/static/portal_webmcp.js"></script>
   <link rel="stylesheet" href="/portal/static/portal.css?v=catalog-form-1" />
 </head>
 <body>
@@ -339,8 +340,27 @@
     let lastRedeemedKey = '';
     let lastTeacherKey = '';
     let selectedCourseId = '';
+    let portalWebMcpEnhanced = false;
 
     const PORTAL_THEME_KEY = 'portal-theme';
+
+    function getPortalWorkingContext() {
+      return window.VansPortalWebMcp.readWorkingContext({
+        document,
+        classes: teacherClasses,
+        sessions: monitorSessions,
+        getSessionName: sessionDisplayName,
+      });
+    }
+
+    function enhancePortalWithWebMcp() {
+      if (portalWebMcpEnhanced || !window.VansPortalWebMcp) return;
+      portalWebMcpEnhanced = true;
+      window.VansPortalWebMcp.enhance({
+        document,
+        getWorkingContext: getPortalWorkingContext,
+      });
+    }
 
     function getPortalTheme() {
       const theme = document.documentElement.getAttribute('data-theme');
@@ -1317,6 +1337,7 @@
         syncMonitorCourseSelect();
         showTab('keyTab');
       }
+      enhancePortalWithWebMcp();
     }
 
     function syncCourseSelect() {
