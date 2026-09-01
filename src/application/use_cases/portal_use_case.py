@@ -158,7 +158,6 @@ class PortalUseCase:
         )
 
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
-        self._assert_class_target_exists(class_id)
         self._assert_class_owner_or_admin(user_id, class_id)
         return self.repo.list_class_sessions(class_id)
 
@@ -291,7 +290,6 @@ class PortalUseCase:
         return self.repo.get_prompt_log(teacher_id, class_id, log_id)
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
-        self._assert_class_target_exists(class_id)
         self._assert_class_owner(teacher_id, class_id)
         return self.repo.class_usage(teacher_id, class_id)
 
@@ -378,10 +376,6 @@ class PortalUseCase:
         if not user or not (self._has_role(user, "teacher") or self._has_role(user, "admin")):
             raise PermissionError("teacher only")
 
-    def _assert_class_target_exists(self, class_id: int) -> None:
-        if not self.repo.get_class(class_id):
-            raise MissingTargetError("找不到課程")
-
     def _assert_admin(self, user_id: int) -> None:
         user = self.repo.get_user(user_id)
         if not user or not self._has_role(user, "admin"):
@@ -390,7 +384,9 @@ class PortalUseCase:
     def _assert_class_owner(self, teacher_id: int, class_id: int) -> None:
         self._assert_teacher(teacher_id)
         klass = self.repo.get_class(class_id)
-        if not klass or klass["teacher_id"] != teacher_id:
+        if not klass:
+            raise MissingTargetError("找不到課程")
+        if klass["teacher_id"] != teacher_id:
             raise PermissionError("class not owned by teacher")
 
     def _assert_class_owner_or_admin(self, user_id: int, class_id: int) -> None:
@@ -400,7 +396,7 @@ class PortalUseCase:
         if self._has_role(user, "admin"):
             klass = self.repo.get_class(class_id)
             if not klass:
-                raise PermissionError("class not found")
+                raise MissingTargetError("找不到課程")
             return
         self._assert_class_owner(user_id, class_id)
 
