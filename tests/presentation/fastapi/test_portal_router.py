@@ -877,6 +877,20 @@ def test_prompt_log_detail_endpoint(tmp_path):
     }
 
 
+def test_list_classes_requires_teacher_and_returns_owned_classes(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    owned = repo.create_class(teacher["id"], "AI 素養", None, 2)
+
+    response = client.get("/teacher/classes", cookies=_portal_cookie(repo, teacher))
+    forbidden = client.get("/teacher/classes", cookies=_portal_cookie(repo, student))
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == owned["id"]
+    assert forbidden.status_code == 403
+
+
 def test_list_and_create_class_sessions(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
@@ -908,6 +922,67 @@ def test_list_and_create_class_sessions(tmp_path):
     )
     assert patch.status_code == 200
     assert patch.json()["name"] == "第二堂"
+
+
+def test_get_class_session_enforces_portal_authorization_and_missing_target(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+
+    found = client.get(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher),
+    )
+    unauthenticated = client.get(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}"
+    )
+    forbidden = client.get(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, other),
+    )
+    missing = client.get(
+        f"/teacher/classes/{klass['id']}/sessions/999999",
+        cookies=_portal_cookie(repo, teacher),
+    )
+
+    assert found.status_code == 200
+    assert found.json()["id"] == session["id"]
+    assert found.json()["class_id"] == klass["id"]
+    assert unauthenticated.status_code == 401
+    assert forbidden.status_code == 403
+    assert missing.status_code == 404
+
+
+def test_read_only_class_session_and_usage_http_contracts(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    teacher_cookie = _portal_cookie(repo, teacher)
+    student_cookie = _portal_cookie(repo, student)
+
+    sessions = client.get(
+        f"/teacher/classes/{klass['id']}/sessions", cookies=teacher_cookie
+    )
+    usage = client.get(f"/teacher/classes/{klass['id']}/usage", cookies=teacher_cookie)
+
+    assert sessions.status_code == 200
+    assert sessions.json()["items"][0]["id"] == session["id"]
+    assert usage.status_code == 200
+    assert usage.json() == {"items": []}
+
+    for path in (
+        f"/teacher/classes/{klass['id']}/sessions",
+        f"/teacher/classes/{klass['id']}/usage",
+    ):
+        assert client.get(path).status_code == 401
+        assert client.get(path, cookies=student_cookie).status_code == 403
+
+    validation = client.get("/teacher/classes/not-an-id/sessions", cookies=teacher_cookie)
+    assert validation.status_code == 422
 
 
 def test_new_class_session_has_seat_limit_60(tmp_path):

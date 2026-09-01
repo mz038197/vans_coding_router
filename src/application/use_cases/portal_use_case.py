@@ -132,6 +132,10 @@ class PortalUseCase:
         self._assert_teacher(teacher_id)
         return self.repo.create_class(teacher_id, name, ends_at, api_key_ttl_hours)
 
+    def list_classes(self, user_id: int) -> list[dict[str, Any]]:
+        self._assert_teacher(user_id)
+        return self.repo.list_classes(teacher_id=user_id)
+
     def create_session(
         self,
         teacher_id: int,
@@ -155,6 +159,18 @@ class PortalUseCase:
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner_or_admin(user_id, class_id)
         return self.repo.list_class_sessions(class_id)
+
+    def get_session(
+        self, user_id: int, class_id: int, session_id: int
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                session
+                for session in self.list_sessions(user_id, class_id)
+                if int(session["id"]) == session_id
+            ),
+            None,
+        )
 
     def update_session(
         self,

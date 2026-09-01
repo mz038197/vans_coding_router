@@ -447,8 +447,9 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
 
     @router.get("/teacher/classes")
     async def list_my_classes(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
-        user = portal_use_case.me(current_user_id(session_user_id))
-        return {"items": user.get("classes", []) if user else []}
+        return portal_call(
+            lambda: {"items": portal_use_case.list_classes(current_user_id(session_user_id))}
+        )
 
     @router.get("/teacher/classes/{class_id}/sessions")
     async def list_sessions(class_id: int, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
@@ -457,6 +458,21 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 "items": portal_use_case.list_sessions(current_user_id(session_user_id), class_id),
             }
         )
+
+    @router.get("/teacher/classes/{class_id}/sessions/{session_id}")
+    async def get_session(
+        class_id: int,
+        session_id: int,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        session = portal_call(
+            lambda: portal_use_case.get_session(
+                current_user_id(session_user_id), class_id, session_id
+            )
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="找不到課堂")
+        return session
 
     @router.post("/teacher/classes/{class_id}/sessions")
     async def create_session(
