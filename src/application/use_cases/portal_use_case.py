@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from src.domain.entities.auth import PortalSessionContext
+from src.domain.errors import MissingTargetError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
@@ -157,6 +158,7 @@ class PortalUseCase:
         )
 
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
+        self._assert_class_target_exists(class_id)
         self._assert_class_owner_or_admin(user_id, class_id)
         return self.repo.list_class_sessions(class_id)
 
@@ -289,6 +291,7 @@ class PortalUseCase:
         return self.repo.get_prompt_log(teacher_id, class_id, log_id)
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
+        self._assert_class_target_exists(class_id)
         self._assert_class_owner(teacher_id, class_id)
         return self.repo.class_usage(teacher_id, class_id)
 
@@ -374,6 +377,10 @@ class PortalUseCase:
         user = self.repo.get_user(user_id)
         if not user or not (self._has_role(user, "teacher") or self._has_role(user, "admin")):
             raise PermissionError("teacher only")
+
+    def _assert_class_target_exists(self, class_id: int) -> None:
+        if not self.repo.get_class(class_id):
+            raise MissingTargetError("找不到課程")
 
     def _assert_admin(self, user_id: int) -> None:
         user = self.repo.get_user(user_id)

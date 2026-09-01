@@ -982,7 +982,11 @@ def test_read_only_class_session_and_usage_http_contracts(tmp_path):
         assert client.get(path, cookies=student_cookie).status_code == 403
 
     validation = client.get("/teacher/classes/not-an-id/sessions", cookies=teacher_cookie)
+    missing_sessions = client.get("/teacher/classes/999999/sessions", cookies=teacher_cookie)
+    missing_usage = client.get("/teacher/classes/999999/usage", cookies=teacher_cookie)
     assert validation.status_code == 422
+    assert missing_sessions.status_code == 404
+    assert missing_usage.status_code == 404
 
 
 def test_new_class_session_has_seat_limit_60(tmp_path):

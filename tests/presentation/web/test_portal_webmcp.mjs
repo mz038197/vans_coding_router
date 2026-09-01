@@ -183,6 +183,34 @@ test("get Class Session resolves omitted targets from live Portal Working Contex
   });
 });
 
+test("an explicit Class does not borrow a Class Session from unrelated working context", async () => {
+  const adapter = loadAdapter();
+  const registered = new Map();
+  const document = {
+    modelContext: {
+      registerTool(tool) {
+        registered.set(tool.name, tool);
+        return Promise.resolve();
+      },
+    },
+  };
+  const result = adapter.enhance({
+    document,
+    getWorkingContext: () => ({ class_id: 7, session_id: 21 }),
+    request: async () => assert.fail("mismatched targets must not send an HTTP request"),
+  });
+  await result.registration;
+
+  const output = await registered.get("get_class_session").execute({ class_id: 9 });
+  assert.deepEqual(JSON.parse(JSON.stringify(output)), {
+    error: {
+      type: "missing_target",
+      status: null,
+      message: "class_id and session_id are required",
+    },
+  });
+});
+
 test("get Class usage returns existing backend facts without browser analysis", async () => {
   const adapter = loadAdapter();
   const registered = new Map();

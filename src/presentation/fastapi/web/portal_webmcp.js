@@ -171,7 +171,7 @@
       async execute(input = {}) {
         const context = getWorkingContext();
         const classId = input.class_id || context.class_id;
-        const sessionId = input.session_id || context.session_id;
+        const sessionId = input.session_id || (input.class_id ? null : context.session_id);
         if (!classId || !sessionId) {
           return structuredError(
             "missing_target",

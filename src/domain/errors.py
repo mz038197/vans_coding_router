@@ -144,6 +144,15 @@ class ServiceUnavailableError(AppError):
         )
 
 
+class MissingTargetError(AppError):
+    def __init__(self, message: str):
+        super().__init__(
+            message=message,
+            status_code=404,
+            code="missing_target",
+        )
+
+
 class UpstreamBusyError(AppError):
     def __init__(
         self,
