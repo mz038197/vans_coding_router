@@ -258,7 +258,10 @@ test("create Class Session resolves its Class and sends the existing teacher HTT
     "/teacher/classes/9/sessions",
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "X-Vans-Invocation-Channel": "webmcp",
+      },
       body: JSON.stringify({
         name: "第二堂",
         session_at: "2026-09-10T01:00:00Z",

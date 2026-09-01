@@ -75,7 +75,10 @@
   function jsonRequest(method, body) {
     return {
       method,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "X-Vans-Invocation-Channel": "webmcp",
+      },
       body: JSON.stringify(body),
     };
   }

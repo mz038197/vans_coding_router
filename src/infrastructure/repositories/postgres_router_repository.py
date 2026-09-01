@@ -241,6 +241,26 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS agent_action_audits (
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    actor_user_id INTEGER NOT NULL REFERENCES users(id),
+                    action TEXT NOT NULL,
+                    class_id INTEGER NOT NULL REFERENCES classes(id),
+                    session_id INTEGER NOT NULL REFERENCES class_sessions(id),
+                    arguments_json TEXT NOT NULL,
+                    invocation_channel TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS agent_action_audits_actor_user_id ON agent_action_audits(actor_user_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS agent_action_audits_target ON agent_action_audits(class_id, session_id)"
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,

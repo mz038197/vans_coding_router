@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any
 
+from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import PortalSessionContext
 from src.domain.errors import MissingTargetError
 from src.domain.ports.router_repository import RouterRepositoryPort
@@ -12,6 +13,14 @@ _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
 _VALID_SESSION_STATUSES = frozenset({"active", "ended"})
 _NICKNAME_MAX_LEN = 64
+_SESSION_CAPABILITY_FIELDS = frozenset(
+    {
+        "image_generation_enabled",
+        "tts_enabled",
+        "speech_transcription_enabled",
+        "prompt_logging_enabled",
+    }
+)
 
 
 class PortalUseCase:
@@ -144,18 +153,34 @@ class PortalUseCase:
         name: str,
         ttl_hours: int | None = None,
         session_at: str | None = None,
+        invocation_channel: str | None = None,
+        invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
         klass = self.repo.get_class(class_id)
         if not klass or klass["teacher_id"] != teacher_id:
             raise PermissionError("class not owned by teacher")
-        return self.repo.create_class_session(
+        arguments = invocation_arguments or self._create_session_arguments(
+            name=name,
+            ttl_hours=ttl_hours,
+            session_at=session_at,
+        )
+        session = self.repo.create_class_session(
             class_id,
             teacher_id,
             name,
             ttl_hours=ttl_hours,
             session_at=session_at,
+            agent_action_audit=self._agent_action_audit(
+                actor_user_id=teacher_id,
+                action="create_class_session",
+                class_id=class_id,
+                session_id=None,
+                arguments=arguments,
+                invocation_channel=invocation_channel,
+            ),
         )
+        return session
 
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner_or_admin(user_id, class_id)
@@ -187,6 +212,8 @@ class PortalUseCase:
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
+        invocation_channel: str | None = None,
+        invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         # Class owner or admin may update any session fields (privileged and non-privileged).
         # Admins must be allowed for non-privileged-only updates too, so permission stays consistent.
@@ -199,7 +226,18 @@ class PortalUseCase:
             or seat_limit < 1
         ):
             raise ValueError("座位上限必須為正整數")
-        return self.repo.update_class_session(
+        changes = invocation_arguments or self._session_change_arguments(
+            expires_at=expires_at,
+            name=name,
+            image_generation_enabled=image_generation_enabled,
+            tts_enabled=tts_enabled,
+            speech_transcription_enabled=speech_transcription_enabled,
+            prompt_logging_enabled=prompt_logging_enabled,
+            status=status,
+            course_catalog_yaml=course_catalog_yaml,
+            seat_limit=seat_limit,
+        )
+        session = self.repo.update_class_session(
             class_id,
             session_id,
             expires_at=expires_at,
@@ -211,7 +249,66 @@ class PortalUseCase:
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
+            agent_action_audit=self._agent_action_audit(
+                actor_user_id=user_id,
+                action=self._session_action(changes),
+                class_id=class_id,
+                session_id=session_id,
+                arguments=changes,
+                invocation_channel=invocation_channel,
+            ),
         )
+        return session
+
+    @staticmethod
+    def _agent_action_audit(
+        *,
+        actor_user_id: int,
+        action: str,
+        class_id: int,
+        session_id: int | None,
+        arguments: dict[str, Any],
+        invocation_channel: str | None,
+    ) -> AgentActionAudit | None:
+        if invocation_channel != "webmcp":
+            return None
+        return AgentActionAudit(
+            actor_user_id=actor_user_id,
+            action=action,
+            class_id=class_id,
+            session_id=session_id,
+            arguments=arguments,
+            invocation_channel=invocation_channel,
+        )
+
+    @staticmethod
+    def _create_session_arguments(
+        *,
+        name: str,
+        ttl_hours: int | None,
+        session_at: str | None,
+    ) -> dict[str, Any]:
+        arguments: dict[str, Any] = {"name": name.strip()}
+        if session_at is not None:
+            arguments["session_at"] = session_at
+        if ttl_hours is not None:
+            arguments["ttl_hours"] = ttl_hours
+        return arguments
+
+    @staticmethod
+    def _session_change_arguments(**changes: Any) -> dict[str, Any]:
+        return {key: value for key, value in changes.items() if value is not None}
+
+    @staticmethod
+    def _session_action(changes: dict[str, Any]) -> str:
+        fields = set(changes)
+        if fields and fields <= _SESSION_CAPABILITY_FIELDS:
+            return "update_session_capabilities"
+        if fields == {"expires_at"}:
+            return "change_session_expiry"
+        if fields == {"seat_limit"}:
+            return "change_session_seat_limit"
+        return "update_class_session"
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:
         yaml_text = self.repo.get_course_catalog_yaml_for_api_key(api_key)

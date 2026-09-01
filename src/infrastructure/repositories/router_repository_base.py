@@ -5,9 +5,11 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
+import json
 import secrets
 from typing import Any, Iterator
 
+from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
@@ -74,6 +76,95 @@ class RouterRepositoryBase(ABC):
             ),
             (user_id, session_id, event_type, actor_user_id, dt(occurred_at)),
         )
+
+    def record_agent_action_audit(
+        self,
+        actor_user_id: int,
+        action: str,
+        class_id: int,
+        session_id: int,
+        arguments: dict[str, Any],
+        invocation_channel: str,
+        occurred_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        occurred = dt(occurred_at or utc_now())
+        audit = AgentActionAudit(
+            actor_user_id=actor_user_id,
+            action=action,
+            class_id=class_id,
+            session_id=session_id,
+            arguments=arguments,
+            invocation_channel=invocation_channel,
+        )
+        with self._connect() as conn:
+            audit_id = self._insert_agent_action_audit(conn, audit, occurred)
+            row = conn.execute(
+                self._sql("SELECT * FROM agent_action_audits WHERE id = ?"),
+                (audit_id,),
+            ).fetchone()
+            return self._agent_action_audit_item(row)
+
+    def _insert_agent_action_audit(
+        self,
+        conn: Any,
+        audit: AgentActionAudit,
+        occurred_at: str | None = None,
+    ) -> int:
+        if audit.session_id is None:
+            raise ValueError("agent action audit requires a session target")
+        arguments_json = json.dumps(audit.arguments, ensure_ascii=False, sort_keys=True)
+        return self._insert_returning_id(
+            conn,
+            "INSERT INTO agent_action_audits("
+            "actor_user_id, action, class_id, session_id, arguments_json, "
+            "invocation_channel, occurred_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                audit.actor_user_id,
+                audit.action,
+                audit.class_id,
+                audit.session_id,
+                arguments_json,
+                audit.invocation_channel,
+                occurred_at or dt(utc_now()),
+            ),
+        )
+
+    def _agent_action_audit_item(self, row: Any) -> dict[str, Any]:
+        item = dict(row)
+        try:
+            item["arguments"] = json.loads(item["arguments_json"])
+        except (TypeError, ValueError):
+            item["arguments"] = {}
+        return item
+
+    def list_agent_action_audits(
+        self,
+        *,
+        actor_user_id: int | None = None,
+        class_id: int | None = None,
+        session_id: int | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if actor_user_id is not None:
+            clauses.append("actor_user_id = ?")
+            params.append(actor_user_id)
+        if class_id is not None:
+            clauses.append("class_id = ?")
+            params.append(class_id)
+        if session_id is not None:
+            clauses.append("session_id = ?")
+            params.append(session_id)
+        query = "SELECT * FROM agent_action_audits"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(self._sql(query), params).fetchall()
+            return [self._agent_action_audit_item(row) for row in rows]
 
     def create_portal_session(
         self,
@@ -777,6 +868,7 @@ class RouterRepositoryBase(ABC):
         name: str,
         ttl_hours: int | None = None,
         session_at: str | None = None,
+        agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any]:
         cleaned_name = name.strip()
         if not cleaned_name:
@@ -819,6 +911,18 @@ class RouterRepositoryBase(ABC):
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
+            if agent_action_audit is not None:
+                self._insert_agent_action_audit(
+                    conn,
+                    AgentActionAudit(
+                        actor_user_id=agent_action_audit.actor_user_id,
+                        action=agent_action_audit.action,
+                        class_id=agent_action_audit.class_id,
+                        session_id=session_id,
+                        arguments=agent_action_audit.arguments,
+                        invocation_channel=agent_action_audit.invocation_channel,
+                    ),
+                )
             return dict(row)
 
     def list_class_sessions(self, class_id: int) -> list[dict[str, Any]]:
@@ -887,6 +991,7 @@ class RouterRepositoryBase(ABC):
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
+        agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
             expires_at is None
@@ -966,6 +1071,8 @@ class RouterRepositoryBase(ABC):
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
+            if updated is not None and agent_action_audit is not None:
+                self._insert_agent_action_audit(conn, agent_action_audit)
             return dict(updated) if updated else None
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:

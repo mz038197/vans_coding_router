@@ -28,6 +28,7 @@ PORTAL_HTML_PATH = WEB_DIR / "portal.html"
 PORTAL_CSS_PATH = WEB_DIR / "portal.css"
 PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
+WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +61,13 @@ def _browser_description(user_agent: str) -> str:
         "Unknown OS"
     )
     return f"{browser} on {platform}"
+
+
+def _webmcp_invocation_channel(request: Request) -> str | None:
+    raw = request.headers.get(WEBMCP_INVOCATION_CHANNEL_HEADER, "").strip().lower()
+    if raw == "webmcp":
+        return "webmcp"
+    return None
 
 
 class GoogleLoginRequest(BaseModel):
@@ -480,9 +488,13 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.post("/teacher/classes/{class_id}/sessions")
     async def create_session(
         class_id: int,
+        request: Request,
         data: SessionRequest | None = None,
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
+        invocation_arguments = data.model_dump(exclude_none=True) if data else {}
+        if "name" in invocation_arguments:
+            invocation_arguments["name"] = invocation_arguments["name"].strip()
         return portal_call(
             lambda: portal_use_case.create_session(
                 current_user_id(session_user_id),
@@ -490,6 +502,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 data.name if data else "",
                 ttl_hours=data.ttl_hours if data else None,
                 session_at=data.session_at if data else None,
+                invocation_channel=_webmcp_invocation_channel(request),
+                invocation_arguments=invocation_arguments,
             )
         )
 
@@ -497,9 +511,11 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     async def update_session(
         class_id: int,
         session_id: int,
+        request: Request,
         data: SessionPatchRequest,
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
+        invocation_arguments = data.model_dump(exclude_none=True)
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -514,6 +530,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,
                 seat_limit=data.seat_limit,
+                invocation_channel=_webmcp_invocation_channel(request),
+                invocation_arguments=invocation_arguments,
             )
         )
         if session is None:

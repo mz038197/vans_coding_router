@@ -1020,6 +1020,133 @@ def test_webmcp_session_write_http_contracts_are_explicit_authorized_and_partial
     assert invalid.json() == {"detail": "座位上限必須為正整數"}
 
 
+def test_successful_webmcp_session_mutations_create_agent_action_audits(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    teacher_cookie = _portal_cookie(repo, teacher)
+    webmcp_headers = {"X-Vans-Invocation-Channel": "webmcp"}
+
+    created = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={
+            "name": "第一堂",
+            "session_at": "2026-09-10T01:00:00+00:00",
+            "ttl_hours": 3,
+        },
+    )
+    assert created.status_code == 200
+    session_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={
+            "image_generation_enabled": False,
+            "speech_transcription_enabled": True,
+        },
+    )
+    assert updated.status_code == 200
+
+    expiry = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={"expires_at": "2026-09-30T16:00:00+00:00"},
+    )
+    seat_limit = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={"seat_limit": 75},
+    )
+    assert expiry.status_code == 200
+    assert seat_limit.status_code == 200
+
+    audits = repo.list_agent_action_audits()
+    assert len(audits) == 4
+    seat_audit, expiry_audit, update_audit, create_audit = audits
+    assert create_audit["actor_user_id"] == teacher["id"]
+    assert create_audit["action"] == "create_class_session"
+    assert create_audit["class_id"] == klass["id"]
+    assert create_audit["session_id"] == session_id
+    assert create_audit["arguments"] == {
+        "name": "第一堂",
+        "session_at": "2026-09-10T01:00:00+00:00",
+        "ttl_hours": 3,
+    }
+    assert create_audit["invocation_channel"] == "webmcp"
+    assert create_audit["occurred_at"]
+    assert update_audit["actor_user_id"] == teacher["id"]
+    assert update_audit["action"] == "update_session_capabilities"
+    assert update_audit["class_id"] == klass["id"]
+    assert update_audit["session_id"] == session_id
+    assert update_audit["arguments"] == {
+        "image_generation_enabled": False,
+        "speech_transcription_enabled": True,
+    }
+    assert update_audit["invocation_channel"] == "webmcp"
+    assert update_audit["occurred_at"]
+    assert expiry_audit["action"] == "change_session_expiry"
+    assert expiry_audit["class_id"] == klass["id"]
+    assert expiry_audit["session_id"] == session_id
+    assert expiry_audit["arguments"] == {"expires_at": "2026-09-30T16:00:00+00:00"}
+    assert expiry_audit["invocation_channel"] == "webmcp"
+    assert seat_audit["action"] == "change_session_seat_limit"
+    assert seat_audit["class_id"] == klass["id"]
+    assert seat_audit["session_id"] == session_id
+    assert seat_audit["arguments"] == {"seat_limit": 75}
+    assert seat_audit["invocation_channel"] == "webmcp"
+
+
+def test_failed_or_non_webmcp_mutations_do_not_create_agent_action_audits(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    teacher_cookie = _portal_cookie(repo, teacher)
+    other_cookie = _portal_cookie(repo, other)
+    path = f"/teacher/classes/{klass['id']}/sessions"
+    webmcp_headers = {"X-Vans-Invocation-Channel": "webmcp"}
+
+    ordinary = client.post(path, cookies=teacher_cookie, json={"name": "人工建立"})
+    forbidden = client.post(
+        path,
+        cookies=other_cookie,
+        headers=webmcp_headers,
+        json={"name": "不應建立"},
+    )
+    invalid = client.post(
+        path,
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={"name": ""},
+    )
+    session_id = ordinary.json()["id"]
+    failed_update = client.patch(
+        f"{path}/{session_id}",
+        cookies=teacher_cookie,
+        headers=webmcp_headers,
+        json={"seat_limit": 0},
+    )
+    forbidden_update = client.patch(
+        f"{path}/{session_id}",
+        cookies=other_cookie,
+        headers=webmcp_headers,
+        json={"seat_limit": 80},
+    )
+
+    assert ordinary.status_code == 200
+    assert forbidden.status_code == 403
+    assert invalid.status_code == 400
+    assert failed_update.status_code == 400
+    assert forbidden_update.status_code == 403
+    assert repo.list_agent_action_audits() == []
+
+
 def test_read_only_class_session_and_usage_http_contracts(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")

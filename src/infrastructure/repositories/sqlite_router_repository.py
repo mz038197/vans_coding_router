@@ -154,6 +154,20 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 );
                 CREATE INDEX IF NOT EXISTS portal_session_events_user_id
                 ON portal_session_events(user_id);
+                CREATE TABLE IF NOT EXISTS agent_action_audits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_user_id INTEGER NOT NULL REFERENCES users(id),
+                    action TEXT NOT NULL,
+                    class_id INTEGER NOT NULL REFERENCES classes(id),
+                    session_id INTEGER NOT NULL REFERENCES class_sessions(id),
+                    arguments_json TEXT NOT NULL,
+                    invocation_channel TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS agent_action_audits_actor_user_id
+                ON agent_action_audits(actor_user_id);
+                CREATE INDEX IF NOT EXISTS agent_action_audits_target
+                ON agent_action_audits(class_id, session_id);
                 """
             )
             self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
