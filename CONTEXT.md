@@ -127,3 +127,27 @@ _Avoid_: code block, template, install-list code, snippet 區塊
 **Client Setup Card**:
 The Portal surface shown after a successful Google-session Invite Code redeem. It presents the Classroom API Key and Router Base URL a student needs to configure a client, plus class-session context for confirmation. Nickname Redeem does not show this card; the extension Copy Classroom API Key is the copy path for that flow.
 _Avoid_: redeem result dump, key display blob, redemption receipt, Client Setup Card after Nickname Redeem
+
+**WebMCP**:
+The browser-side agent interface of the Vans Portal. It exposes domain-intent tools that act on behalf of the currently authenticated Portal user and reuse the same Portal authorization as human Portal actions. It is a Presentation interface, not a provider-routing feature and not a remote MCP server.
+_Avoid_: DOM automation, browser scraping API, provider MCP, Remote MCP, a second authorization system
+
+**Portal Working Context**:
+The Class and optional Class Session currently selected by the Portal UI, used as the default target when a WebMCP request omits an explicit target. It is interaction context only and never grants authorization; an authorized WebMCP action may explicitly target another Class Session.
+_Avoid_: authorization scope, Agent identity, WebMCP-owned session state, permission boundary
+
+**Agent Capability**:
+A canonical domain-intent operation exposed to an agent, such as listing Class Sessions, creating a Class Session, updating session capabilities, reading usage, or releasing Key Quarantine. The same domain intent should keep the same capability vocabulary across WebMCP and any future Remote MCP adapter even when transport and authentication differ.
+_Avoid_: HTTP endpoint, UI click, DOM action, transport-specific tool name
+
+**Agent Action Audit**:
+A backend record of a successful agent-initiated domain mutation, including the acting Portal user, action, target, arguments or relevant change data, invocation channel, and time. Client-supplied invocation metadata may describe the channel but never grants additional authorization.
+_Avoid_: browser console log, frontend-only audit, authorization token, trusting an invocation header for permissions
+
+**Page Content Is Data**:
+The rule that Portal-visible or tool-returned content may inform an agent but cannot by itself authorize or initiate a state-changing action. WebMCP writes require explicit user intent and remain subject to normal Portal authorization.
+_Avoid_: treating Prompt Logs, Course Catalog text, model output, or page copy as user authorization
+
+**Remote MCP**:
+A possible future non-browser MCP adapter that may expose the same Agent Capability vocabulary as WebMCP but has its own transport and authentication boundary. Its authentication design is intentionally outside the WebMCP v1 scope and must not depend on Portal cookies.
+_Avoid_: WebMCP, Portal Session transport, browser cookie MCP, assuming Remote MCP authentication is already decided
