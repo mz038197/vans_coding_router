@@ -158,8 +158,8 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     actor_user_id INTEGER NOT NULL REFERENCES users(id),
                     action TEXT NOT NULL,
-                    class_id INTEGER NOT NULL REFERENCES classes(id),
-                    session_id INTEGER NOT NULL REFERENCES class_sessions(id),
+                    class_id INTEGER REFERENCES classes(id),
+                    session_id INTEGER REFERENCES class_sessions(id),
                     arguments_json TEXT NOT NULL,
                     invocation_channel TEXT NOT NULL,
                     occurred_at TEXT NOT NULL
@@ -170,6 +170,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 ON agent_action_audits(class_id, session_id);
                 """
             )
+            self._ensure_agent_action_audit_target_nullable(conn)
             self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -230,6 +231,56 @@ class SqliteRouterRepository(RouterRepositoryBase):
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _ensure_agent_action_audit_target_nullable(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]: bool(row["notnull"])
+            for row in conn.execute("PRAGMA table_info(agent_action_audits)").fetchall()
+        }
+        if not columns or not (columns.get("class_id") or columns.get("session_id")):
+            return
+
+        conn.execute("DROP INDEX IF EXISTS agent_action_audits_actor_user_id")
+        conn.execute("DROP INDEX IF EXISTS agent_action_audits_target")
+        conn.execute("ALTER TABLE agent_action_audits RENAME TO agent_action_audits_legacy")
+        conn.execute(
+            """
+            CREATE TABLE agent_action_audits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER NOT NULL REFERENCES users(id),
+                action TEXT NOT NULL,
+                class_id INTEGER REFERENCES classes(id),
+                session_id INTEGER REFERENCES class_sessions(id),
+                arguments_json TEXT NOT NULL,
+                invocation_channel TEXT NOT NULL,
+                occurred_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_action_audits(
+                id, actor_user_id, action, class_id, session_id, arguments_json,
+                invocation_channel, occurred_at
+            )
+            SELECT id, actor_user_id, action, class_id, session_id, arguments_json,
+                   invocation_channel, occurred_at
+            FROM agent_action_audits_legacy
+            """
+        )
+        conn.execute("DROP TABLE agent_action_audits_legacy")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS agent_action_audits_actor_user_id
+            ON agent_action_audits(actor_user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS agent_action_audits_target
+            ON agent_action_audits(class_id, session_id)
+            """
+        )
 
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
         from src.infrastructure.repositories.router_repository_helpers import parse_dt

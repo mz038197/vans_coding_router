@@ -130,6 +130,12 @@ class OpenAICompatibleGateway:
             raise IndexError(f"key index {index} out of range")
         await pool.release_quarantine(index)
 
+    def is_key_quarantined(self, index: int) -> bool:
+        pool = self._ensure_pool()
+        if pool is None:
+            raise KeyError(f"provider「{self.provider.name}」has no upstream key pool")
+        return pool.is_quarantined(index)
+
     async def health(self) -> dict[str, Any]:
         pool = self.pool_status(limited_only=False)
         try:

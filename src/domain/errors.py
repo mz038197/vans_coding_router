@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 _UPSTREAM_AUTH_MESSAGE = (
@@ -165,6 +166,18 @@ class UpstreamBusyError(AppError):
             status_code=503,
             code="upstream_busy",
         )
+
+
+class QuarantineReleaseCooldownError(AppError):
+    def __init__(self, retry_after_sec: float):
+        retry_after = max(1, math.ceil(retry_after_sec))
+        super().__init__(
+            message=f"上游金鑰剛由 Agent 解除隔離，請在 {retry_after} 秒後再試",
+            status_code=429,
+            code="quarantine_release_cooldown",
+            details={"retry_after_sec": retry_after},
+        )
+        self.retry_after_sec = retry_after
 
 
 class InvalidModelIdError(AppError):

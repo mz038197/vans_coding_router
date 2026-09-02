@@ -63,6 +63,15 @@ class RoutingGateway:
             raise ValueError(f"provider「{provider}」不支援解除隔離")
         await release_fn(index)
 
+    def is_key_quarantined(self, provider: str, index: int) -> bool:
+        gateway = self.gateways.get(provider)
+        if gateway is None:
+            raise ValueError(f"未知 provider：{provider}")
+        status_fn = getattr(gateway, "is_key_quarantined", None)
+        if not callable(status_fn):
+            raise ValueError(f"provider「{provider}」不支援查詢隔離狀態")
+        return bool(status_fn(index))
+
     async def models(self) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}

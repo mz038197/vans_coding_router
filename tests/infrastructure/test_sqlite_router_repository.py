@@ -588,6 +588,74 @@ def test_backfill_aligns_ended_session_future_expires(tmp_path):
     assert repo2.verify_api_key_context(redeemed["api_key"]) is None
 
 
+def test_agent_action_audit_migrates_to_nullable_non_session_targets(tmp_path):
+    settings = _settings(tmp_path)
+    db_path = str(tmp_path / "router.db")
+    repo = SqliteRouterRepository(db_path, settings)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    repo.record_agent_action_audit(
+        actor_user_id=teacher["id"],
+        action="update_session_capabilities",
+        class_id=klass["id"],
+        session_id=session["id"],
+        arguments={"tts_enabled": False},
+        invocation_channel="webmcp",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE agent_action_audits RENAME TO agent_action_audits_old")
+        conn.execute(
+            """
+            CREATE TABLE agent_action_audits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER NOT NULL REFERENCES users(id),
+                action TEXT NOT NULL,
+                class_id INTEGER NOT NULL REFERENCES classes(id),
+                session_id INTEGER NOT NULL REFERENCES class_sessions(id),
+                arguments_json TEXT NOT NULL,
+                invocation_channel TEXT NOT NULL,
+                occurred_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_action_audits(
+                id, actor_user_id, action, class_id, session_id, arguments_json,
+                invocation_channel, occurred_at
+            )
+            SELECT id, actor_user_id, action, class_id, session_id, arguments_json,
+                   invocation_channel, occurred_at
+            FROM agent_action_audits_old
+            """
+        )
+        conn.execute("DROP TABLE agent_action_audits_old")
+        conn.execute(
+            "CREATE INDEX agent_action_audits_actor_user_id ON agent_action_audits(actor_user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX agent_action_audits_target ON agent_action_audits(class_id, session_id)"
+        )
+        conn.commit()
+
+    migrated = SqliteRouterRepository(db_path, settings)
+    migrated.record_agent_action_audit(
+        actor_user_id=teacher["id"],
+        action="release_key_quarantine",
+        class_id=None,
+        session_id=None,
+        arguments={"provider": "ollama_cloud", "key_index": 0},
+        invocation_channel="webmcp",
+    )
+    audits = migrated.list_agent_action_audits()
+    assert len(audits) == 2
+    assert audits[0]["class_id"] is None
+    assert audits[0]["session_id"] is None
+
+
 def test_update_session_expires_at_syncs_api_keys(tmp_path):
     settings = RouterSettings(
         auth=AuthSettings(session_secret="test-secret"),

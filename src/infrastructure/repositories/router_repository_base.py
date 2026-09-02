@@ -81,8 +81,8 @@ class RouterRepositoryBase(ABC):
         self,
         actor_user_id: int,
         action: str,
-        class_id: int,
-        session_id: int,
+        class_id: int | None,
+        session_id: int | None,
         arguments: dict[str, Any],
         invocation_channel: str,
         occurred_at: datetime | None = None,
@@ -110,8 +110,6 @@ class RouterRepositoryBase(ABC):
         audit: AgentActionAudit,
         occurred_at: str | None = None,
     ) -> int:
-        if audit.session_id is None:
-            raise ValueError("agent action audit requires a session target")
         arguments_json = json.dumps(audit.arguments, ensure_ascii=False, sort_keys=True)
         return self._insert_returning_id(
             conn,
@@ -144,7 +142,9 @@ class RouterRepositoryBase(ABC):
         actor_user_id: int | None = None,
         class_id: int | None = None,
         session_id: int | None = None,
-        limit: int = 100,
+        action: str | None = None,
+        invocation_channel: str | None = None,
+        limit: int | None = 100,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -157,11 +157,19 @@ class RouterRepositoryBase(ABC):
         if session_id is not None:
             clauses.append("session_id = ?")
             params.append(session_id)
+        if action is not None:
+            clauses.append("action = ?")
+            params.append(action)
+        if invocation_channel is not None:
+            clauses.append("invocation_channel = ?")
+            params.append(invocation_channel)
         query = "SELECT * FROM agent_action_audits"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY occurred_at DESC, id DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(self._sql(query), params).fetchall()
             return [self._agent_action_audit_item(row) for row in rows]

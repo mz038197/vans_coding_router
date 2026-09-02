@@ -304,3 +304,9 @@ def test_routing_gateway_pool_status_limited_only(monkeypatch):
     dumped = str(status)
     assert "secret" not in dumped
     assert "'a'" not in dumped
+
+    assert gateway.is_key_quarantined("ollama_cloud", 0) is False
+    assert limited._pool is not None
+    limited._pool.quarantine(0, "extra usage balance is empty")
+    assert gateway.is_key_quarantined("ollama_cloud", 0) is True
+    assert gateway.is_key_quarantined("ollama_cloud", 1) is False

@@ -8,7 +8,7 @@ from typing import Any
 class AgentActionAudit:
     actor_user_id: int
     action: str
-    class_id: int
+    class_id: int | None
     session_id: int | None
     arguments: dict[str, Any]
     invocation_channel: str

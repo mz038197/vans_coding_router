@@ -245,8 +245,8 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     actor_user_id INTEGER NOT NULL REFERENCES users(id),
                     action TEXT NOT NULL,
-                    class_id INTEGER NOT NULL REFERENCES classes(id),
-                    session_id INTEGER NOT NULL REFERENCES class_sessions(id),
+                    class_id INTEGER REFERENCES classes(id),
+                    session_id INTEGER REFERENCES class_sessions(id),
                     arguments_json TEXT NOT NULL,
                     invocation_channel TEXT NOT NULL,
                     occurred_at TEXT NOT NULL
@@ -258,6 +258,12 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS agent_action_audits_target ON agent_action_audits(class_id, session_id)"
+            )
+            conn.execute(
+                "ALTER TABLE agent_action_audits ALTER COLUMN class_id DROP NOT NULL"
+            )
+            conn.execute(
+                "ALTER TABLE agent_action_audits ALTER COLUMN session_id DROP NOT NULL"
             )
             conn.execute(
                 """

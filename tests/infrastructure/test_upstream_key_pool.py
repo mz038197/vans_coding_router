@@ -220,6 +220,17 @@ async def test_release_quarantine_makes_key_selectable():
     await pool.release(index)
 
 
+def test_is_quarantined_reports_current_key_state():
+    pool = UpstreamKeyPool(["key-a"], quarantine_ttl_sec=3600)
+
+    assert pool.is_quarantined(0) is False
+    pool.quarantine(0, "extra usage balance is empty")
+    assert pool.is_quarantined(0) is True
+
+    with pytest.raises(IndexError):
+        pool.is_quarantined(1)
+
+
 @pytest.mark.asyncio
 async def test_quarantine_ttl_zero_lasts_until_release():
     from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError

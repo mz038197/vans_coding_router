@@ -88,8 +88,8 @@ class RouterRepositoryPort(Protocol):
         self,
         actor_user_id: int,
         action: str,
-        class_id: int,
-        session_id: int,
+        class_id: int | None,
+        session_id: int | None,
         arguments: dict[str, Any],
         invocation_channel: str,
         occurred_at: datetime | None = None,
@@ -102,7 +102,9 @@ class RouterRepositoryPort(Protocol):
         actor_user_id: int | None = None,
         class_id: int | None = None,
         session_id: int | None = None,
-        limit: int = 100,
+        action: str | None = None,
+        invocation_channel: str | None = None,
+        limit: int | None = 100,
     ) -> list[dict[str, Any]]:
         ...
 

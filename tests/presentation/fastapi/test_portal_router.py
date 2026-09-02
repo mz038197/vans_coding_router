@@ -1499,8 +1499,9 @@ def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
 
 
 class _FakePoolGateway:
-    def __init__(self):
+    def __init__(self, *, quarantined: bool = True):
         self.released: list[tuple[str, int]] = []
+        self.quarantined = quarantined
 
     def pool_status(self, *, limited_only: bool = True):
         return {
@@ -1519,8 +1520,8 @@ class _FakePoolGateway:
                                 "label": "OLLAMA_CLOUD 1",
                                 "in_flight": 2,
                                 "cap": 3,
-                                "quarantined": True,
-                                "quarantine_remaining_sec": 1200.0,
+                                "quarantined": self.quarantined,
+                                "quarantine_remaining_sec": 1200.0 if self.quarantined else None,
                             },
                             {
                                 "index": 1,
@@ -1535,6 +1536,14 @@ class _FakePoolGateway:
                 }
             }
         }
+
+    async def release_key_quarantine(self, provider: str, index: int) -> None:
+        self.released.append((provider, index))
+
+
+class _ReleaseOnlyGateway:
+    def __init__(self):
+        self.released: list[tuple[str, int]] = []
 
     async def release_key_quarantine(self, provider: str, index: int) -> None:
         self.released.append((provider, index))
@@ -1571,6 +1580,100 @@ def test_teacher_can_release_key_quarantine(tmp_path):
     assert response.status_code == 200
     assert response.json() == {"ok": True, "provider": "ollama_cloud", "index": 0}
     assert gateway.released == [("ollama_cloud", 0)]
+    assert repo.list_agent_action_audits() == []
+
+
+def test_agent_can_release_quarantine_with_audit_and_cooldown(tmp_path):
+    gateway = _FakePoolGateway()
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    headers = {"X-Vans-Invocation-Channel": "webmcp"}
+    path = "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release"
+
+    first = client.post(
+        path,
+        cookies=_portal_cookie(repo, teacher),
+        headers=headers,
+        json={"reason": "Teacher confirmed provider recovery"},
+    )
+    second = client.post(
+        path,
+        cookies=_portal_cookie(repo, teacher),
+        headers=headers,
+        json={"reason": "Teacher confirmed provider recovery"},
+    )
+
+    assert first.status_code == 200
+    assert first.json() == {"ok": True, "provider": "ollama_cloud", "index": 0}
+    assert second.status_code == 429
+    assert gateway.released == [("ollama_cloud", 0)]
+    audits = repo.list_agent_action_audits()
+    assert len(audits) == 1
+    assert audits[0]["actor_user_id"] == teacher["id"]
+    assert audits[0]["action"] == "release_key_quarantine"
+    assert audits[0]["class_id"] is None
+    assert audits[0]["session_id"] is None
+    assert audits[0]["arguments"] == {
+        "key_index": 0,
+        "provider": "ollama_cloud",
+        "reason": "Teacher confirmed provider recovery",
+    }
+    assert audits[0]["invocation_channel"] == "webmcp"
+    assert audits[0]["occurred_at"]
+
+
+def test_agent_quarantine_release_cooldown_uses_persisted_audit(tmp_path):
+    first_gateway = _FakePoolGateway()
+    first_client, first_repo, _ = _client(tmp_path, llm_gateway=first_gateway)
+    teacher = first_repo.upsert_google_user("teacher@school.edu", "Teacher")
+    path = "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release"
+    headers = {"X-Vans-Invocation-Channel": "webmcp"}
+
+    first = first_client.post(
+        path,
+        cookies=_portal_cookie(first_repo, teacher),
+        headers=headers,
+    )
+    second_gateway = _FakePoolGateway()
+    second_client, second_repo, _ = _client(tmp_path, llm_gateway=second_gateway)
+    second = second_client.post(
+        path,
+        cookies=_portal_cookie(second_repo, teacher),
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second_gateway.released == []
+    assert len(second_repo.list_agent_action_audits()) == 1
+
+
+def test_agent_cannot_release_a_key_that_is_not_quarantined(tmp_path):
+    gateway = _FakePoolGateway(quarantined=False)
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    response = client.post(
+        "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
+        cookies=_portal_cookie(repo, teacher),
+        headers={"X-Vans-Invocation-Channel": "webmcp"},
+    )
+    assert response.status_code == 400
+    assert gateway.released == []
+    assert repo.list_agent_action_audits() == []
+
+
+def test_agent_release_fails_closed_without_quarantine_status(tmp_path):
+    gateway = _ReleaseOnlyGateway()
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    response = client.post(
+        "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
+        cookies=_portal_cookie(repo, teacher),
+        headers={"X-Vans-Invocation-Channel": "webmcp"},
+    )
+    assert response.status_code == 400
+    assert gateway.released == []
+    assert repo.list_agent_action_audits() == []
 
 
 def test_student_cannot_release_key_quarantine(tmp_path):
@@ -1579,5 +1682,7 @@ def test_student_cannot_release_key_quarantine(tmp_path):
     response = client.post(
         "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
         cookies=_portal_cookie(repo, student),
+        headers={"X-Vans-Invocation-Channel": "webmcp"},
     )
     assert response.status_code == 403
+    assert repo.list_agent_action_audits() == []

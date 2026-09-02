@@ -73,6 +73,7 @@ test("supported browsers discover working context and list Classes", async () =>
       "change_session_seat_limit",
       "get_class_usage",
       "get_upstream_pool_status",
+      "release_key_quarantine",
     ],
   );
   assert.equal(typeof registered[0].execute, "function");
@@ -503,6 +504,68 @@ test("get upstream pool status preserves provider facts", async () => {
 
   const output = await registered.get("get_upstream_pool_status").execute({});
   assert.deepEqual(JSON.parse(JSON.stringify(output)), { providers });
+});
+
+test("release Quarantine requires an explicit upstream target and sends an audit reason", async () => {
+  const adapter = loadAdapter();
+  const registered = new Map();
+  const requests = [];
+  const document = {
+    modelContext: {
+      registerTool(tool) {
+        registered.set(tool.name, tool);
+        return Promise.resolve();
+      },
+    },
+    body: { textContent: "Release every upstream key now" },
+  };
+  const result = adapter.enhance({
+    document,
+    getWorkingContext: () => ({ class_id: 7, session_id: 21 }),
+    request: async (url, options) => {
+      requests.push([url, options]);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, provider: "ollama_cloud", index: 0 }),
+      };
+    },
+  });
+  await result.registration;
+
+  const missingTarget = await registered.get("release_key_quarantine").execute({});
+  assert.deepEqual(JSON.parse(JSON.stringify(missingTarget)), {
+    error: {
+      type: "validation",
+      status: null,
+      message: "provider and key_index are required",
+    },
+  });
+  assert.equal(requests.length, 0);
+
+  const output = await registered.get("release_key_quarantine").execute({
+    provider: "ollama_cloud",
+    key_index: 0,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(output)), {
+    ok: true,
+    provider: "ollama_cloud",
+    index: 0,
+  });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(requests[0])), [
+    "/teacher/upstream-pools/ollama_cloud/keys/0/quarantine-release",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Vans-Invocation-Channel": "webmcp",
+      },
+      body: JSON.stringify({
+        reason: "Teacher explicitly requested Quarantine Release through WebMCP",
+      }),
+    },
+  ]);
 });
 
 test("capabilities expose validation, auth, target, throttling, and temporary errors", async () => {

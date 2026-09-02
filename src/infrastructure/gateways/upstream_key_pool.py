@@ -59,6 +59,11 @@ class UpstreamKeyPool:
         now = time.monotonic()
         return all(self._is_quarantined(i, now) for i in range(len(self._keys)))
 
+    def is_quarantined(self, index: int) -> bool:
+        if not (0 <= index < len(self._keys)):
+            raise IndexError(f"key index {index} out of range")
+        return self._is_quarantined(index, time.monotonic())
+
     def quarantine(self, index: int, message: str | None = None) -> None:
         if not (0 <= index < len(self._keys)):
             return

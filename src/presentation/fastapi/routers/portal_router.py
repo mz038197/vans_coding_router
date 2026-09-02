@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.domain.errors import MissingTargetError
+from src.domain.errors import MissingTargetError, QuarantineReleaseCooldownError
 from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.infrastructure.auth.extension_handoff import (
     build_extension_uri,
@@ -138,6 +138,10 @@ class SettingsPatchRequest(BaseModel):
 
 class PromptLogDeleteRequest(BaseModel):
     user_ids: list[int]
+
+
+class QuarantineReleaseRequest(BaseModel):
+    reason: str | None = None
 
 
 def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSettings) -> APIRouter:
@@ -570,6 +574,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     async def release_key_quarantine(
         provider: str,
         key_index: int,
+        request: Request,
+        data: QuarantineReleaseRequest | None = None,
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         try:
@@ -577,9 +583,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 provider,
                 key_index,
+                invocation_channel=_webmcp_invocation_channel(request),
+                reason=data.reason if data else None,
             )
         except HTTPException:
             raise
+        except QuarantineReleaseCooldownError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.message,
+                headers={"Retry-After": str(exc.retry_after_sec)},
+            ) from None
         except PermissionError:
             raise HTTPException(status_code=403, detail="權限不足") from None
         except ValueError as exc:

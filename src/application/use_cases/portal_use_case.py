@@ -1,18 +1,24 @@
-from datetime import datetime
+from datetime import UTC, datetime
+import time
 from typing import Any
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import PortalSessionContext
-from src.domain.errors import MissingTargetError
+from src.domain.errors import MissingTargetError, QuarantineReleaseCooldownError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
+from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
 _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
 _VALID_SESSION_STATUSES = frozenset({"active", "ended"})
 _NICKNAME_MAX_LEN = 64
+_WEBMCP_QUARANTINE_RELEASE_COOLDOWN_SEC = 60.0
+_WEBMCP_QUARANTINE_RELEASE_DEFAULT_REASON = (
+    "Teacher explicitly requested Quarantine Release through WebMCP"
+)
 _SESSION_CAPABILITY_FIELDS = frozenset(
     {
         "image_generation_enabled",
@@ -33,6 +39,7 @@ class PortalUseCase:
         self.repo = repo
         self._base_settings = base_settings
         self._llm_gateway = llm_gateway
+        self._agent_quarantine_release_at: dict[tuple[str, int], float] = {}
         self.refresh_settings()
 
     def refresh_settings(self) -> None:
@@ -124,19 +131,166 @@ class PortalUseCase:
             return {"providers": {}}
         return status_fn(limited_only=True)
 
-    async def release_key_quarantine(self, user_id: int, provider: str, index: int) -> dict[str, Any]:
+    async def release_key_quarantine(
+        self,
+        user_id: int,
+        provider: str,
+        index: int,
+        *,
+        invocation_channel: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         self._assert_teacher(user_id)
+        if not isinstance(provider, str):
+            raise ValueError("provider 不可為空")
+        provider = provider.strip()
+        if not provider:
+            raise ValueError("provider 不可為空")
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError("key index 必須為非負整數")
         gateway = self._llm_gateway
         if gateway is None:
             raise ValueError("上游 gateway 未設定")
         release_fn = getattr(gateway, "release_key_quarantine", None)
         if not callable(release_fn):
             raise ValueError("此 gateway 不支援解除隔離")
+        is_agent_action = invocation_channel == "webmcp"
+        reservation_time: float | None = None
+        if is_agent_action:
+            reservation_time = self._reserve_agent_quarantine_release(provider, index)
+            try:
+                self._assert_key_quarantined(gateway, provider, index)
+            except Exception:
+                self._forget_agent_quarantine_release(provider, index, reservation_time)
+                raise
         try:
             await release_fn(provider, index)
         except (KeyError, IndexError) as exc:
+            if reservation_time is not None:
+                self._forget_agent_quarantine_release(provider, index, reservation_time)
             raise ValueError(str(exc)) from exc
+        except BaseException:
+            if reservation_time is not None:
+                self._forget_agent_quarantine_release(provider, index, reservation_time)
+            raise
+        if is_agent_action:
+            audit_reason = self._quarantine_release_reason(reason)
+            self._agent_quarantine_release_at[(provider, index)] = time.monotonic()
+            self.repo.record_agent_action_audit(
+                actor_user_id=user_id,
+                action="release_key_quarantine",
+                class_id=None,
+                session_id=None,
+                arguments={
+                    "key_index": index,
+                    "provider": provider,
+                    "reason": audit_reason,
+                },
+                invocation_channel="webmcp",
+            )
         return {"ok": True, "provider": provider, "index": index}
+
+    @staticmethod
+    def _quarantine_release_reason(reason: str | None) -> str:
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()[:500]
+        return _WEBMCP_QUARANTINE_RELEASE_DEFAULT_REASON
+
+    def _reserve_agent_quarantine_release(self, provider: str, index: int) -> float:
+        now = time.monotonic()
+        key = (provider, index)
+        previous = self._agent_quarantine_release_at.get(key)
+        if previous is not None:
+            remaining = _WEBMCP_QUARANTINE_RELEASE_COOLDOWN_SEC - (now - previous)
+            if remaining > 0:
+                raise QuarantineReleaseCooldownError(remaining)
+        else:
+            persisted = self._persisted_agent_quarantine_release(provider, index)
+            if persisted is not None:
+                elapsed = (datetime.now(UTC) - persisted).total_seconds()
+                remaining = _WEBMCP_QUARANTINE_RELEASE_COOLDOWN_SEC - elapsed
+                if remaining > 0:
+                    raise QuarantineReleaseCooldownError(remaining)
+        self._agent_quarantine_release_at[key] = now
+        return now
+
+    def _persisted_agent_quarantine_release(
+        self,
+        provider: str,
+        index: int,
+    ) -> datetime | None:
+        for audit in self.repo.list_agent_action_audits(
+            action="release_key_quarantine",
+            invocation_channel="webmcp",
+            limit=None,
+        ):
+            arguments = audit.get("arguments")
+            if not isinstance(arguments, dict) or arguments.get("provider") != provider:
+                continue
+            try:
+                audit_index = int(arguments.get("key_index"))
+            except (TypeError, ValueError):
+                continue
+            if audit_index != index:
+                continue
+            occurred_at = audit.get("occurred_at")
+            if occurred_at is None:
+                continue
+            try:
+                return parse_dt(str(occurred_at))
+            except ValueError:
+                continue
+        return None
+
+    def _forget_agent_quarantine_release(
+        self,
+        provider: str,
+        index: int,
+        reservation_time: float,
+    ) -> None:
+        key = (provider, index)
+        if self._agent_quarantine_release_at.get(key) == reservation_time:
+            self._agent_quarantine_release_at.pop(key, None)
+
+    @staticmethod
+    def _assert_key_quarantined(gateway: Any, provider: str, index: int) -> None:
+        state_fn = getattr(gateway, "is_key_quarantined", None)
+        if callable(state_fn):
+            try:
+                quarantined = state_fn(provider, index)
+            except (KeyError, IndexError) as exc:
+                raise ValueError(str(exc)) from exc
+            if not quarantined:
+                raise ValueError("指定的上游金鑰目前不在隔離中")
+            return
+
+        status_fn = getattr(gateway, "pool_status", None)
+        if not callable(status_fn):
+            raise ValueError("無法確認指定的上游金鑰是否在隔離中")
+        status = status_fn(limited_only=False)
+        providers = status.get("providers") if isinstance(status, dict) else None
+        provider_status = providers.get(provider) if isinstance(providers, dict) else None
+        pool = provider_status.get("pool") if isinstance(provider_status, dict) else None
+        keys = pool.get("keys") if isinstance(pool, dict) else None
+        target = next(
+            (
+                item
+                for item in keys or []
+                if isinstance(item, dict) and PortalUseCase._status_key_index(item) == index
+            ),
+            None,
+        )
+        if target is None:
+            raise ValueError("找不到指定的上游金鑰")
+        if not target.get("quarantined"):
+            raise ValueError("指定的上游金鑰目前不在隔離中")
+
+    @staticmethod
+    def _status_key_index(item: dict[str, Any]) -> int | None:
+        try:
+            return int(item.get("index", -1))
+        except (TypeError, ValueError):
+            return None
 
     def create_class(self, teacher_id: int, name: str, ends_at: str | None, api_key_ttl_hours: int | None) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
