@@ -326,6 +326,28 @@
     </div>
   </div>
 
+  <div class="modal" id="editModelAllowlistModal" onclick="onEditModelAllowlistBackdropClick(event)">
+    <div class="modal-content modal-content-sm" onclick="event.stopPropagation()">
+      <div class="modal-header" id="editModelAllowlistTitle">編輯本課可用模型</div>
+      <div class="modal-body">
+        <p class="hint">候選來自 Router Model Template。未限制時學生可用 Template 全集；限制後只寫入勾選的模型，全不選則零模型。</p>
+        <label class="model-allowlist-restrict">
+          <input type="checkbox" id="modelAllowlistRestrict" onchange="applyModelAllowlistRestrictState()" />
+          <span>限制本課可用模型</span>
+        </label>
+        <label class="modal-field-label" for="modelAllowlistSearch">搜尋</label>
+        <input id="modelAllowlistSearch" type="search" class="modal-datetime-input" placeholder="名稱或 id" oninput="filterModelAllowlistList()" />
+        <div id="modelAllowlistList" class="model-allowlist-list"></div>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-actions">
+          <button type="button" class="btn-secondary" onclick="closeEditModelAllowlistModal()">取消</button>
+          <button type="button" onclick="saveEditSessionModelAllowlist()">儲存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentRoles = ['student'];
     let currentUserId = null;
@@ -769,6 +791,26 @@
       );
       return `<div class="cell-with-action" data-session-id="${session.id}" data-seat-limit="${limit}">
         <div class="cell-main"><span class="seat-limit-label">${occupied} / ${limit}</span></div>
+        ${edit}
+      </div>`;
+    }
+
+    function sessionModelAllowlistLabel(session) {
+      const list = session.model_allowlist;
+      if (list == null) return '未限制';
+      if (!list.length) return '全不選';
+      return `${list.length} 個模型`;
+    }
+
+    function sessionModelAllowlistCell(classId, session) {
+      const label = sessionModelAllowlistLabel(session);
+      const edit = iconBtn(
+        'fas fa-pen',
+        '編輯可用模型',
+        `beginEditSessionModelAllowlist(${classId}, ${session.id})`,
+      );
+      return `<div class="cell-with-action">
+        <div class="cell-main"><span class="model-allowlist-label">${escapeHtml(label)}</span></div>
         ${edit}
       </div>`;
     }
@@ -1711,7 +1753,7 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 6 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
+      const colCount = 7 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
       window.__sessionById = window.__sessionById || {};
       sessions.forEach((s) => { window.__sessionById[s.id] = s; });
       box.innerHTML = `<table class="session-table">
@@ -1722,6 +1764,7 @@
           <th>邀請碼</th>
           <th>key 到期</th>
           ${allowOwnerActions ? '<th>安裝清單</th>' : ''}
+          <th>模型</th>
           <th>暱稱座位</th>
           ${showRedemptions ? '<th>已領取</th>' : ''}
         </tr>
@@ -1733,6 +1776,7 @@
             <td>${sessionInviteCell(s, allowOwnerActions)}</td>
             <td>${sessionExpiresCell(classId, s)}</td>
             ${allowOwnerActions ? `<td>${sessionCatalogCell(classId, s)}</td>` : ''}
+            <td>${sessionModelAllowlistCell(classId, s)}</td>
             <td>${sessionSeatLimitCell(classId, s)}</td>
             ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
@@ -2666,6 +2710,133 @@ snippets:
       input.select();
     }
 
+    let modelAllowlistContext = null;
+    let routerModelTemplate = null;
+
+    function onEditModelAllowlistBackdropClick(event) {
+      if (event.target && event.target.id === 'editModelAllowlistModal') {
+        closeEditModelAllowlistModal();
+      }
+    }
+
+    function closeEditModelAllowlistModal() {
+      const modal = document.getElementById('editModelAllowlistModal');
+      if (modal) modal.classList.remove('show');
+      modelAllowlistContext = null;
+    }
+
+    function templateModels(template) {
+      const models = [];
+      for (const provider of template || []) {
+        for (const model of provider.models || []) {
+          if (model && model.id) models.push(model);
+        }
+      }
+      return models;
+    }
+
+    function modelIdPrefix(id) {
+      const at = String(id).indexOf('@');
+      return at === -1 ? String(id) : String(id).slice(0, at);
+    }
+
+    async function loadRouterModelTemplate() {
+      if (routerModelTemplate) return routerModelTemplate;
+      const data = await api('/extension/chat-language-models');
+      routerModelTemplate = Array.isArray(data) ? data : [];
+      return routerModelTemplate;
+    }
+
+    function applyModelAllowlistRestrictState() {
+      const restrict = document.getElementById('modelAllowlistRestrict');
+      const listEl = document.getElementById('modelAllowlistList');
+      const search = document.getElementById('modelAllowlistSearch');
+      const on = Boolean(restrict && restrict.checked);
+      if (listEl) listEl.classList.toggle('is-disabled', !on);
+      if (search) search.disabled = !on;
+      document.querySelectorAll('#modelAllowlistList input[type=checkbox]').forEach((el) => {
+        el.disabled = !on;
+      });
+    }
+
+    function filterModelAllowlistList() {
+      const q = (document.getElementById('modelAllowlistSearch')?.value || '').trim().toLowerCase();
+      document.querySelectorAll('#modelAllowlistList .model-allowlist-item').forEach((el) => {
+        el.hidden = Boolean(q) && !(el.dataset.search || '').includes(q);
+      });
+      document.querySelectorAll('#modelAllowlistList .model-allowlist-group').forEach((group) => {
+        const visible = [...group.querySelectorAll('.model-allowlist-item')].some((el) => !el.hidden);
+        group.hidden = !visible;
+      });
+    }
+
+    async function beginEditSessionModelAllowlist(classId, sessionId) {
+      const modal = document.getElementById('editModelAllowlistModal');
+      const title = document.getElementById('editModelAllowlistTitle');
+      const restrict = document.getElementById('modelAllowlistRestrict');
+      const search = document.getElementById('modelAllowlistSearch');
+      const listEl = document.getElementById('modelAllowlistList');
+      if (!modal || !restrict || !listEl) return;
+      const session = window.__sessionById && window.__sessionById[sessionId];
+      modelAllowlistContext = { classId, sessionId };
+      if (title) {
+        const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
+        title.textContent = `編輯本課可用模型 · ${label}`;
+      }
+      try {
+        const template = await loadRouterModelTemplate();
+        const models = templateModels(template);
+        const current = session ? session.model_allowlist : null;
+        restrict.checked = current != null;
+        if (search) search.value = '';
+        const groups = {};
+        for (const model of models) {
+          const prefix = modelIdPrefix(model.id);
+          (groups[prefix] ||= []).push(model);
+        }
+        const selected = new Set(current || []);
+        listEl.innerHTML = Object.keys(groups).sort().map((prefix) => {
+          const items = groups[prefix].map((model) => {
+            const checked = current == null ? true : selected.has(model.id);
+            const searchText = `${model.id} ${model.name || ''}`.toLowerCase();
+            return `<label class="model-allowlist-item" data-search="${escapeHtml(searchText)}">
+              <input type="checkbox" value="${escapeHtml(model.id)}" ${checked ? 'checked' : ''} />
+              <span>${escapeHtml(model.name || model.id)} <code>${escapeHtml(model.id)}</code></span>
+            </label>`;
+          }).join('');
+          return `<div class="model-allowlist-group"><div class="model-allowlist-prefix">${escapeHtml(prefix)}</div>${items}</div>`;
+        }).join('') || '<p class="hint">Template 沒有模型。</p>';
+        applyModelAllowlistRestrictState();
+        filterModelAllowlistList();
+        modal.classList.add('show');
+      } catch (err) {
+        modelAllowlistContext = null;
+        alert(err.message || String(err));
+      }
+    }
+
+    async function saveEditSessionModelAllowlist() {
+      if (!modelAllowlistContext) return;
+      const restrict = document.getElementById('modelAllowlistRestrict');
+      const { classId, sessionId } = modelAllowlistContext;
+      const body = (!restrict || !restrict.checked)
+        ? { model_allowlist: null }
+        : {
+            model_allowlist: [...document.querySelectorAll('#modelAllowlistList input[type=checkbox]:checked')]
+              .map((el) => el.value),
+          };
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
+        closeEditModelAllowlistModal();
+        await reloadSessionViews(classId);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+
     let editExpiresContext = null;
 
     function beginEditSessionExpires(classId, sessionId, currentIso) {
@@ -3100,6 +3271,28 @@ snippets:
       }
     }
 
+    async function downloadInstallScript(event, href, filename) {
+      event.preventDefault();
+      const headers = {};
+      if (lastRedeemedKey) headers.Authorization = `Bearer ${lastRedeemedKey}`;
+      try {
+        const res = await fetch(href, { headers, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('下載失敗');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+      return false;
+    }
+
     function detectInstallOs() {
       const platform = (navigator.userAgentData && navigator.userAgentData.platform)
         || navigator.platform
@@ -3129,10 +3322,10 @@ snippets:
         label: '下載 install-vscode-models.command（macOS）',
       };
       const linkHtml = (item) => (
-        `<a class="btn-download" href="${item.href}" download="${item.download}">`
+        `<a class="btn-download" href="${item.href}" download="${item.download}" onclick="return downloadInstallScript(event, '${item.href}', '${item.download}')">`
         + `<i class="fas fa-download" aria-hidden="true"></i>${item.label}</a>`
       );
-      const mergeHint = '會把 VSRouter 模型<strong>合併</strong>進本機 VS Code，不覆蓋既有設定。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。';
+      const mergeHint = '會把 VCRouter 模型<strong>同步</strong>進本機 VS Code（刪掉不在清單內的課堂模型），不改其他廠商。完成後 Reload Window，並在 Chat: Manage Language Models 填入 API Key。';
       const os = detectInstallOs();
 
       if (os === 'windows') {

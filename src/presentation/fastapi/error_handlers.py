@@ -9,6 +9,7 @@ from src.domain.errors import (
     ImageGenerationDisabledError,
     ImageGenerationNotSupportedError,
     InvalidModelIdError,
+    ModelNotAllowedError,
     ServiceUnavailableError,
     StatefulResponsesNotSupportedError,
     SpeechTranscriptionDisabledError,
@@ -180,6 +181,18 @@ def register_error_handlers(app: FastAPI) -> None:
                 exc.message,
                 error_type="invalid_request_error",
                 code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(ModelNotAllowedError)
+    async def handle_model_not_allowed(request: Request, exc: ModelNotAllowedError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+                param="model",
             )
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 

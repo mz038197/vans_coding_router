@@ -196,6 +196,20 @@ def test_portal_session_row_shows_occupied_nickname_seats_versus_limit(tmp_path)
     assert '{"seat_limit"' in html or "{ seat_limit" in html
 
 
+def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert "<th>模型</th>" in html
+    assert "sessionModelAllowlistCell" in html
+    assert "beginEditSessionModelAllowlist" in html
+    assert 'id="editModelAllowlistModal"' in html
+    assert "未限制" in html
+    assert "全不選" in html
+    assert "model_allowlist" in html
+    assert "downloadInstallScript" in html
+    assert "lastRedeemedKey" in html
+
+
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
@@ -1196,8 +1210,10 @@ def test_new_class_session_has_seat_limit_60(tmp_path):
 
     assert created.status_code == 200
     assert created.json()["seat_limit"] == 60
+    assert created.json()["model_allowlist"] is None
     assert listing.json()["items"][0]["seat_limit"] == 60
     assert listing.json()["items"][0]["nickname_seat_count"] == 0
+    assert listing.json()["items"][0]["model_allowlist"] is None
 
 
 def test_owner_and_admin_can_change_session_seat_limit(tmp_path):
@@ -1403,6 +1419,42 @@ def test_install_vscode_models_download_returns_script(tmp_path):
     assert "install-vscode-models.ps1" in response.headers["content-disposition"]
     assert "VCRouter" in response.text
     assert "Merge-ChatLanguageModels" in response.text
+    assert "ollama_cloud@minimax-m3:cloud" in response.text
+
+
+def test_install_vscode_models_download_embeds_session_allowlist(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    allowed = "ollama_cloud@minimax-m3:cloud"
+    other = "openrouter@minimax/minimax-m3"
+    client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"model_allowlist": [allowed]},
+    )
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+    redeem = client.post(
+        "/extension/sessions/redeem",
+        json={
+            "handoff_token": login.json()["handoff_token"],
+            "invite_code": session["invite_code"],
+        },
+    )
+    api_key = redeem.json()["api_key"]
+    student = repo.get_user_by_email("student@gmail.com")
+    response = client.get(
+        "/portal/download/install-vscode-models.ps1",
+        cookies=_portal_cookie(repo, student),
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    assert allowed in response.text
+    assert other not in response.text
 
 
 def test_install_vscode_models_zip_download(tmp_path):

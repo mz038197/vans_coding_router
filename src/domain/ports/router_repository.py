@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
+from src.domain.session_model_allowlist import MODEL_ALLOWLIST_UNCHANGED
 
 
 class RouterRepositoryPort(Protocol):
@@ -171,8 +172,17 @@ class RouterRepositoryPort(Protocol):
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
+        model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
+        ...
+
+    def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
+        ...
+
+    def classroom_api_key_session_allowlist(
+        self, api_key: str
+    ) -> tuple[bool, list[str] | None]:
         ...
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:

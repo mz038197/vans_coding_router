@@ -142,6 +142,7 @@ def create_api_router(
             tool_choice=req.tool_choice,
         )
         domain_req = input_dto.to_domain()
+        api_use_case.validate_model_allowed(domain_req.model, auth_context)
 
         if domain_req.stream:
             generator = _stream_with_error_handling(domain_req, api_key, client_ip, auth_context)
@@ -162,6 +163,7 @@ def create_api_router(
         body: dict[str, Any] = await request.json()
         auth_context = getattr(request.state, "auth_context", None)
         api_use_case.validate_responses_request(body)
+        api_use_case.validate_model_allowed(str(body.get("model") or ""), auth_context)
 
         if body.get("stream"):
             generator = _responses_stream_with_error_handling(body, api_key, client_ip, auth_context)

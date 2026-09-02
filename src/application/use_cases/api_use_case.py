@@ -18,8 +18,10 @@ from src.infrastructure.logging.message_preview import (
 
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
+from src.domain.session_model_allowlist import is_model_allowed
 from src.domain.errors import (
     ImageGenerationDisabledError,
+    ModelNotAllowedError,
     SpeechTranscriptionDisabledError,
     SpeechTranscriptionNotSupportedError,
     StatefulResponsesNotSupportedError,
@@ -55,6 +57,7 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
+        self._assert_model_allowed(req.model, auth_context)
         response = await self.gateway.chat_completions_nonstream(req)
         assistant_messages = extract_assistant_messages_for_log(response, CHAT_COMPLETIONS_PATH)
         self._log_request(
@@ -75,6 +78,7 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        self._assert_model_allowed(req.model, auth_context)
         tracker = _SseStreamTracker(CHAT_COMPLETIONS_PATH)
         async with aclosing(self.gateway.chat_completions_stream(req)) as stream:
             async for chunk in stream:
@@ -101,6 +105,7 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         self._validate_responses_body(body)
+        self._assert_model_allowed(str(body.get("model") or ""), auth_context)
         response = await self.gateway.responses_create(body)
         assistant_messages = extract_assistant_messages_for_log(response, RESPONSES_PATH)
         self._log_responses_request(
@@ -122,6 +127,7 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         self._validate_responses_body(body)
+        self._assert_model_allowed(str(body.get("model") or ""), auth_context)
         tracker = _SseStreamTracker(RESPONSES_PATH)
         async with aclosing(self.gateway.responses_create_stream(body)) as stream:
             async for chunk in stream:
@@ -225,6 +231,22 @@ class ApiUseCase:
             return
         if not self.api_key_repo.is_tts_enabled(auth_context.session_id):
             raise TtsDisabledError()
+
+    def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
+        if auth_context is None or auth_context.session_id is None:
+            return
+        getter = getattr(self.api_key_repo, "get_session_model_allowlist", None)
+        if not callable(getter):
+            return
+        if not is_model_allowed(model_id, getter(auth_context.session_id)):
+            raise ModelNotAllowedError()
+
+    def validate_model_allowed(
+        self,
+        model_id: str,
+        auth_context: AuthContext | None = None,
+    ) -> None:
+        self._assert_model_allowed(model_id, auth_context)
 
     def validate_audio_speech_request(
         self,

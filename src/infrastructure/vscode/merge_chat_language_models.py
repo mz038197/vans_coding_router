@@ -58,6 +58,17 @@ def merge_chat_language_models(
             if model_id:
                 model_ids.add(model_id)
 
+        allowed_ids = {
+            model.get("id")
+            for model in template_models
+            if isinstance(model, dict) and model.get("id")
+        }
+        target["models"] = [
+            model
+            for model in existing_models
+            if isinstance(model, dict) and model.get("id") in allowed_ids
+        ]
+
     return merged
 
 

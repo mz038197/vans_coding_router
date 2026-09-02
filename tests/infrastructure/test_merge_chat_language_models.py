@@ -103,6 +103,55 @@ def test_merge_appends_models_and_preserves_api_key():
     assert merged[0]["models"][1]["id"] == "ollama_cloud@qwen3.5:cloud"
 
 
+def test_merge_drops_template_provider_models_not_on_the_allowlist():
+    existing = [
+        {
+            "name": "VSRouter",
+            "vendor": "customendpoint",
+            "apiKey": "student-secret",
+            "models": [
+                {"id": "keep-me", "name": "Keep"},
+                {"id": "drop-me", "name": "Drop"},
+            ],
+        },
+        {
+            "name": "Other",
+            "vendor": "customoai",
+            "apiKey": "keep-me",
+            "models": [{"id": "other-model", "name": "Other Model"}],
+        },
+    ]
+    template = [
+        {
+            "name": "VSRouter",
+            "vendor": "customendpoint",
+            "apiKey": "",
+            "models": [{"id": "keep-me", "name": "Keep", "url": "https://new"}],
+        }
+    ]
+    merged = merge_chat_language_models(existing, template)
+    assert merged[0]["apiKey"] == "student-secret"
+    assert [model["id"] for model in merged[0]["models"]] == ["keep-me"]
+    assert merged[1]["name"] == "Other"
+    assert merged[1]["models"][0]["id"] == "other-model"
+
+
+def test_merge_clears_models_when_template_provider_is_empty():
+    existing = [
+        {
+            "name": "VSRouter",
+            "vendor": "customendpoint",
+            "apiKey": "student-secret",
+            "models": [{"id": "drop-me", "name": "Drop"}],
+        }
+    ]
+    template = [{"name": "VSRouter", "vendor": "customendpoint", "apiKey": "", "models": []}]
+    merged = merge_chat_language_models(existing, template)
+    assert merged[0]["name"] == "VSRouter"
+    assert merged[0]["models"] == []
+    assert merged[0]["apiKey"] == "student-secret"
+
+
 def test_merge_does_not_mutate_inputs():
     existing = [{"name": "VSRouter", "vendor": "customendpoint", "models": []}]
     template = [{"name": "VSRouter", "vendor": "customendpoint", "models": [{"id": "a", "name": "A"}]}]

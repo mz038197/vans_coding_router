@@ -225,6 +225,15 @@ class TtsDisabledError(AppError):
         )
 
 
+class ModelNotAllowedError(AppError):
+    def __init__(self, message: str = "此課堂未開放此模型"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="model_not_allowed",
+        )
+
+
 class SpeechTranscriptionNotSupportedError(AppError):
     def __init__(self, message: str = "此 provider 不支援 /v1/audio/transcriptions"):
         super().__init__(

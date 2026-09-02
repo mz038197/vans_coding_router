@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import zipfile
+from typing import Any
 
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.infrastructure.vscode.model_defaults import MODEL_PATCH_KEYS
@@ -12,10 +13,14 @@ _CMD_PAYLOAD_MARKER = ":VANS_PAYLOAD"
 _CMD_PAYLOAD_SPLIT = "(?m)^:VANS_PAYLOAD\\r?\\n"
 
 
-def render_install_vscode_models_command() -> str:
+def _resolved_template(template: list[Any] | None) -> list[Any]:
+    return template if template is not None else load_vans_template()
+
+
+def render_install_vscode_models_command(template: list[Any] | None = None) -> str:
     """Self-contained macOS .command installer (double-click opens Terminal)."""
     template_b64 = base64.b64encode(
-        json.dumps(load_vans_template(), ensure_ascii=False).encode("utf-8")
+        json.dumps(_resolved_template(template), ensure_ascii=False).encode("utf-8")
     ).decode("ascii")
     patch_keys_literal = ", ".join(repr(key) for key in MODEL_PATCH_KEYS)
     python_body = f"""
@@ -83,6 +88,17 @@ def merge_chat_language_models(existing, template):
             existing_models.append(copy.deepcopy(template_model))
             if model_id:
                 model_ids.add(model_id)
+
+        allowed_ids = {{
+            model.get("id")
+            for model in template_models
+            if isinstance(model, dict) and model.get("id")
+        }}
+        target["models"] = [
+            model
+            for model in existing_models
+            if isinstance(model, dict) and model.get("id") in allowed_ids
+        ]
 
     return merged
 
@@ -155,8 +171,8 @@ print("3. Pick the VCRouter model in Copilot (avoid Auto)")
     )
 
 
-def render_install_vscode_models_cmd() -> str:
-    ps1 = render_install_vscode_models_script()
+def render_install_vscode_models_cmd(template: list[Any] | None = None) -> str:
+    ps1 = render_install_vscode_models_script(template)
     if _CMD_PAYLOAD_MARKER in ps1:
         raise ValueError("PowerShell script cannot contain the payload marker")
     payload = base64.b64encode(ps1.encode("utf-8")).decode("ascii")
@@ -178,15 +194,15 @@ def render_install_vscode_models_cmd() -> str:
     )
 
 
-def build_install_vscode_models_zip() -> bytes:
+def build_install_vscode_models_zip(template: list[Any] | None = None) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("install-vscode-models.cmd", render_install_vscode_models_cmd())
+        archive.writestr("install-vscode-models.cmd", render_install_vscode_models_cmd(template))
     return buffer.getvalue()
 
 
-def render_install_vscode_models_script() -> str:
-    template_json = json.dumps(load_vans_template(), ensure_ascii=False, indent=2)
+def render_install_vscode_models_script(template: list[Any] | None = None) -> str:
+    template_json = json.dumps(_resolved_template(template), ensure_ascii=False, indent=2)
     # Escape closing here-strings for PowerShell single-quoted here-string.
     template_json = template_json.replace("'", "''")
 
@@ -252,6 +268,15 @@ function Merge-ChatLanguageModels {{
             $target.models += ($templateModel | ConvertTo-Json -Depth 30 -Compress | ConvertFrom-Json)
             if ($templateModel.id) {{ $modelIds[$templateModel.id] = $true }}
         }}
+        $allowed = @{{}}
+        foreach ($templateModel in @($templateProvider.models)) {{
+            if ($templateModel.id) {{ $allowed[$templateModel.id] = $true }}
+        }}
+        $kept = @()
+        foreach ($model in @($target.models)) {{
+            if ($model.id -and $allowed.ContainsKey($model.id)) {{ $kept += $model }}
+        }}
+        $target.models = $kept
     }}
 
     return ,$merged

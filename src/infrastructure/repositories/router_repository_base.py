@@ -11,6 +11,11 @@ from typing import Any, Iterator
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
+from src.domain.session_model_allowlist import (
+    MODEL_ALLOWLIST_UNCHANGED,
+    dump_allowlist_json,
+    parse_allowlist_json,
+)
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
 
@@ -931,7 +936,7 @@ class RouterRepositoryBase(ABC):
                         invocation_channel=agent_action_audit.invocation_channel,
                     ),
                 )
-            return dict(row)
+            return self._public_class_session(row)
 
     def list_class_sessions(self, class_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -959,7 +964,14 @@ class RouterRepositoryBase(ABC):
                 ),
                 (class_id,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [self._public_class_session(row) for row in rows]
+
+    @staticmethod
+    def _public_class_session(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        raw = data.pop("model_allowlist_json", None)
+        data["model_allowlist"] = parse_allowlist_json(raw)
+        return data
 
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
         current = now or utc_now()
@@ -999,6 +1011,7 @@ class RouterRepositoryBase(ABC):
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
+        model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
@@ -1011,6 +1024,7 @@ class RouterRepositoryBase(ABC):
             and status is None
             and course_catalog_yaml is None
             and seat_limit is None
+            and model_allowlist is MODEL_ALLOWLIST_UNCHANGED
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -1075,13 +1089,57 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET seat_limit = ? WHERE id = ?"),
                     (int(seat_limit), session_id),
                 )
+            if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET model_allowlist_json = ? WHERE id = ?"),
+                    (dump_allowlist_json(model_allowlist), session_id),
+                )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
             if updated is not None and agent_action_audit is not None:
                 self._insert_agent_action_audit(conn, agent_action_audit)
-            return dict(updated) if updated else None
+            return self._public_class_session(updated) if updated else None
+
+    def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT model_allowlist_json FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return parse_allowlist_json(row["model_allowlist_json"])
+
+    def classroom_api_key_session_allowlist(
+        self, api_key: str
+    ) -> tuple[bool, list[str] | None]:
+        from src.infrastructure.auth.client_api_key import normalize_api_key
+
+        api_key = normalize_api_key(api_key)
+        if not api_key:
+            return False, None
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql(
+                    """
+                    SELECT k.enabled, k.session_id, u.status AS user_status, s.model_allowlist_json
+                    FROM api_keys k
+                    JOIN users u ON u.id = k.user_id
+                    LEFT JOIN class_sessions s ON s.id = k.session_id
+                    WHERE k.key_hash = ?
+                    """
+                ),
+                (self._hash_key(api_key),),
+            ).fetchone()
+            if not row:
+                return False, None
+            if not bool(row["enabled"]) or row["user_status"] != "active":
+                return False, None
+            if not row["session_id"]:
+                return True, None
+            return True, parse_allowlist_json(row["model_allowlist_json"])
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML

@@ -46,6 +46,20 @@ def test_render_install_cmd_decodes_embedded_script():
     assert decoded == render_install_vscode_models_script()
 
 
+def test_render_install_script_embeds_filtered_template():
+    script = render_install_vscode_models_script(
+        [
+            {
+                "name": "VCRouter",
+                "vendor": "customendpoint",
+                "models": [{"id": "only-this-model", "name": "only"}],
+            }
+        ]
+    )
+    assert "only-this-model" in script
+    assert "ollama_cloud@minimax-m3:cloud" not in script
+
+
 def test_render_install_command_targets_macos_paths():
     script = render_install_vscode_models_command()
     assert script.startswith("#!/bin/bash\n")

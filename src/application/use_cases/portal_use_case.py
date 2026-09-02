@@ -10,6 +10,11 @@ from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from src.domain.session_model_allowlist import (
+    MODEL_ALLOWLIST_UNCHANGED,
+    filter_chat_language_models,
+    validate_allowlist,
+)
 
 _VALID_ROLES = frozenset({"admin", "teacher", "student"})
 _VALID_STATUSES = frozenset({"active", "inactive"})
@@ -366,6 +371,7 @@ class PortalUseCase:
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
+        model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         invocation_channel: str | None = None,
         invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
@@ -380,6 +386,8 @@ class PortalUseCase:
             or seat_limit < 1
         ):
             raise ValueError("座位上限必須為正整數")
+        if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
+            model_allowlist = validate_allowlist(model_allowlist, load_vans_template())
         changes = invocation_arguments or self._session_change_arguments(
             expires_at=expires_at,
             name=name,
@@ -391,6 +399,8 @@ class PortalUseCase:
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
         )
+        if invocation_arguments is None and model_allowlist is not MODEL_ALLOWLIST_UNCHANGED:
+            changes["model_allowlist"] = model_allowlist
         session = self.repo.update_class_session(
             class_id,
             session_id,
@@ -403,6 +413,7 @@ class PortalUseCase:
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
+            model_allowlist=model_allowlist,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=user_id,
                 action=self._session_action(changes),
@@ -462,6 +473,8 @@ class PortalUseCase:
             return "change_session_expiry"
         if fields == {"seat_limit"}:
             return "change_session_seat_limit"
+        if fields == {"model_allowlist"}:
+            return "change_session_model_allowlist"
         return "update_class_session"
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:
@@ -488,8 +501,14 @@ class PortalUseCase:
             raise ValueError("classroom nickname is too long")
         return self.repo.redeem_invite_with_nickname(invite_code, cleaned)
 
-    def chat_language_models_template(self) -> list[dict[str, Any]]:
-        return load_vans_template()
+    def chat_language_models_template(self, api_key: str | None = None) -> list[dict[str, Any]]:
+        template = load_vans_template()
+        if not api_key:
+            return template
+        valid, allowlist = self.repo.classroom_api_key_session_allowlist(api_key)
+        if not valid:
+            raise PermissionError("無效的 Classroom API Key")
+        return filter_chat_language_models(template, allowlist)
 
     def _handoff_service(self) -> ExtensionHandoffService:
         return ExtensionHandoffService(

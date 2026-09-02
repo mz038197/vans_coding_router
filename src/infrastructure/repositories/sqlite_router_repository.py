@@ -216,6 +216,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 "seat_limit",
                 "INTEGER NOT NULL DEFAULT 60",
             )
+            self._ensure_column(conn, "class_sessions", "model_allowlist_json", "TEXT")
             self._ensure_column(conn, "class_members", "classroom_nickname", "TEXT")
             conn.execute(
                 """

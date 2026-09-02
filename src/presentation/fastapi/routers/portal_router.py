@@ -16,6 +16,7 @@ from src.infrastructure.auth.extension_handoff import (
 )
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
+from src.domain.session_model_allowlist import MODEL_ALLOWLIST_UNCHANGED
 from src.infrastructure.vscode.install_vscode_models_script import (
     build_install_vscode_models_zip,
     render_install_vscode_models_cmd,
@@ -30,6 +31,13 @@ PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
+
+
+def _classroom_api_key(request: Request) -> str:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return normalize_api_key(auth_header[7:]) or ""
+    return normalize_api_key(request.headers.get("X-API-Key")) or ""
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -113,6 +121,7 @@ class SessionPatchRequest(BaseModel):
     status: str | None = None
     course_catalog_yaml: str | None = None
     seat_limit: int | None = None
+    model_allowlist: list[str] | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -368,8 +377,11 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return payload
 
     @router.get("/extension/chat-language-models")
-    async def extension_chat_language_models():
-        return portal_call(portal_use_case.chat_language_models_template)
+    async def extension_chat_language_models(request: Request):
+        api_key = _classroom_api_key(request)
+        return portal_call(
+            lambda: portal_use_case.chat_language_models_template(api_key or None)
+        )
 
     @router.post("/extension/sessions/redeem")
     async def extension_redeem(data: ExtensionRedeemRequest):
@@ -385,11 +397,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
 
     @router.get("/extension/course-catalog")
     async def extension_course_catalog(request: Request):
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            api_key = normalize_api_key(auth_header[7:]) or ""
-        else:
-            api_key = normalize_api_key(request.headers.get("X-API-Key")) or ""
+        api_key = _classroom_api_key(request)
         if not api_key:
             raise HTTPException(status_code=401, detail="缺少 Classroom API Key")
         return portal_call(lambda: portal_use_case.extension_course_catalog(api_key))
@@ -520,6 +528,13 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         invocation_arguments = data.model_dump(exclude_none=True)
+        model_allowlist = (
+            data.model_allowlist
+            if "model_allowlist" in data.model_fields_set
+            else MODEL_ALLOWLIST_UNCHANGED
+        )
+        if "model_allowlist" in data.model_fields_set:
+            invocation_arguments["model_allowlist"] = data.model_allowlist
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -534,6 +549,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,
                 seat_limit=data.seat_limit,
+                model_allowlist=model_allowlist,
                 invocation_channel=_webmcp_invocation_channel(request),
                 invocation_arguments=invocation_arguments,
             )
@@ -644,9 +660,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return portal_call(lambda: portal_use_case.redeem(current_user_id(session_user_id), data.invite_code))
 
     @router.get("/portal/download/install-vscode-models.ps1")
-    async def download_install_vscode_models(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+    async def download_install_vscode_models(
+        request: Request,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
         current_user_id(session_user_id)
-        script = render_install_vscode_models_script()
+        template = portal_call(
+            lambda: portal_use_case.chat_language_models_template(
+                _classroom_api_key(request) or None
+            )
+        )
+        script = render_install_vscode_models_script(template)
         return PlainTextResponse(
             script,
             media_type="text/plain; charset=utf-8",
@@ -654,9 +678,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         )
 
     @router.get("/portal/download/install-vscode-models.cmd")
-    async def download_install_vscode_models_cmd(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+    async def download_install_vscode_models_cmd(
+        request: Request,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
         current_user_id(session_user_id)
-        script = render_install_vscode_models_cmd()
+        template = portal_call(
+            lambda: portal_use_case.chat_language_models_template(
+                _classroom_api_key(request) or None
+            )
+        )
+        script = render_install_vscode_models_cmd(template)
         return PlainTextResponse(
             script,
             media_type="application/octet-stream",
@@ -664,9 +696,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         )
 
     @router.get("/portal/download/install-vscode-models.command")
-    async def download_install_vscode_models_command(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+    async def download_install_vscode_models_command(
+        request: Request,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
         current_user_id(session_user_id)
-        script = render_install_vscode_models_command()
+        template = portal_call(
+            lambda: portal_use_case.chat_language_models_template(
+                _classroom_api_key(request) or None
+            )
+        )
+        script = render_install_vscode_models_command(template)
         return PlainTextResponse(
             script,
             media_type="application/octet-stream",
@@ -674,9 +714,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         )
 
     @router.get("/portal/download/install-vscode-models.zip")
-    async def download_install_vscode_models_zip(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+    async def download_install_vscode_models_zip(
+        request: Request,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
         current_user_id(session_user_id)
-        payload = build_install_vscode_models_zip()
+        template = portal_call(
+            lambda: portal_use_case.chat_language_models_template(
+                _classroom_api_key(request) or None
+            )
+        )
+        payload = build_install_vscode_models_zip(template)
         return Response(
             content=payload,
             media_type="application/zip",

@@ -105,8 +105,16 @@ A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_�
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
 
 **Class Session**:
-A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. After the sitting ends, the last saved Course Catalog remains readable for students who still hold a key for that session.
+A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Model Allowlist, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. After the sitting ends, the last saved Course Catalog remains readable for students who still hold a key for that session.
 _Avoid_: lesson plan, curriculum repo, student workspace
+
+**Session Model Allowlist**:
+The teacher-chosen subset of Router Model Template ids for one Class Session. Unset (NULL) means no extra filter: GET without a tighter list returns the full Template, and chat/responses API calls keep today's behavior. An explicit empty list means zero chat models. A set list is intersected with the Template for the keyed GET and Portal install scripts, and the API rejects Model IDs not on that list. It is not stored in Course Catalog YAML. **Parity requirement:** same GET/PATCH/API contract as `pegasi_router`.
+_Avoid_: stuffing the allowlist into Course Catalog YAML, a second model-list GET, Class-level default, a shortlist besides the Template
+
+**Router Model Template**:
+The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`. Teacher candidates and student precheck use this GET. Ids not in the Template cannot be saved on a Session Model Allowlist.
+_Avoid_: a second curated catalog, picking a whole upstream by provider name only
 
 **Portal Copy**:
 Teacher- and student-visible Portal UI wording uses Traditional Chinese characters only.
@@ -114,7 +122,7 @@ _Avoid_: Simplified glyphs in Portal copy (e.g. 校验／注册／保存), mixed
 
 **Course Catalog**:
 The curated list of Install Actions and Lesson Snippets attached to one Class Session, stored as YAML (same shape as `classroom-installs.yaml`). Top-level `actions` is required; top-level `snippets` is optional (`[]` or omitted means none). Invalid `snippets` rejects the whole catalog on save. Save-time normalize must round-trip `snippets` (must not dump only `actions`) and dump multiline Lesson Snippet bodies as block scalars. Teachers open a Catalog modal from the session row in Portal and edit Install Actions and Lesson Snippets as structured fields; YAML is import/export only (optional `.yaml`/`.yml` upload into the draft, template download, and download of the current draft), not the primary edit surface. New sessions start with an empty catalog (`actions: []`); invalid YAML is rejected on save. Students fetch via a dedicated extension GET authorized by Classroom API Key (on redeem success, on extension startup when a key already exists, and on manual reload), including after the session has ended (last saved version). The extension keeps the fetched catalog in memory only and does not write it into the student workspace file. Same concept as in the classroom-one-click-install context. **Parity requirement:** Install Action catalog API remains shared with `pegasi_router`. Lesson Snippet save/normalize ships here first; Pegasi parity is deferred (Pegasi save still drops `snippets`). Nickname Redeem is a Vans-only exception and is not part of that shared Router contract.
-_Avoid_: install-vscode-models script, BYOK model list, lobby workspace on the server, per-action file-hosting CDN as catalog storage, first-class file-asset install API in this router, draft-invalid catalogs that break every student's Course Lane, bundling catalog only inside redeem with no reload GET, requiring the extension to persist catalog into `classroom-installs.yaml`, inline expandable catalog row as the primary edit surface, editable YAML textarea as the primary Catalog editor, dumping only `actions` and dropping `snippets`
+_Avoid_: install-vscode-models script, BYOK model list, Session Model Allowlist stored in YAML, lobby workspace on the server, per-action file-hosting CDN as catalog storage, first-class file-asset install API in this router, draft-invalid catalogs that break every student's Course Lane, bundling catalog only inside redeem with no reload GET, requiring the extension to persist catalog into `classroom-installs.yaml`, inline expandable catalog row as the primary edit surface, editable YAML textarea as the primary Catalog editor, dumping only `actions` and dropping `snippets`
 
 **Install Action**:
 A Course Catalog item that names an extension-run install command. Its kind is skill, package, or mcp. It is not a Lesson Snippet and not a file hosted by this router.

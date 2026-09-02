@@ -473,6 +473,37 @@ def test_update_session_name(tmp_path):
     assert updated["name"] == "New Name"
 
 
+def test_session_model_allowlist_round_trip(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    assert session["model_allowlist"] is None
+    assert repo.get_session_model_allowlist(session["id"]) is None
+
+    updated = repo.update_class_session(
+        klass["id"],
+        session["id"],
+        model_allowlist=["ollama_cloud@minimax-m3:cloud"],
+    )
+    assert updated is not None
+    assert updated["model_allowlist"] == ["ollama_cloud@minimax-m3:cloud"]
+    assert repo.get_session_model_allowlist(session["id"]) == ["ollama_cloud@minimax-m3:cloud"]
+
+    emptied = repo.update_class_session(klass["id"], session["id"], model_allowlist=[])
+    assert emptied is not None
+    assert emptied["model_allowlist"] == []
+    assert repo.get_session_model_allowlist(session["id"]) == []
+
+    unset = repo.update_class_session(klass["id"], session["id"], model_allowlist=None)
+    assert unset is not None
+    assert unset["model_allowlist"] is None
+    assert repo.get_session_model_allowlist(session["id"]) is None
+
+
 def test_get_active_keys_includes_session_name(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),

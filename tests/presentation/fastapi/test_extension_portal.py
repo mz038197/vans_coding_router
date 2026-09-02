@@ -55,6 +55,105 @@ def test_chat_language_models_template_is_public(tmp_path):
     assert response.json() == load_vans_template()
 
 
+def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    allowed = "ollama_cloud@minimax-m3:cloud"
+    other = "openrouter@minimax/minimax-m3"
+    patch = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"model_allowlist": [allowed]},
+    )
+    assert patch.status_code == 200
+    assert patch.json()["model_allowlist"] == [allowed]
+
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+    redeem = client.post(
+        "/extension/sessions/redeem",
+        json={
+            "handoff_token": login.json()["handoff_token"],
+            "invite_code": session["invite_code"],
+        },
+    )
+    api_key = redeem.json()["api_key"]
+    filtered = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert filtered.status_code == 200
+    ids = [model["id"] for model in filtered.json()[0]["models"]]
+    assert ids == [allowed]
+    assert other not in ids
+
+    empty = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"model_allowlist": []},
+    )
+    assert empty.status_code == 200
+    assert empty.json()["model_allowlist"] == []
+    emptied = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert emptied.json()[0]["name"] == "VCRouter"
+    assert emptied.json()[0]["models"] == []
+
+    unset = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"model_allowlist": None},
+    )
+    assert unset.status_code == 200
+    assert unset.json()["model_allowlist"] is None
+    restored = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert restored.json() == load_vans_template()
+
+
+def test_chat_language_models_invalid_bearer_is_forbidden(tmp_path):
+    client, _, _ = _client(tmp_path)
+    response = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": "Bearer vcr_sk_not-a-real-key"},
+    )
+    assert response.status_code == 403
+
+
+def test_chat_language_models_personal_key_returns_full_template(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    repo.update_user(teacher["id"], roles=["teacher"])
+    personal = repo.issue_long_lived_key(teacher["id"])
+    response = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {personal}"},
+    )
+    assert response.status_code == 200
+    assert response.json() == load_vans_template()
+
+
+def test_session_model_allowlist_rejects_ids_outside_template(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"model_allowlist": ["unknown@not-in-template"]},
+    )
+    assert response.status_code == 400
+
+
 def test_dev_google_login_returns_handoff_for_extension_client(tmp_path):
     client, _, _ = _client(tmp_path)
     response = client.post(
