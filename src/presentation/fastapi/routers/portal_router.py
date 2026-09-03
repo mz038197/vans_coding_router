@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.domain.errors import MissingTargetError, QuarantineReleaseCooldownError
+from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
 from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.infrastructure.auth.extension_handoff import (
     build_extension_uri,
@@ -172,6 +172,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         except HTTPException:
             raise
         except MissingTargetError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+        except ApiKeyExpiredError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
         except PermissionError:
             raise HTTPException(status_code=403, detail="權限不足") from None

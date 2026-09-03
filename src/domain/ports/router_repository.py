@@ -188,8 +188,8 @@ class RouterRepositoryPort(Protocol):
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         """Return Session Course Catalog YAML for a Classroom API Key.
 
-        Ignores session/key expiry so ended sittings still serve the last catalog.
         Returns None when the key is missing, disabled, or not bound to a session.
+        Callers reject expired keys before serving the catalog.
         """
         ...
 
