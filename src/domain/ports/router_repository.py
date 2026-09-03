@@ -18,6 +18,9 @@ class RouterRepositoryPort(Protocol):
     def verify_api_key_context(self, api_key: str) -> AuthContext | None:
         ...
 
+    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+        ...
+
     def upsert_google_user(self, email: str, name: str, google_sub: str | None = None) -> dict[str, Any]:
         ...
 

@@ -478,7 +478,7 @@ class PortalUseCase:
         return "update_class_session"
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:
-        self._require_live_api_key(api_key)
+        self._require_usable_api_key(api_key)
         yaml_text = self.repo.get_course_catalog_yaml_for_api_key(api_key)
         if yaml_text is None:
             raise PermissionError("無效的 Classroom API Key")
@@ -506,15 +506,13 @@ class PortalUseCase:
         template = load_vans_template()
         if not api_key:
             return template
-        self._require_live_api_key(api_key)
+        self._require_usable_api_key(api_key)
         valid, allowlist = self.repo.classroom_api_key_session_allowlist(api_key)
         if not valid:
             raise PermissionError("無效的 Classroom API Key")
         return filter_chat_language_models(template, allowlist)
 
-    def _require_live_api_key(self, api_key: str) -> None:
-        if not hasattr(self.repo, "verify_api_key_with_reason"):
-            return
+    def _require_usable_api_key(self, api_key: str) -> None:
         _, failure = self.repo.verify_api_key_with_reason(api_key)
         if failure == "expired":
             raise ApiKeyExpiredError()
