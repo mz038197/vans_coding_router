@@ -54,7 +54,10 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
     student = repo.upsert_google_user("student@school.edu", "Student")
     student_key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     headers = {"Authorization": f"Bearer {student_key}"}
-    body = {"model": "fake-model", "messages": [{"role": "user", "content": "hello"}]}
+    body = {
+        "model": "ollama_cloud@minimax-m3:cloud",
+        "messages": [{"role": "user", "content": "hello"}],
+    }
 
     assert repo.is_prompt_logging_enabled(session["id"]) is True
 
