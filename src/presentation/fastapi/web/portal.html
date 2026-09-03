@@ -2797,8 +2797,16 @@ snippets:
         vendor: VCROUTER_STENCIL.vendor,
         apiKey: VCROUTER_STENCIL.apiKey,
         apiType: VCROUTER_STENCIL.apiType,
-        models: (draft.models || []).map((model) => ({ ...model })),
+        models: (draft.models || []).map(stencilDraftModel),
       }];
+    }
+
+    function stencilDraftModel(model) {
+      return {
+        ...model,
+        url: VCROUTER_STENCIL.url,
+        requestHeaders: { ...VCROUTER_STENCIL.requestHeaders },
+      };
     }
 
     function parseSessionChatModelsUpload(raw) {
@@ -2811,17 +2819,20 @@ snippets:
       if (!Array.isArray(parsed)) {
         throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
       }
-      const models = modelsFromDocument(parsed);
-      if (parsed.length && parsed.some((item) => !item || typeof item !== 'object')) {
+      if (parsed.some((item) => !item || typeof item !== 'object')) {
         throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
       }
-      if (parsed.some((provider) => provider && provider.models && !Array.isArray(provider.models))) {
+      if (parsed.some((provider) => provider.models != null && !Array.isArray(provider.models))) {
         throw new Error('Session Chat Language Models 格式錯誤，編輯器內容未變更。');
       }
-      if ((parsed[0] && parsed[0].models || []).some((model) => model && !model.id)) {
-        throw new Error('模型缺少 id，編輯器內容未變更。');
+      for (const provider of parsed) {
+        for (const model of provider.models || []) {
+          if (!model || typeof model !== 'object' || !model.id) {
+            throw new Error('模型缺少 id，編輯器內容未變更。');
+          }
+        }
       }
-      return models;
+      return modelsFromDocument(parsed).map(stencilDraftModel);
     }
 
     function setSessionChatModelsMsg(id, text, isError) {
@@ -2962,6 +2973,18 @@ snippets:
         });
         seen.add(model.id);
       }
+      for (const model of Object.values(sessionChatModelsDraft.removed || {})) {
+        if (!model || !model.id || seen.has(model.id)) continue;
+        const catalog = catalogById.get(model.id);
+        rows.push({
+          id: model.id,
+          name: model.name || (catalog && catalog.name) || model.id,
+          provider: catalog ? catalog.provider : modelIdPrefix(model.id),
+          missing: !catalog,
+          checked: false,
+        });
+        seen.add(model.id);
+      }
       if (!sessionChatModelsCatalog.unavailable) {
         for (const item of sessionChatModelsCatalog.models || []) {
           if (seen.has(item.id)) continue;
@@ -3067,7 +3090,21 @@ snippets:
       setSessionChatModelsMsg('sessionChatModelsCatalogMsg', '', false);
     }
 
+    function isSessionChatModelsDraftDirty() {
+      const session = sessionChatModelsContext
+        && window.__sessionById
+        && window.__sessionById[sessionChatModelsContext.sessionId];
+      const saved = modelsFromDocument(session && session.session_chat_language_models);
+      const current = sessionChatModelsDraft.models || [];
+      if (saved.length !== current.length) return true;
+      return JSON.stringify(saved.map((m) => m.id).sort()) !== JSON.stringify(current.map((m) => m.id).sort());
+    }
+
     function requestCloseSessionChatModelsModal() {
+      if (isSessionChatModelsDraftDirty()) {
+        const ok = window.confirm('尚未儲存，確定離開？');
+        if (!ok) return;
+      }
       closeSessionChatModelsModal();
     }
 

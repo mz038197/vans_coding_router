@@ -174,7 +174,10 @@ class PortalUseCase:
                     "name": name if isinstance(name, str) and name else model_id,
                 }
             )
-        return {"providers": providers, "models": models, "unavailable": False}
+        errors = (raw or {}).get("provider_errors") or {}
+        chat_errors = {name: errors[name] for name in providers if name in errors}
+        unavailable = bool(providers) and not models and set(providers) <= set(chat_errors)
+        return {"providers": providers, "models": models, "unavailable": unavailable}
 
     async def release_key_quarantine(
         self,

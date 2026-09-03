@@ -328,6 +328,35 @@ def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tm
     assert ids.count("openrouter@minimax/minimax-m3") == 1
 
 
+class _AllChatProvidersFailedGateway:
+    async def models(self):
+        return {
+            "object": "list",
+            "data": [{"id": "openai@gpt-4o-mini-tts", "provider": "openai", "name": "tts"}],
+            "provider_errors": {
+                "ollama_cloud": "timeout",
+                "openrouter": "timeout",
+            },
+        }
+
+
+def test_catalog_is_unavailable_when_every_chat_provider_fails(tmp_path):
+    client, repo, _ = _client(
+        tmp_path,
+        llm_gateway=_AllChatProvidersFailedGateway(),
+        providers=_classroom_providers(),
+    )
+    teacher, _, _ = _owner_session(repo)
+    catalog = client.get(
+        "/teacher/upstream-model-catalog",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    assert catalog.status_code == 200
+    assert catalog.json()["unavailable"] is True
+    assert catalog.json()["models"] == []
+    assert set(catalog.json()["providers"]) == {"ollama_cloud", "openrouter"}
+
+
 def test_catalog_fetch_failure_does_not_clear_stored_rows(tmp_path):
     client, repo, _ = _client(
         tmp_path,
