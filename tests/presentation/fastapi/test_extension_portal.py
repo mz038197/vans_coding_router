@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -158,11 +157,11 @@ def test_keyed_chat_language_models_returns_session_document_not_live_template(t
             "models": [{"id": "ollama_cloud@minimax-m3:cloud", "name": "sitting-only"}],
         }
     ]
-    with repo._connect() as conn:
-        conn.execute(
-            repo._sql("UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"),
-            (json.dumps(document, ensure_ascii=False), session["id"]),
-        )
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=document,
+    )
     api_key = _redeem_student_key(client, session["invite_code"])
 
     keyed = client.get(
@@ -228,13 +227,13 @@ def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
     assert emptied.json()[0]["name"] == "VCRouter"
     assert emptied.json()[0]["models"] == []
 
-    unset = client.patch(
-        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
-        cookies=_portal_cookie(repo, teacher["id"]),
-        json={"model_allowlist": None},
+    restored_session = repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=load_vans_template(),
     )
-    assert unset.status_code == 200
-    assert unset.json()["model_allowlist"] == template_model_ids(load_vans_template())
+    assert restored_session is not None
+    assert restored_session["model_allowlist"] == template_model_ids(load_vans_template())
     restored = client.get(
         "/extension/chat-language-models",
         headers={"Authorization": f"Bearer {api_key}"},

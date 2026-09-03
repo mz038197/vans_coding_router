@@ -13,6 +13,7 @@ from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
+    SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
     allowlist_from_document,
     dump_session_chat_language_models_json,
     filter_chat_language_models,
@@ -1038,6 +1039,7 @@ class RouterRepositoryBase(ABC):
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
+        session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
@@ -1051,6 +1053,7 @@ class RouterRepositoryBase(ABC):
             and course_catalog_yaml is None
             and seat_limit is None
             and model_allowlist is MODEL_ALLOWLIST_UNCHANGED
+            and session_chat_language_models is SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -1115,15 +1118,24 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET seat_limit = ? WHERE id = ?"),
                     (int(seat_limit), session_id),
                 )
-            if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED:
-                from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
-
-                template = load_vans_template()
-                document = (
-                    template
-                    if model_allowlist is None
-                    else filter_chat_language_models(template, model_allowlist)
+            if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
+                conn.execute(
+                    self._sql(
+                        "UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"
+                    ),
+                    (dump_session_chat_language_models_json(session_chat_language_models), session_id),
                 )
+            elif model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
+                current_row = conn.execute(
+                    self._sql(
+                        "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                    ),
+                    (session_id,),
+                ).fetchone()
+                current = parse_session_chat_language_models_json(
+                    current_row["session_chat_language_models_json"] if current_row else None
+                )
+                document = filter_chat_language_models(current or [], model_allowlist)
                 conn.execute(
                     self._sql(
                         "UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"

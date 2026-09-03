@@ -5,7 +5,10 @@ from typing import Any, Protocol
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
-from src.domain.session_model_allowlist import MODEL_ALLOWLIST_UNCHANGED
+from src.domain.session_model_allowlist import (
+    MODEL_ALLOWLIST_UNCHANGED,
+    SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
+)
 
 
 class RouterRepositoryPort(Protocol):
@@ -176,6 +179,7 @@ class RouterRepositoryPort(Protocol):
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
+        session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         ...

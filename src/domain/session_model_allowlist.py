@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 MODEL_ALLOWLIST_UNCHANGED = object()
+SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
 
 
 def template_model_ids(template: list[Any]) -> list[str]:

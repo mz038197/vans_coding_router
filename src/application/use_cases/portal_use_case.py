@@ -386,7 +386,9 @@ class PortalUseCase:
         ):
             raise ValueError("座位上限必須為正整數")
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
-            model_allowlist = validate_allowlist(model_allowlist, load_vans_template())
+            existing = self.get_session(user_id, class_id, session_id)
+            document = (existing or {}).get("session_chat_language_models") or []
+            model_allowlist = validate_allowlist(model_allowlist, document)
         changes = invocation_arguments or self._session_change_arguments(
             expires_at=expires_at,
             name=name,

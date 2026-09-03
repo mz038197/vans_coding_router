@@ -109,15 +109,15 @@ A teacher-managed classroom instance under a Class: invite lifecycle, Session Se
 _Avoid_: lesson plan, curriculum repo, student workspace
 
 **Session Chat Language Models**:
-A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. A new sitting is born as a copy of the Template; sittings with no document receive that copy once at ship, not on student GET. A student with an unexpired Classroom API Key receives this document from the keyed models GET.
+A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template.
 _Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML
 
 **Session Model Allowlist**:
-The Model IDs inside that session’s Session Chat Language Models. It is not a second teacher-edited list. An empty document means zero chat models. Chat completions and responses reject Model IDs not in the document.
+The Model IDs inside that session’s Session Chat Language Models, not a second teacher-edited list.
 _Avoid_: a second teacher-edited id list, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
-The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`. Teacher candidates and student precheck use this GET. It is the copy source for a new Class Session and for the one-shot ship of sittings that have no document.
+The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`.
 _Avoid_: a second curated catalog, picking a whole upstream by provider name only, treating the live file as the student keyed GET
 
 **Portal Copy**:

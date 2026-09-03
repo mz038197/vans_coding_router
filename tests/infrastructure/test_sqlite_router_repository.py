@@ -502,10 +502,14 @@ def test_session_model_allowlist_round_trip(tmp_path):
     assert emptied["model_allowlist"] == []
     assert repo.get_session_model_allowlist(session["id"]) == []
 
-    unset = repo.update_class_session(klass["id"], session["id"], model_allowlist=None)
-    assert unset is not None
-    assert unset["session_chat_language_models"] == template
-    assert unset["model_allowlist"] == template_model_ids(template)
+    restored = repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=template,
+    )
+    assert restored is not None
+    assert restored["session_chat_language_models"] == template
+    assert restored["model_allowlist"] == template_model_ids(template)
     assert repo.get_session_model_allowlist(session["id"]) == template_model_ids(template)
 
 
