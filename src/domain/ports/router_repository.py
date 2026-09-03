@@ -18,6 +18,9 @@ class RouterRepositoryPort(Protocol):
     def verify_api_key_context(self, api_key: str) -> AuthContext | None:
         ...
 
+    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+        ...
+
     def upsert_google_user(self, email: str, name: str, google_sub: str | None = None) -> dict[str, Any]:
         ...
 
@@ -188,8 +191,8 @@ class RouterRepositoryPort(Protocol):
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         """Return Session Course Catalog YAML for a Classroom API Key.
 
-        Ignores session/key expiry so ended sittings still serve the last catalog.
         Returns None when the key is missing, disabled, or not bound to a session.
+        Callers reject expired keys before serving the catalog.
         """
         ...
 

@@ -7,11 +7,17 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fakes import FakeLLMGateway, FakeRequestLogger
+from src.application.use_cases.api_use_case import ApiUseCase
+from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from src.presentation.fastapi.error_handlers import register_error_handlers
+from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
+from src.presentation.fastapi.routers.api_router import create_api_router
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 
 
@@ -35,12 +41,38 @@ def _client(tmp_path, **settings_kwargs):
     settings = _settings(tmp_path, **settings_kwargs)
     repo = SqliteRouterRepository(settings.database.path, settings)
     app = FastAPI()
+    register_error_handlers(app)
+    auth_use_case = AuthUseCase(api_key_repo=repo)
+    api_use_case = ApiUseCase(gateway=FakeLLMGateway(), api_key_repo=repo, logger=FakeRequestLogger())
+    app.add_middleware(ApiKeyMiddleware, auth_use_case=auth_use_case)
+    app.include_router(create_api_router(api_use_case))
     app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
     return TestClient(
         app,
         base_url="http://127.0.0.1",
         headers={"Origin": settings.public_url},
     ), repo, settings
+
+
+def _redeem_student_key(client, invite_code: str) -> str:
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+    redeem = client.post(
+        "/extension/sessions/redeem",
+        json={"handoff_token": login.json()["handoff_token"], "invite_code": invite_code},
+    )
+    return redeem.json()["api_key"]
+
+
+def _end_session(client, repo, teacher_id: int, class_id: int, session_id: int) -> None:
+    ended = client.patch(
+        f"/teacher/classes/{class_id}/sessions/{session_id}",
+        cookies=_portal_cookie(repo, teacher_id),
+        json={"status": "ended"},
+    )
+    assert ended.status_code == 200
 
 
 def _portal_cookie(repo, user_id: int) -> dict[str, str]:
@@ -194,7 +226,7 @@ def test_extension_redeem_with_handoff(tmp_path):
     assert reuse.status_code == 400
 
 
-def test_extension_course_catalog_get_and_after_session_end(tmp_path):
+def test_extension_course_catalog_get_and_fails_after_session_end(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "Demo", None, 2)
@@ -252,8 +284,93 @@ actions:
         "/extension/course-catalog",
         headers={"Authorization": f"Bearer {api_key}"},
     )
-    assert after_end.status_code == 200
-    assert "demo" in after_end.json()["course_catalog_yaml"]
+    assert after_end.status_code == 401
+    assert after_end.json()["detail"] == "API 金鑰已過期，請至 Portal 重新取得邀請碼"
+
+
+def test_keyed_chat_language_models_fails_after_session_end(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+
+    live = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert live.status_code == 200
+    assert live.json() == load_vans_template()
+
+    _end_session(client, repo, teacher["id"], klass["id"], session["id"])
+    after_end = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert after_end.status_code == 401
+    assert after_end.json()["detail"] == "API 金鑰已過期，請至 Portal 重新取得邀請碼"
+
+    public = client.get("/extension/chat-language-models")
+    assert public.status_code == 200
+    assert public.json() == load_vans_template()
+
+
+def test_v1_chat_still_fails_after_session_end(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    _end_session(client, repo, teacher["id"], klass["id"], session["id"])
+
+    chat = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert chat.status_code == 401
+    assert chat.json()["error"]["code"] == "api_key_expired"
+
+
+def test_disabled_key_fails_extension_gets(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE api_keys SET enabled = ? WHERE key_hash = ?"),
+            (repo._disabled_enabled_value(), repo._hash_key(api_key)),
+        )
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    catalog = client.get("/extension/course-catalog", headers=headers)
+    models = client.get("/extension/chat-language-models", headers=headers)
+    assert catalog.status_code == 403
+    assert models.status_code == 403
+
+
+def test_suspended_user_fails_extension_gets(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    student = repo.get_user_by_email("student@gmail.com")
+    assert student is not None
+    disable = client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"status": "inactive"},
+    )
+    assert disable.status_code == 200
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    catalog = client.get("/extension/course-catalog", headers=headers)
+    models = client.get("/extension/chat-language-models", headers=headers)
+    assert catalog.status_code == 403
+    assert models.status_code == 403
 
 
 def test_teacher_patch_dumps_multiline_snippet_body_as_block_scalar(tmp_path):
