@@ -41,6 +41,27 @@ def dump_allowlist_json(allowlist: list[str] | None) -> str | None:
     return json.dumps(allowlist, ensure_ascii=False)
 
 
+def parse_session_chat_language_models_json(raw: str | None) -> list[Any] | None:
+    if raw is None or raw == "":
+        return None
+    data = json.loads(raw)
+    if not isinstance(data, list):
+        raise ValueError("Session Chat Language Models 格式錯誤")
+    return data
+
+
+def dump_session_chat_language_models_json(document: list[Any] | None) -> str | None:
+    if document is None:
+        return None
+    return json.dumps(document, ensure_ascii=False)
+
+
+def allowlist_from_document(document: list[Any] | None) -> list[str] | None:
+    if document is None:
+        return None
+    return template_model_ids(document)
+
+
 def validate_allowlist(allowlist: list[str], template: list[Any]) -> list[str]:
     allowed = set(template_model_ids(template))
     unknown = [model_id for model_id in allowlist if model_id not in allowed]

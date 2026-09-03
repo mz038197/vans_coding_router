@@ -12,7 +12,6 @@ from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
-    filter_chat_language_models,
     validate_allowlist,
 )
 
@@ -507,10 +506,12 @@ class PortalUseCase:
         if not api_key:
             return template
         self._require_usable_api_key(api_key)
-        valid, allowlist = self.repo.classroom_api_key_session_allowlist(api_key)
+        valid, document = self.repo.classroom_api_key_session_chat_language_models(api_key)
         if not valid:
             raise PermissionError("無效的 Classroom API Key")
-        return filter_chat_language_models(template, allowlist)
+        if document is None:
+            return template
+        return document
 
     def _require_usable_api_key(self, api_key: str) -> None:
         _, failure = self.repo.verify_api_key_with_reason(api_key)

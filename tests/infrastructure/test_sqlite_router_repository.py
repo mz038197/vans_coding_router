@@ -3,8 +3,10 @@ import sqlite3
 
 import pytest
 
+from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
 
 def _settings(tmp_path) -> RouterSettings:
@@ -481,8 +483,10 @@ def test_session_model_allowlist_round_trip(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     klass = repo.create_class(teacher["id"], "AI", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
-    assert session["model_allowlist"] is None
-    assert repo.get_session_model_allowlist(session["id"]) is None
+    template = load_vans_template()
+    assert session["session_chat_language_models"] == template
+    assert session["model_allowlist"] == template_model_ids(template)
+    assert repo.get_session_model_allowlist(session["id"]) == template_model_ids(template)
 
     updated = repo.update_class_session(
         klass["id"],
@@ -500,8 +504,9 @@ def test_session_model_allowlist_round_trip(tmp_path):
 
     unset = repo.update_class_session(klass["id"], session["id"], model_allowlist=None)
     assert unset is not None
-    assert unset["model_allowlist"] is None
-    assert repo.get_session_model_allowlist(session["id"]) is None
+    assert unset["session_chat_language_models"] == template
+    assert unset["model_allowlist"] == template_model_ids(template)
+    assert repo.get_session_model_allowlist(session["id"]) == template_model_ids(template)
 
 
 def test_get_active_keys_includes_session_name(tmp_path):

@@ -188,6 +188,11 @@ class RouterRepositoryPort(Protocol):
     ) -> tuple[bool, list[str] | None]:
         ...
 
+    def classroom_api_key_session_chat_language_models(
+        self, api_key: str
+    ) -> tuple[bool, list[Any] | None]:
+        ...
+
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         """Return Session Course Catalog YAML for a Classroom API Key.
 

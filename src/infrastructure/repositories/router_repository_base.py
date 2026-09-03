@@ -13,8 +13,10 @@ from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
-    dump_allowlist_json,
-    parse_allowlist_json,
+    allowlist_from_document,
+    dump_session_chat_language_models_json,
+    filter_chat_language_models,
+    parse_session_chat_language_models_json,
 )
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
@@ -509,6 +511,22 @@ class RouterRepositoryBase(ABC):
                 (now_s, session_id),
             )
 
+    def _backfill_session_chat_language_models(self, conn: Any) -> None:
+        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+        document_json = dump_session_chat_language_models_json(load_vans_template())
+        conn.execute(
+            self._sql(
+                """
+                UPDATE class_sessions
+                SET session_chat_language_models_json = ?
+                WHERE session_chat_language_models_json IS NULL
+                   OR session_chat_language_models_json = ''
+                """
+            ),
+            (document_json,),
+        )
+
     def is_enabled(self) -> bool:
         return True
 
@@ -899,6 +917,9 @@ class RouterRepositoryBase(ABC):
         invite_code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
         now = dt(utc_now())
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
+        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+        document_json = dump_session_chat_language_models_json(load_vans_template())
 
         with self._connect() as conn:
             session_id = self._insert_returning_id(
@@ -906,8 +927,8 @@ class RouterRepositoryBase(ABC):
                 """
                 INSERT INTO class_sessions(
                     class_id, invite_code, expires_at, session_at, name, created_by, created_at,
-                    course_catalog_yaml
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    course_catalog_yaml, session_chat_language_models_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     class_id,
@@ -918,6 +939,7 @@ class RouterRepositoryBase(ABC):
                     created_by,
                     now,
                     DEFAULT_COURSE_CATALOG_YAML,
+                    document_json,
                 ),
             )
             row = conn.execute(
@@ -969,8 +991,12 @@ class RouterRepositoryBase(ABC):
     @staticmethod
     def _public_class_session(row: Any) -> dict[str, Any]:
         data = dict(row)
-        raw = data.pop("model_allowlist_json", None)
-        data["model_allowlist"] = parse_allowlist_json(raw)
+        data.pop("model_allowlist_json", None)
+        document = parse_session_chat_language_models_json(
+            data.pop("session_chat_language_models_json", None)
+        )
+        data["session_chat_language_models"] = document
+        data["model_allowlist"] = allowlist_from_document(document)
         return data
 
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
@@ -1090,9 +1116,19 @@ class RouterRepositoryBase(ABC):
                     (int(seat_limit), session_id),
                 )
             if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED:
+                from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+                template = load_vans_template()
+                document = (
+                    template
+                    if model_allowlist is None
+                    else filter_chat_language_models(template, model_allowlist)
+                )
                 conn.execute(
-                    self._sql("UPDATE class_sessions SET model_allowlist_json = ? WHERE id = ?"),
-                    (dump_allowlist_json(model_allowlist), session_id),
+                    self._sql(
+                        "UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"
+                    ),
+                    (dump_session_chat_language_models_json(document), session_id),
                 )
             updated = conn.execute(
                 self._sql("SELECT * FROM class_sessions WHERE id = ?"),
@@ -1105,16 +1141,31 @@ class RouterRepositoryBase(ABC):
     def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT model_allowlist_json FROM class_sessions WHERE id = ?"),
+                self._sql(
+                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                ),
                 (session_id,),
             ).fetchone()
             if not row:
                 return None
-            return parse_allowlist_json(row["model_allowlist_json"])
+            document = parse_session_chat_language_models_json(
+                row["session_chat_language_models_json"]
+            )
+            if document is None:
+                return []
+            return allowlist_from_document(document)
 
     def classroom_api_key_session_allowlist(
         self, api_key: str
     ) -> tuple[bool, list[str] | None]:
+        valid, document = self.classroom_api_key_session_chat_language_models(api_key)
+        if not valid:
+            return False, None
+        return True, allowlist_from_document(document)
+
+    def classroom_api_key_session_chat_language_models(
+        self, api_key: str
+    ) -> tuple[bool, list[Any] | None]:
         from src.infrastructure.auth.client_api_key import normalize_api_key
 
         api_key = normalize_api_key(api_key)
@@ -1124,7 +1175,8 @@ class RouterRepositoryBase(ABC):
             row = conn.execute(
                 self._sql(
                     """
-                    SELECT k.enabled, k.session_id, u.status AS user_status, s.model_allowlist_json
+                    SELECT k.enabled, k.session_id, u.status AS user_status,
+                           s.session_chat_language_models_json
                     FROM api_keys k
                     JOIN users u ON u.id = k.user_id
                     LEFT JOIN class_sessions s ON s.id = k.session_id
@@ -1139,7 +1191,10 @@ class RouterRepositoryBase(ABC):
                 return False, None
             if not row["session_id"]:
                 return True, None
-            return True, parse_allowlist_json(row["model_allowlist_json"])
+            document = parse_session_chat_language_models_json(
+                row["session_chat_language_models_json"]
+            )
+            return True, [] if document is None else document
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML

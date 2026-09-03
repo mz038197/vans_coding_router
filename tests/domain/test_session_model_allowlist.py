@@ -1,8 +1,11 @@
 from src.domain.session_model_allowlist import (
+    allowlist_from_document,
     dump_allowlist_json,
+    dump_session_chat_language_models_json,
     filter_chat_language_models,
     is_model_allowed,
     parse_allowlist_json,
+    parse_session_chat_language_models_json,
     template_model_ids,
     validate_allowlist,
 )
@@ -60,3 +63,15 @@ def test_parse_and_dump_round_trip_empty_versus_unset():
         "ollama_cloud@mini:cloud",
         "openrouter@minimax/minimax-m3",
     ]
+
+
+def test_allowlist_is_derived_from_session_document():
+    assert allowlist_from_document(None) is None
+    assert allowlist_from_document([]) == []
+    assert allowlist_from_document(TEMPLATE) == [
+        "ollama_cloud@mini:cloud",
+        "openrouter@minimax/minimax-m3",
+    ]
+    dumped = dump_session_chat_language_models_json(TEMPLATE)
+    assert parse_session_chat_language_models_json(dumped) == TEMPLATE
+    assert parse_session_chat_language_models_json(None) is None

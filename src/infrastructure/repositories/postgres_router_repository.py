@@ -201,6 +201,10 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS model_allowlist_json TEXT"
             )
+            conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS session_chat_language_models_json TEXT"
+            )
+            self._backfill_session_chat_language_models(conn)
             conn.execute("ALTER TABLE class_members ADD COLUMN IF NOT EXISTS classroom_nickname TEXT")
             conn.execute(
                 """

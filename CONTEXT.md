@@ -105,16 +105,20 @@ A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_â€
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
 
 **Class Session**:
-A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Model Allowlist, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
+A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
 _Avoid_: lesson plan, curriculum repo, student workspace
 
+**Session Chat Language Models**:
+A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. A new sitting is born as a copy of the Template; sittings with no document receive that copy once at ship, not on student GET. A student with an unexpired Classroom API Key receives this document from the keyed models GET.
+_Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML
+
 **Session Model Allowlist**:
-The teacher-chosen subset of Router Model Template ids for one Class Session. Unset (NULL) means no extra filter: GET without a tighter list returns the full Template, and chat/responses API calls keep today's behavior. An explicit empty list means zero chat models. A set list is intersected with the Template for the keyed GET and Portal install scripts, and the API rejects Model IDs not on that list. It is not stored in Course Catalog YAML. **Parity requirement:** same GET/PATCH/API contract as `pegasi_router`.
-_Avoid_: stuffing the allowlist into Course Catalog YAML, a second model-list GET, Class-level default, a shortlist besides the Template
+The Model IDs inside that sessionâ€™s Session Chat Language Models. It is not a second teacher-edited list. An empty document means zero chat models. Chat completions and responses reject Model IDs not in the document.
+_Avoid_: a second teacher-edited id list, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
-The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`. Teacher candidates and student precheck use this GET. Ids not in the Template cannot be saved on a Session Model Allowlist.
-_Avoid_: a second curated catalog, picking a whole upstream by provider name only
+The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`. Teacher candidates and student precheck use this GET. It is the copy source for a new Class Session and for the one-shot ship of sittings that have no document.
+_Avoid_: a second curated catalog, picking a whole upstream by provider name only, treating the live file as the student keyed GET
 
 **Portal Copy**:
 Teacher- and student-visible Portal UI wording uses Traditional Chinese characters only.

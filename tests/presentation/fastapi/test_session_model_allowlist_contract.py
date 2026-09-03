@@ -63,15 +63,52 @@ def test_session_allowlist_rejects_disallowed_chat_model(tmp_path):
     assert allowed.status_code == 200
 
 
-def test_unset_allowlist_does_not_filter_chat_models(tmp_path):
-    client, repo, _gateway = _sqlite_api_client(tmp_path)
+def test_new_session_chat_rejects_model_id_not_in_template_copy(tmp_path):
+    client, repo, gateway = _sqlite_api_client(tmp_path)
     _klass, _session, student_key = _student_chat_setup(repo)
-    response = client.post(
+    headers = {"Authorization": f"Bearer {student_key}"}
+
+    blocked = client.post(
         "/v1/chat/completions",
-        headers={"Authorization": f"Bearer {student_key}"},
+        headers=headers,
         json={"model": "anything-goes", "messages": [{"role": "user", "content": "hi"}]},
     )
-    assert response.status_code == 200
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "model_not_allowed"
+    assert gateway.last_nonstream_req is None
+
+    allowed = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert allowed.status_code == 200
+
+
+def test_missing_session_document_rejects_all_chat_models_without_writing(tmp_path):
+    client, repo, gateway = _sqlite_api_client(tmp_path)
+    klass, session, student_key = _student_chat_setup(repo)
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql(
+                "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = ?"
+            ),
+            (session["id"],),
+        )
+    blocked = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "model_not_allowed"
+    assert gateway.last_nonstream_req is None
+    with repo._connect() as conn:
+        stored = conn.execute(
+            repo._sql("SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"),
+            (session["id"],),
+        ).fetchone()
+        assert stored["session_chat_language_models_json"] is None
 
 
 def test_empty_allowlist_rejects_all_chat_models(tmp_path):

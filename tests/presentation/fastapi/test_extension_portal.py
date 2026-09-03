@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.presentation.fastapi.error_handlers import register_error_handlers
 from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
@@ -87,6 +89,95 @@ def test_chat_language_models_template_is_public(tmp_path):
     assert response.json() == load_vans_template()
 
 
+def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    created = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"name": "Week 1"},
+    )
+    assert created.status_code == 200
+    assert created.json()["session_chat_language_models"] == load_vans_template()
+    api_key = _redeem_student_key(client, created.json()["invite_code"])
+
+    keyed = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert keyed.status_code == 200
+    assert keyed.json() == load_vans_template()
+
+
+def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql(
+                "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = ?"
+            ),
+            (session["id"],),
+        )
+
+    before_ship = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert before_ship.status_code == 200
+    assert before_ship.json() == []
+    with repo._connect() as conn:
+        stored = conn.execute(
+            repo._sql("SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"),
+            (session["id"],),
+        ).fetchone()
+        assert stored["session_chat_language_models_json"] is None
+
+    shipped, _, _ = _client(tmp_path)
+    after_ship = shipped.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert after_ship.status_code == 200
+    assert after_ship.json() == load_vans_template()
+
+
+def test_keyed_chat_language_models_returns_session_document_not_live_template(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    document = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "models": [{"id": "ollama_cloud@minimax-m3:cloud", "name": "sitting-only"}],
+        }
+    ]
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"),
+            (json.dumps(document, ensure_ascii=False), session["id"]),
+        )
+    api_key = _redeem_student_key(client, session["invite_code"])
+
+    keyed = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert keyed.status_code == 200
+    assert keyed.json() == document
+
+    public = client.get("/extension/chat-language-models")
+    assert public.status_code == 200
+    assert public.json() == load_vans_template()
+    assert public.json() != document
+
+
 def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
@@ -143,7 +234,7 @@ def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
         json={"model_allowlist": None},
     )
     assert unset.status_code == 200
-    assert unset.json()["model_allowlist"] is None
+    assert unset.json()["model_allowlist"] == template_model_ids(load_vans_template())
     restored = client.get(
         "/extension/chat-language-models",
         headers={"Authorization": f"Bearer {api_key}"},

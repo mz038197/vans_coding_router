@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
+from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.presentation.fastapi.routers.portal_router import create_portal_router
@@ -1210,10 +1212,12 @@ def test_new_class_session_has_seat_limit_60(tmp_path):
 
     assert created.status_code == 200
     assert created.json()["seat_limit"] == 60
-    assert created.json()["model_allowlist"] is None
+    assert created.json()["session_chat_language_models"] == load_vans_template()
+    assert created.json()["model_allowlist"] == template_model_ids(load_vans_template())
     assert listing.json()["items"][0]["seat_limit"] == 60
     assert listing.json()["items"][0]["nickname_seat_count"] == 0
-    assert listing.json()["items"][0]["model_allowlist"] is None
+    assert listing.json()["items"][0]["session_chat_language_models"] == load_vans_template()
+    assert listing.json()["items"][0]["model_allowlist"] == template_model_ids(load_vans_template())
 
 
 def test_owner_and_admin_can_change_session_seat_limit(tmp_path):
