@@ -120,6 +120,14 @@ _Avoid_: a second teacher-edited id list, unset-means-no-filter after the sittin
 The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`.
 _Avoid_: a second curated catalog, picking a whole upstream by provider name only, treating the live file as the student keyed GET
 
+**Upstream Model Catalog**:
+The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription. Teachers use it as a shelf to check models into Session Chat Language Models. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
+_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document
+
+**VCRouter Stencil**:
+The locked classroom provider identity and routing fields for Session Chat Language Models: `VCRouter` / `customendpoint` / `responses` / router url / `Authorization: Bearer ${apiKey}`. Teacher save and upload force these fields; display name, thinking, and token limits may differ.
+_Avoid_: letting upload keep a foreign provider, teacher-edited url or headers
+
 **Portal Copy**:
 Teacher- and student-visible Portal UI wording uses Traditional Chinese characters only.
 _Avoid_: Simplified glyphs in Portal copy (e.g. 校验／注册／保存), mixed zh-CN/zh-TW Portal strings

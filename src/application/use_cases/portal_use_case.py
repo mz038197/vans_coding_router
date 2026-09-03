@@ -7,11 +7,18 @@ from src.domain.entities.auth import PortalSessionContext
 from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
-from src.infrastructure.config import RouterSettings, apply_runtime_settings, settings_summary
+from src.infrastructure.config import (
+    RouterSettings,
+    apply_runtime_settings,
+    classroom_chat_provider_names,
+    settings_summary,
+)
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
+    SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
+    normalize_session_chat_language_models,
     validate_allowlist,
 )
 
@@ -134,6 +141,40 @@ class PortalUseCase:
         if not callable(status_fn):
             return {"providers": {}}
         return status_fn(limited_only=True)
+
+    async def upstream_model_catalog(self, user_id: int) -> dict[str, Any]:
+        self._assert_teacher(user_id)
+        providers = classroom_chat_provider_names(self.settings.providers)
+        gateway = self._llm_gateway
+        if gateway is None:
+            return {"providers": providers, "models": [], "unavailable": True}
+        models_fn = getattr(gateway, "models", None)
+        if not callable(models_fn):
+            return {"providers": providers, "models": [], "unavailable": True}
+        try:
+            raw = await models_fn()
+        except Exception:
+            return {"providers": providers, "models": [], "unavailable": True}
+        allowed = set(providers)
+        models: list[dict[str, Any]] = []
+        for item in (raw or {}).get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            provider = item.get("provider")
+            if not isinstance(model_id, str) or not model_id:
+                continue
+            if provider not in allowed:
+                continue
+            name = item.get("name")
+            models.append(
+                {
+                    "id": model_id,
+                    "provider": provider,
+                    "name": name if isinstance(name, str) and name else model_id,
+                }
+            )
+        return {"providers": providers, "models": models, "unavailable": False}
 
     async def release_key_quarantine(
         self,
@@ -371,6 +412,7 @@ class PortalUseCase:
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
+        session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
         invocation_channel: str | None = None,
         invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
@@ -385,6 +427,10 @@ class PortalUseCase:
             or seat_limit < 1
         ):
             raise ValueError("座位上限必須為正整數")
+        if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
+            session_chat_language_models = normalize_session_chat_language_models(
+                session_chat_language_models
+            )
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
             existing = self.get_session(user_id, class_id, session_id)
             document = (existing or {}).get("session_chat_language_models") or []
@@ -402,6 +448,8 @@ class PortalUseCase:
         )
         if invocation_arguments is None and model_allowlist is not MODEL_ALLOWLIST_UNCHANGED:
             changes["model_allowlist"] = model_allowlist
+        if invocation_arguments is None and session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
+            changes["session_chat_language_models"] = session_chat_language_models
         session = self.repo.update_class_session(
             class_id,
             session_id,
@@ -415,6 +463,7 @@ class PortalUseCase:
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
             model_allowlist=model_allowlist,
+            session_chat_language_models=session_chat_language_models,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=user_id,
                 action=self._session_action(changes),
@@ -476,6 +525,8 @@ class PortalUseCase:
             return "change_session_seat_limit"
         if fields == {"model_allowlist"}:
             return "change_session_model_allowlist"
+        if fields == {"session_chat_language_models"}:
+            return "change_session_chat_language_models"
         return "update_class_session"
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:

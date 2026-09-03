@@ -203,11 +203,10 @@ def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
     html = client.get("/portal").text
     assert "<th>模型</th>" in html
     assert "sessionModelAllowlistCell" in html
-    assert "beginEditSessionModelAllowlist" in html
-    assert 'id="editModelAllowlistModal"' in html
-    assert "未限制" in html
+    assert "beginEditSessionChatLanguageModels" in html
+    assert 'id="editSessionChatModelsModal"' in html
     assert "全不選" in html
-    assert "model_allowlist" in html
+    assert "session_chat_language_models" in html
     assert "downloadInstallScript" in html
     assert "lastRedeemedKey" in html
 

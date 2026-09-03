@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=catalog-form-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=session-chat-models-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -326,23 +326,43 @@
     </div>
   </div>
 
-  <div class="modal" id="editModelAllowlistModal" onclick="onEditModelAllowlistBackdropClick(event)">
-    <div class="modal-content modal-content-sm" onclick="event.stopPropagation()">
-      <div class="modal-header" id="editModelAllowlistTitle">編輯本課可用模型</div>
+  <div class="modal" id="editSessionChatModelsModal">
+    <div class="modal-content modal-content-catalog">
+      <div class="modal-header" id="editSessionChatModelsTitle">編輯本課對話模型</div>
       <div class="modal-body">
-        <p class="hint">候選來自 Router Model Template。未限制時學生可用 Template 全集；限制後只寫入勾選的模型，全不選則零模型。</p>
-        <label class="model-allowlist-restrict">
-          <input type="checkbox" id="modelAllowlistRestrict" onchange="applyModelAllowlistRestrictState()" />
-          <span>限制本課可用模型</span>
-        </label>
-        <label class="modal-field-label" for="modelAllowlistSearch">搜尋</label>
-        <input id="modelAllowlistSearch" type="search" class="modal-datetime-input" placeholder="名稱或 id" oninput="filterModelAllowlistList()" />
-        <div id="modelAllowlistList" class="model-allowlist-list"></div>
+        <p class="hint">與本課安裝清單相同：可上傳或下載 JSON。主要畫面是上游模型目錄；勾選後可改顯示名稱、思考與 token 上限。路由欄位固定為 VCRouter。</p>
+        <div
+          id="sessionChatModelsDropzone"
+          class="catalog-dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="上傳 Session Chat Language Models JSON"
+        >
+          <input type="file" id="sessionChatModelsFileInput" accept=".json,application/json" hidden />
+          <p class="catalog-dropzone-title">拖拉 JSON 到此上傳</p>
+          <p class="hint-inline">或 <button type="button" class="btn-link" id="sessionChatModelsPickFileBtn">選擇 .json 檔</button></p>
+        </div>
+        <p id="sessionChatModelsUploadMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
+        <p id="sessionChatModelsCatalogMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
+        <div class="session-chat-models-toolbar">
+          <label class="modal-field-label" for="sessionChatModelsProvider">廠商</label>
+          <select id="sessionChatModelsProvider" class="modal-datetime-input" onchange="renderSessionChatModelsList()"></select>
+          <label class="modal-field-label" for="sessionChatModelsSearch">搜尋</label>
+          <input id="sessionChatModelsSearch" type="search" class="modal-datetime-input" placeholder="名稱或 id" oninput="renderSessionChatModelsList()" />
+        </div>
+        <div id="sessionChatModelsList" class="session-chat-models-list"></div>
+        <p id="sessionChatModelsSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
       </div>
       <div class="modal-footer">
-        <div class="modal-footer-actions">
-          <button type="button" class="btn-secondary" onclick="closeEditModelAllowlistModal()">取消</button>
-          <button type="button" onclick="saveEditSessionModelAllowlist()">儲存</button>
+        <div class="modal-footer-actions modal-footer-actions-split">
+          <div class="modal-footer-start">
+            <button type="button" class="btn-secondary" onclick="downloadSessionChatModelsTemplate()">下載範本</button>
+            <button type="button" class="btn-secondary" onclick="downloadCurrentSessionChatModels()">下載目前清單</button>
+          </div>
+          <div class="modal-footer-end">
+            <button type="button" class="btn-secondary" onclick="requestCloseSessionChatModelsModal()">取消</button>
+            <button type="button" id="sessionChatModelsSaveBtn" onclick="saveSessionChatLanguageModels()">儲存</button>
+          </div>
         </div>
       </div>
     </div>
@@ -795,19 +815,29 @@
       </div>`;
     }
 
+    function sessionChatLanguageModelsCount(session) {
+      const document = session.session_chat_language_models;
+      if (!Array.isArray(document)) return 0;
+      let count = 0;
+      for (const provider of document) {
+        const models = provider && provider.models;
+        if (Array.isArray(models)) count += models.filter((model) => model && model.id).length;
+      }
+      return count;
+    }
+
     function sessionModelAllowlistLabel(session) {
-      const list = session.model_allowlist;
-      if (list == null) return '未限制';
-      if (!list.length) return '全不選';
-      return `${list.length} 個模型`;
+      const count = sessionChatLanguageModelsCount(session);
+      if (!count) return '全不選';
+      return `${count} 個模型`;
     }
 
     function sessionModelAllowlistCell(classId, session) {
       const label = sessionModelAllowlistLabel(session);
       const edit = iconBtn(
         'fas fa-pen',
-        '編輯可用模型',
-        `beginEditSessionModelAllowlist(${classId}, ${session.id})`,
+        '編輯本課對話模型',
+        `beginEditSessionChatLanguageModels(${classId}, ${session.id})`,
       );
       return `<div class="cell-with-action">
         <div class="cell-main"><span class="model-allowlist-label">${escapeHtml(label)}</span></div>
@@ -2710,29 +2740,95 @@ snippets:
       input.select();
     }
 
-    let modelAllowlistContext = null;
+    const VCROUTER_STENCIL = {
+      name: 'VCRouter',
+      vendor: 'customendpoint',
+      apiKey: '',
+      apiType: 'responses',
+      url: 'https://ai.vanscoding.com/v1',
+      requestHeaders: { Authorization: 'Bearer ${apiKey}' },
+      thinking: true,
+      reasoningEffortFormat: 'responses',
+      supportsReasoningEffort: ['none', 'low', 'medium', 'high'],
+      zeroDataRetentionEnabled: true,
+      toolCalling: true,
+      vision: true,
+      maxInputTokens: 262144,
+      maxOutputTokens: 65536,
+    };
+
+    let sessionChatModelsContext = null;
+    let sessionChatModelsDraft = { models: [], removed: {} };
+    let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false };
+    let sessionChatModelsDropzoneBound = false;
+    let sessionChatModelsLocked = false;
     let routerModelTemplate = null;
 
-    function onEditModelAllowlistBackdropClick(event) {
-      if (event.target && event.target.id === 'editModelAllowlistModal') {
-        closeEditModelAllowlistModal();
-      }
+    function defaultVcrouterModel(modelId, displayName) {
+      return {
+        id: modelId,
+        name: displayName || modelId,
+        url: VCROUTER_STENCIL.url,
+        requestHeaders: { ...VCROUTER_STENCIL.requestHeaders },
+        thinking: VCROUTER_STENCIL.thinking,
+        reasoningEffortFormat: VCROUTER_STENCIL.reasoningEffortFormat,
+        supportsReasoningEffort: [...VCROUTER_STENCIL.supportsReasoningEffort],
+        zeroDataRetentionEnabled: VCROUTER_STENCIL.zeroDataRetentionEnabled,
+        toolCalling: VCROUTER_STENCIL.toolCalling,
+        vision: VCROUTER_STENCIL.vision,
+        maxInputTokens: VCROUTER_STENCIL.maxInputTokens,
+        maxOutputTokens: VCROUTER_STENCIL.maxOutputTokens,
+      };
     }
 
-    function closeEditModelAllowlistModal() {
-      const modal = document.getElementById('editModelAllowlistModal');
-      if (modal) modal.classList.remove('show');
-      modelAllowlistContext = null;
-    }
-
-    function templateModels(template) {
+    function modelsFromDocument(document) {
       const models = [];
-      for (const provider of template || []) {
-        for (const model of provider.models || []) {
-          if (model && model.id) models.push(model);
+      for (const provider of document || []) {
+        for (const model of (provider && provider.models) || []) {
+          if (model && model.id) models.push({ ...model });
         }
       }
       return models;
+    }
+
+    function documentFromDraft(draft) {
+      return [{
+        name: VCROUTER_STENCIL.name,
+        vendor: VCROUTER_STENCIL.vendor,
+        apiKey: VCROUTER_STENCIL.apiKey,
+        apiType: VCROUTER_STENCIL.apiType,
+        models: (draft.models || []).map((model) => ({ ...model })),
+      }];
+    }
+
+    function parseSessionChatModelsUpload(raw) {
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error('JSON 無法解析，編輯器內容未變更。');
+      }
+      if (!Array.isArray(parsed)) {
+        throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
+      }
+      const models = modelsFromDocument(parsed);
+      if (parsed.length && parsed.some((item) => !item || typeof item !== 'object')) {
+        throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
+      }
+      if (parsed.some((provider) => provider && provider.models && !Array.isArray(provider.models))) {
+        throw new Error('Session Chat Language Models 格式錯誤，編輯器內容未變更。');
+      }
+      if ((parsed[0] && parsed[0].models || []).some((model) => model && !model.id)) {
+        throw new Error('模型缺少 id，編輯器內容未變更。');
+      }
+      return models;
+    }
+
+    function setSessionChatModelsMsg(id, text, isError) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text || '';
+      el.classList.toggle('is-error', Boolean(isError && text));
     }
 
     function modelIdPrefix(id) {
@@ -2747,93 +2843,300 @@ snippets:
       return routerModelTemplate;
     }
 
-    function applyModelAllowlistRestrictState() {
-      const restrict = document.getElementById('modelAllowlistRestrict');
-      const listEl = document.getElementById('modelAllowlistList');
-      const search = document.getElementById('modelAllowlistSearch');
-      const on = Boolean(restrict && restrict.checked);
-      if (listEl) listEl.classList.toggle('is-disabled', !on);
-      if (search) search.disabled = !on;
-      document.querySelectorAll('#modelAllowlistList input[type=checkbox]').forEach((el) => {
-        el.disabled = !on;
+    function ensureSessionChatModelsDropzoneBound() {
+      if (sessionChatModelsDropzoneBound) return;
+      const zone = document.getElementById('sessionChatModelsDropzone');
+      const input = document.getElementById('sessionChatModelsFileInput');
+      const pickBtn = document.getElementById('sessionChatModelsPickFileBtn');
+      if (!zone || !input || !pickBtn) return;
+      pickBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        input.click();
+      });
+      zone.addEventListener('click', (event) => {
+        if (event.target === pickBtn || pickBtn.contains(event.target)) return;
+        input.click();
+      });
+      zone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          input.click();
+        }
+      });
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (file) loadSessionChatModelsFile(file);
+        input.value = '';
+      });
+      zone.addEventListener('dragenter', (event) => {
+        event.preventDefault();
+        zone.classList.add('is-dragover');
+      });
+      zone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        zone.classList.add('is-dragover');
+      });
+      zone.addEventListener('dragleave', (event) => {
+        if (!zone.contains(event.relatedTarget)) zone.classList.remove('is-dragover');
+      });
+      zone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        zone.classList.remove('is-dragover');
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (file) loadSessionChatModelsFile(file);
+      });
+      sessionChatModelsDropzoneBound = true;
+    }
+
+    function loadSessionChatModelsFile(file) {
+      if (!file) return;
+      if (!/\.json$/i.test(String(file.name || ''))) {
+        setSessionChatModelsMsg('sessionChatModelsUploadMsg', '僅接受 .json 檔，編輯器內容未變更。', true);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const models = parseSessionChatModelsUpload(String(reader.result || ''));
+          sessionChatModelsDraft = { models, removed: { ...sessionChatModelsDraft.removed } };
+          setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
+          renderSessionChatModelsList();
+        } catch (err) {
+          setSessionChatModelsMsg('sessionChatModelsUploadMsg', err.message || String(err), true);
+        }
+      };
+      reader.onerror = () => {
+        setSessionChatModelsMsg('sessionChatModelsUploadMsg', '讀取檔案失敗，編輯器內容未變更。', true);
+      };
+      reader.readAsText(file);
+    }
+
+    async function downloadSessionChatModelsTemplate() {
+      const template = await loadRouterModelTemplate();
+      downloadTextFile('router-model-template.json', `${JSON.stringify(template, null, 2)}\n`);
+    }
+
+    function downloadCurrentSessionChatModels() {
+      const sessionId = sessionChatModelsContext && sessionChatModelsContext.sessionId;
+      const name = sessionId
+        ? `session-chat-language-models-${sessionId}.json`
+        : 'session-chat-language-models.json';
+      downloadTextFile(name, `${JSON.stringify(documentFromDraft(sessionChatModelsDraft), null, 2)}\n`);
+    }
+
+    function populateSessionChatModelsProviders() {
+      const select = document.getElementById('sessionChatModelsProvider');
+      if (!select) return;
+      const providers = sessionChatModelsCatalog.providers || [];
+      const previous = select.value;
+      const options = providers.length ? providers : [];
+      select.innerHTML = options.map((name) => (
+        `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
+      )).join('');
+      if (previous && options.includes(previous)) select.value = previous;
+    }
+
+    function catalogModelById(modelId) {
+      return (sessionChatModelsCatalog.models || []).find((item) => item.id === modelId);
+    }
+
+    function draftModelById(modelId) {
+      return sessionChatModelsDraft.models.find((model) => model.id === modelId);
+    }
+
+    function visibleCatalogRows() {
+      const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
+      const q = (document.getElementById('sessionChatModelsSearch')?.value || '').trim().toLowerCase();
+      const catalogById = new Map((sessionChatModelsCatalog.models || []).map((item) => [item.id, item]));
+      const rows = [];
+      const seen = new Set();
+      for (const model of sessionChatModelsDraft.models) {
+        const catalog = catalogById.get(model.id);
+        rows.push({
+          id: model.id,
+          name: model.name || (catalog && catalog.name) || model.id,
+          provider: catalog ? catalog.provider : modelIdPrefix(model.id),
+          missing: !catalog,
+          checked: true,
+        });
+        seen.add(model.id);
+      }
+      if (!sessionChatModelsCatalog.unavailable) {
+        for (const item of sessionChatModelsCatalog.models || []) {
+          if (seen.has(item.id)) continue;
+          rows.push({
+            id: item.id,
+            name: item.name || item.id,
+            provider: item.provider,
+            missing: false,
+            checked: false,
+          });
+        }
+      }
+      return rows.filter((row) => {
+        if (provider && row.provider !== provider) return false;
+        if (!q) return true;
+        return `${row.id} ${row.name}`.toLowerCase().includes(q);
       });
     }
 
-    function filterModelAllowlistList() {
-      const q = (document.getElementById('modelAllowlistSearch')?.value || '').trim().toLowerCase();
-      document.querySelectorAll('#modelAllowlistList .model-allowlist-item').forEach((el) => {
-        el.hidden = Boolean(q) && !(el.dataset.search || '').includes(q);
-      });
-      document.querySelectorAll('#modelAllowlistList .model-allowlist-group').forEach((group) => {
-        const visible = [...group.querySelectorAll('.model-allowlist-item')].some((el) => !el.hidden);
-        group.hidden = !visible;
+    function renderSessionChatModelsList() {
+      const listEl = document.getElementById('sessionChatModelsList');
+      if (!listEl) return;
+      const rows = visibleCatalogRows();
+      const canCheckNew = !sessionChatModelsCatalog.unavailable;
+      listEl.innerHTML = rows.map((row) => {
+        const draft = draftModelById(row.id);
+        const expanded = Boolean(row.checked && draft);
+        const missing = row.missing ? '<span class="session-chat-models-missing">目錄未列出</span>' : '';
+        const details = expanded ? `
+          <div class="session-chat-models-fields">
+            <label class="catalog-field">顯示名稱
+              <input class="catalog-field-input" data-model-id="${escapeHtml(row.id)}" data-field="name" value="${escapeHtml(draft.name || '')}" />
+            </label>
+            <label class="catalog-field session-chat-models-check-field">思考
+              <input type="checkbox" data-model-id="${escapeHtml(row.id)}" data-field="thinking" ${draft.thinking ? 'checked' : ''} />
+            </label>
+            <label class="catalog-field">最大輸入 tokens
+              <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(row.id)}" data-field="maxInputTokens" value="${escapeHtml(String(draft.maxInputTokens ?? ''))}" />
+            </label>
+            <label class="catalog-field">最大輸出 tokens
+              <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(row.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(draft.maxOutputTokens ?? ''))}" />
+            </label>
+          </div>` : '';
+        const disableNew = !row.checked && !canCheckNew;
+        return `<div class="session-chat-models-row${row.missing ? ' is-missing' : ''}">
+          <label class="model-allowlist-item">
+            <input type="checkbox" value="${escapeHtml(row.id)}" ${row.checked ? 'checked' : ''} ${disableNew ? 'disabled' : ''} onchange="onSessionChatModelCheck(this)" />
+            <span>${escapeHtml(row.name || row.id)} <code>${escapeHtml(row.id)}</code> ${missing}</span>
+          </label>
+          ${details}
+        </div>`;
+      }).join('') || '<p class="hint">沒有可顯示的模型。</p>';
+      listEl.querySelectorAll('[data-field]').forEach((input) => {
+        input.addEventListener('input', onSessionChatModelField);
+        input.addEventListener('change', onSessionChatModelField);
       });
     }
 
-    async function beginEditSessionModelAllowlist(classId, sessionId) {
-      const modal = document.getElementById('editModelAllowlistModal');
-      const title = document.getElementById('editModelAllowlistTitle');
-      const restrict = document.getElementById('modelAllowlistRestrict');
-      const search = document.getElementById('modelAllowlistSearch');
-      const listEl = document.getElementById('modelAllowlistList');
-      if (!modal || !restrict || !listEl) return;
+    function onSessionChatModelCheck(input) {
+      const modelId = input.value;
+      if (input.checked) {
+        const restored = sessionChatModelsDraft.removed[modelId];
+        const catalog = catalogModelById(modelId);
+        const next = restored
+          ? { ...restored }
+          : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
+        sessionChatModelsDraft.models.push(next);
+        delete sessionChatModelsDraft.removed[modelId];
+      } else {
+        const current = draftModelById(modelId);
+        if (current) sessionChatModelsDraft.removed[modelId] = { ...current };
+        sessionChatModelsDraft.models = sessionChatModelsDraft.models.filter((model) => model.id !== modelId);
+      }
+      renderSessionChatModelsList();
+    }
+
+    function onSessionChatModelField(event) {
+      const target = event.target;
+      const modelId = target.getAttribute('data-model-id');
+      const field = target.getAttribute('data-field');
+      const model = draftModelById(modelId);
+      if (!model || !field) return;
+      if (field === 'thinking') {
+        model.thinking = Boolean(target.checked);
+        return;
+      }
+      if (field === 'maxInputTokens' || field === 'maxOutputTokens') {
+        const n = Number(target.value);
+        if (Number.isFinite(n) && n >= 1) model[field] = n;
+        return;
+      }
+      model[field] = target.value;
+    }
+
+    function closeSessionChatModelsModal() {
+      const modal = document.getElementById('editSessionChatModelsModal');
+      if (modal) modal.classList.remove('show');
+      sessionChatModelsContext = null;
+      sessionChatModelsDraft = { models: [], removed: {} };
+      sessionChatModelsLocked = false;
+      setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
+      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
+      setSessionChatModelsMsg('sessionChatModelsCatalogMsg', '', false);
+    }
+
+    function requestCloseSessionChatModelsModal() {
+      closeSessionChatModelsModal();
+    }
+
+    async function beginEditSessionChatLanguageModels(classId, sessionId) {
+      const modal = document.getElementById('editSessionChatModelsModal');
+      const title = document.getElementById('editSessionChatModelsTitle');
+      if (!modal) return;
+      ensureSessionChatModelsDropzoneBound();
       const session = window.__sessionById && window.__sessionById[sessionId];
-      modelAllowlistContext = { classId, sessionId };
+      sessionChatModelsContext = { classId, sessionId };
+      sessionChatModelsLocked = false;
+      sessionChatModelsDraft = {
+        models: modelsFromDocument(session && session.session_chat_language_models),
+        removed: {},
+      };
       if (title) {
         const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
-        title.textContent = `編輯本課可用模型 · ${label}`;
+        title.textContent = `編輯本課對話模型 · ${label}`;
       }
+      setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
+      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
+      const search = document.getElementById('sessionChatModelsSearch');
+      if (search) search.value = '';
       try {
-        const template = await loadRouterModelTemplate();
-        const models = templateModels(template);
-        const current = session ? session.model_allowlist : null;
-        restrict.checked = current != null;
-        if (search) search.value = '';
-        const groups = {};
-        for (const model of models) {
-          const prefix = modelIdPrefix(model.id);
-          (groups[prefix] ||= []).push(model);
-        }
-        const selected = new Set(current || []);
-        listEl.innerHTML = Object.keys(groups).sort().map((prefix) => {
-          const items = groups[prefix].map((model) => {
-            const checked = current == null ? true : selected.has(model.id);
-            const searchText = `${model.id} ${model.name || ''}`.toLowerCase();
-            return `<label class="model-allowlist-item" data-search="${escapeHtml(searchText)}">
-              <input type="checkbox" value="${escapeHtml(model.id)}" ${checked ? 'checked' : ''} />
-              <span>${escapeHtml(model.name || model.id)} <code>${escapeHtml(model.id)}</code></span>
-            </label>`;
-          }).join('');
-          return `<div class="model-allowlist-group"><div class="model-allowlist-prefix">${escapeHtml(prefix)}</div>${items}</div>`;
-        }).join('') || '<p class="hint">Template 沒有模型。</p>';
-        applyModelAllowlistRestrictState();
-        filterModelAllowlistList();
-        modal.classList.add('show');
+        const catalog = await api('/teacher/upstream-model-catalog');
+        sessionChatModelsCatalog = {
+          providers: Array.isArray(catalog.providers) ? catalog.providers : [],
+          models: Array.isArray(catalog.models) ? catalog.models : [],
+          unavailable: Boolean(catalog.unavailable),
+        };
+        setSessionChatModelsMsg(
+          'sessionChatModelsCatalogMsg',
+          sessionChatModelsCatalog.unavailable
+            ? '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。'
+            : '',
+          sessionChatModelsCatalog.unavailable,
+        );
       } catch (err) {
-        modelAllowlistContext = null;
-        alert(err.message || String(err));
+        sessionChatModelsCatalog = { providers: [], models: [], unavailable: true };
+        setSessionChatModelsMsg(
+          'sessionChatModelsCatalogMsg',
+          '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。',
+          true,
+        );
       }
+      populateSessionChatModelsProviders();
+      renderSessionChatModelsList();
+      modal.classList.add('show');
     }
 
-    async function saveEditSessionModelAllowlist() {
-      if (!modelAllowlistContext) return;
-      const restrict = document.getElementById('modelAllowlistRestrict');
-      const { classId, sessionId } = modelAllowlistContext;
-      const body = (!restrict || !restrict.checked)
-        ? { model_allowlist: null }
-        : {
-            model_allowlist: [...document.querySelectorAll('#modelAllowlistList input[type=checkbox]:checked')]
-              .map((el) => el.value),
-          };
+    async function saveSessionChatLanguageModels() {
+      if (!sessionChatModelsContext || sessionChatModelsLocked) return;
+      const saveBtn = document.getElementById('sessionChatModelsSaveBtn');
+      const { classId, sessionId } = sessionChatModelsContext;
+      sessionChatModelsLocked = true;
+      if (saveBtn) saveBtn.disabled = true;
+      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '儲存中…', false);
       try {
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
-          body: JSON.stringify(body),
+          body: JSON.stringify({ session_chat_language_models: documentFromDraft(sessionChatModelsDraft) }),
         });
-        closeEditModelAllowlistModal();
+        closeSessionChatModelsModal();
         await reloadSessionViews(classId);
       } catch (err) {
-        alert(err.message || String(err));
+        sessionChatModelsLocked = false;
+        setSessionChatModelsMsg('sessionChatModelsSaveMsg', err?.message || '儲存失敗', true);
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
       }
     }
 

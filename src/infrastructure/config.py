@@ -72,8 +72,26 @@ def resolve_provider_api_keys(provider: ProviderSettings) -> list[str]:
     return []
 
 
+_SPEECH_ONLY_CAPABILITIES = frozenset(
+    {CAPABILITY_AUDIO_SPEECH, CAPABILITY_AUDIO_TRANSCRIPTION}
+)
+
+
 def provider_supports(provider: ProviderSettings, capability: str) -> bool:
     return capability in provider.capabilities
+
+
+def is_speech_only_provider(provider: ProviderSettings) -> bool:
+    caps = frozenset(provider.capabilities)
+    return bool(caps) and caps <= _SPEECH_ONLY_CAPABILITIES
+
+
+def classroom_chat_provider_names(providers: dict[str, ProviderSettings]) -> list[str]:
+    return [
+        name
+        for name, provider in providers.items()
+        if provider.enabled and not is_speech_only_provider(provider)
+    ]
 
 
 def providers_with_capability(

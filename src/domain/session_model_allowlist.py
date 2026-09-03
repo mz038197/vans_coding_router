@@ -7,6 +7,23 @@ from typing import Any
 MODEL_ALLOWLIST_UNCHANGED = object()
 SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
 
+VCROUTER_STENCIL: dict[str, Any] = {
+    "name": "VCRouter",
+    "vendor": "customendpoint",
+    "apiKey": "",
+    "apiType": "responses",
+    "url": "https://ai.vanscoding.com/v1",
+    "requestHeaders": {"Authorization": "Bearer ${apiKey}"},
+    "thinking": True,
+    "reasoningEffortFormat": "responses",
+    "supportsReasoningEffort": ["none", "low", "medium", "high"],
+    "zeroDataRetentionEnabled": True,
+    "toolCalling": True,
+    "vision": True,
+    "maxInputTokens": 262144,
+    "maxOutputTokens": 65536,
+}
+
 
 def template_model_ids(template: list[Any]) -> list[str]:
     ids: list[str] = []
@@ -103,3 +120,58 @@ def is_model_allowed(model_id: str, allowlist: list[str] | None) -> bool:
     if allowlist is None:
         return True
     return model_id in set(allowlist)
+
+
+def default_vcrouter_model(model_id: str, display_name: str) -> dict[str, Any]:
+    return {
+        "id": model_id,
+        "name": display_name,
+        "url": VCROUTER_STENCIL["url"],
+        "requestHeaders": copy.deepcopy(VCROUTER_STENCIL["requestHeaders"]),
+        "thinking": VCROUTER_STENCIL["thinking"],
+        "reasoningEffortFormat": VCROUTER_STENCIL["reasoningEffortFormat"],
+        "supportsReasoningEffort": list(VCROUTER_STENCIL["supportsReasoningEffort"]),
+        "zeroDataRetentionEnabled": VCROUTER_STENCIL["zeroDataRetentionEnabled"],
+        "toolCalling": VCROUTER_STENCIL["toolCalling"],
+        "vision": VCROUTER_STENCIL["vision"],
+        "maxInputTokens": VCROUTER_STENCIL["maxInputTokens"],
+        "maxOutputTokens": VCROUTER_STENCIL["maxOutputTokens"],
+    }
+
+
+def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]]:
+    if not isinstance(document, list):
+        raise ValueError("Session Chat Language Models 必須是陣列")
+    collected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for provider in document:
+        if not isinstance(provider, dict):
+            raise ValueError("Session Chat Language Models 必須是一個 VCRouter customendpoint 提供者")
+        models = provider.get("models")
+        if models is None:
+            continue
+        if not isinstance(models, list):
+            raise ValueError("Session Chat Language Models 格式錯誤")
+        for model in models:
+            if not isinstance(model, dict):
+                raise ValueError("Session Chat Language Models 格式錯誤")
+            model_id = model.get("id")
+            if not isinstance(model_id, str) or not model_id.strip():
+                raise ValueError("模型缺少 id")
+            if model_id in seen:
+                continue
+            seen.add(model_id)
+            restenciled = dict(model)
+            restenciled["id"] = model_id
+            restenciled["url"] = VCROUTER_STENCIL["url"]
+            restenciled["requestHeaders"] = copy.deepcopy(VCROUTER_STENCIL["requestHeaders"])
+            collected.append(restenciled)
+    return [
+        {
+            "name": VCROUTER_STENCIL["name"],
+            "vendor": VCROUTER_STENCIL["vendor"],
+            "apiKey": VCROUTER_STENCIL["apiKey"],
+            "apiType": VCROUTER_STENCIL["apiType"],
+            "models": collected,
+        }
+    ]

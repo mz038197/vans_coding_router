@@ -3,6 +3,8 @@ from urllib.parse import quote
 import logging
 from ipaddress import ip_address
 
+from typing import Any
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
@@ -16,7 +18,10 @@ from src.infrastructure.auth.extension_handoff import (
 )
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
-from src.domain.session_model_allowlist import MODEL_ALLOWLIST_UNCHANGED
+from src.domain.session_model_allowlist import (
+    MODEL_ALLOWLIST_UNCHANGED,
+    SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
+)
 from src.infrastructure.vscode.install_vscode_models_script import (
     build_install_vscode_models_zip,
     render_install_vscode_models_cmd,
@@ -122,6 +127,7 @@ class SessionPatchRequest(BaseModel):
     course_catalog_yaml: str | None = None
     seat_limit: int | None = None
     model_allowlist: list[str] | None = None
+    session_chat_language_models: Any = None
 
 
 class UserPatchRequest(BaseModel):
@@ -535,8 +541,15 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             if "model_allowlist" in data.model_fields_set
             else MODEL_ALLOWLIST_UNCHANGED
         )
+        session_chat_language_models = (
+            data.session_chat_language_models
+            if "session_chat_language_models" in data.model_fields_set
+            else SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
+        )
         if "model_allowlist" in data.model_fields_set:
             invocation_arguments["model_allowlist"] = data.model_allowlist
+        if "session_chat_language_models" in data.model_fields_set:
+            invocation_arguments["session_chat_language_models"] = data.session_chat_language_models
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -552,6 +565,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 course_catalog_yaml=data.course_catalog_yaml,
                 seat_limit=data.seat_limit,
                 model_allowlist=model_allowlist,
+                session_chat_language_models=session_chat_language_models,
                 invocation_channel=_webmcp_invocation_channel(request),
                 invocation_arguments=invocation_arguments,
             )
@@ -587,6 +601,22 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.get("/teacher/upstream-pools")
     async def upstream_pools(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         return portal_call(lambda: portal_use_case.upstream_pools(current_user_id(session_user_id)))
+
+    @router.get("/teacher/upstream-model-catalog")
+    async def upstream_model_catalog(
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        try:
+            return await portal_use_case.upstream_model_catalog(current_user_id(session_user_id))
+        except HTTPException:
+            raise
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="權限不足") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except Exception:
+            logger.exception("Upstream Model Catalog request failed")
+            raise HTTPException(status_code=500, detail="伺服器錯誤，請稍後再試") from None
 
     @router.post("/teacher/upstream-pools/{provider}/keys/{key_index}/quarantine-release")
     async def release_key_quarantine(
