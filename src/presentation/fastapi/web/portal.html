@@ -796,21 +796,21 @@
       return Number.isFinite(n) && n >= 1 ? n : 60;
     }
 
-    function sessionNicknameSeatCount(session) {
-      const n = Number(session.nickname_seat_count || 0);
+    function sessionRedemptionCount(session) {
+      const n = Number(session.redemption_count || 0);
       return Number.isFinite(n) ? n : 0;
     }
 
     function sessionSeatLimitCell(classId, session) {
-      const occupied = sessionNicknameSeatCount(session);
+      const occupied = sessionRedemptionCount(session);
       const limit = sessionSeatLimit(session);
       const edit = iconBtn(
         'fas fa-pen',
         '編輯座位上限',
-        `beginEditSessionSeatLimit(${classId}, ${session.id}, this)`,
+        `event.stopPropagation(); beginEditSessionSeatLimit(${classId}, ${session.id}, this)`,
       );
-      return `<div class="cell-with-action" data-session-id="${session.id}" data-seat-limit="${limit}">
-        <div class="cell-main"><span class="seat-limit-label">${occupied} / ${limit}</span></div>
+      return `<div class="cell-with-action" data-session-id="${session.id}" data-seat-limit="${limit}" onclick="toggleRedemptions(${classId}, ${session.id}, this)">
+        <div class="cell-main"><span class="seat-limit-label btn-link">${occupied} / ${limit}</span></div>
         ${edit}
       </div>`;
     }
@@ -1783,7 +1783,7 @@
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 7 + (allowOwnerActions ? 1 : 0) + (showRedemptions ? 1 : 0);
+      const colCount = 7 + (allowOwnerActions ? 1 : 0);
       window.__sessionById = window.__sessionById || {};
       sessions.forEach((s) => { window.__sessionById[s.id] = s; });
       box.innerHTML = `<table class="session-table">
@@ -1795,8 +1795,7 @@
           <th>key 到期</th>
           ${allowOwnerActions ? '<th>安裝清單</th>' : ''}
           <th>模型</th>
-          <th>暱稱座位</th>
-          ${showRedemptions ? '<th>已領取</th>' : ''}
+          <th>課堂座位</th>
         </tr>
         ${sessions.map(s => `
           <tr>
@@ -1808,7 +1807,6 @@
             ${allowOwnerActions ? `<td>${sessionCatalogCell(classId, s)}</td>` : ''}
             <td>${sessionModelAllowlistCell(classId, s)}</td>
             <td>${sessionSeatLimitCell(classId, s)}</td>
-            ${showRedemptions ? `<td><button type="button" class="btn-link" onclick="toggleRedemptions(${classId}, ${s.id}, this)">${s.redemption_count || 0} 人</button></td>` : ''}
           </tr>
           ${showRedemptions ? `<tr id="redemption-row-${classId}-${s.id}" class="hidden">
             <td colspan="${colCount}"><div id="redemption-body-${classId}-${s.id}"></div></td>
@@ -2597,7 +2595,8 @@ snippets:
       body.innerHTML = renderRedemptionSubtable(classId, items);
     }
 
-    function toggleRedemptions(classId, sessionId, buttonEl) {
+    function toggleRedemptions(classId, sessionId, triggerEl) {
+      if (triggerEl?.querySelector?.('input.inline-edit')) return;
       const row = document.getElementById(`redemption-row-${classId}-${sessionId}`);
       const body = document.getElementById(`redemption-body-${classId}-${sessionId}`);
       if (!row || !body) return;
@@ -2605,18 +2604,20 @@ snippets:
         item => item.session_id === sessionId && item.redeemed_at
       ).length;
       const opening = row.classList.contains('hidden');
+      const label = triggerEl.querySelector?.('.seat-limit-label');
+      const limit = Number(triggerEl.dataset?.seatLimit || 60);
       if (opening) {
         fillRedemptionBody(classId, sessionId);
         row.classList.remove('hidden');
-        buttonEl.textContent = `${count} 人 ▲`;
+        if (label) label.textContent = `${count} / ${limit} ▲`;
       } else {
         row.classList.add('hidden');
-        buttonEl.textContent = `${count} 人`;
+        if (label) label.textContent = `${count} / ${limit}`;
       }
     }
 
     async function disableClassMember(classId, sessionId, userId) {
-      const ok = window.confirm('停用後該學生的 Classroom API Key 會立即失效，且無法再以同一暱稱領取。確定停用？');
+      const ok = window.confirm('停用後該學生的 Classroom API Key 會立即失效，且無法再領取。該席仍佔用課堂座位。確定停用？');
       if (!ok) return;
       await api(`/teacher/classes/${classId}/members/${userId}`, {
         method: 'PATCH',
@@ -2731,6 +2732,7 @@ snippets:
           input.focus();
         }
       };
+      input.addEventListener('click', (e) => e.stopPropagation());
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); save(); }
         if (e.key === 'Escape') { e.preventDefault(); restore(); }

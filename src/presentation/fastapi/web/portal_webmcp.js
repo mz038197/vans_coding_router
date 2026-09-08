@@ -45,7 +45,6 @@
       "speech_transcription_enabled",
       "prompt_logging_enabled",
       "seat_limit",
-      "nickname_seat_count",
       "redemption_count",
     ]);
   }

@@ -124,7 +124,7 @@ def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
     assert user_a != user_b
 
 
-def test_postgres_session_seat_limit_blocks_new_nickname(postgres_repo):
+def test_postgres_session_seat_limit_blocks_new_identities(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "AI", None, 2)
@@ -138,5 +138,9 @@ def test_postgres_session_seat_limit_blocks_new_nickname(postgres_repo):
     again = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
     assert again["api_key"] == first["api_key"]
     items = repo.list_class_sessions(klass["id"])
-    assert items[0]["nickname_seat_count"] == 1
+    assert "nickname_seat_count" not in items[0]
+    assert items[0]["redemption_count"] == 1
     assert items[0]["seat_limit"] == 1
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    with pytest.raises(ValueError, match="無法領取"):
+        repo.redeem_invite(session["invite_code"], student["id"])

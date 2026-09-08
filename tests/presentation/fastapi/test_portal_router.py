@@ -187,15 +187,20 @@ def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
     assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
 
 
-def test_portal_session_row_shows_occupied_nickname_seats_versus_limit(tmp_path):
+def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert "<th>暱稱座位</th>" in html
+    assert "<th>課堂座位</th>" in html
+    assert "<th>暱稱座位</th>" not in html
+    assert "<th>已領取</th>" not in html
     assert "sessionSeatLimitCell" in html
     assert "beginEditSessionSeatLimit" in html
-    assert "nickname_seat_count" in html
+    assert "toggleRedemptions" in html
+    assert "nickname_seat_count" not in html
+    assert "redemption_count" in html
     assert "seat_limit" in html
     assert '{"seat_limit"' in html or "{ seat_limit" in html
+    assert "該席仍佔用課堂座位" in html
 
 
 def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
@@ -1214,7 +1219,8 @@ def test_new_class_session_has_seat_limit_60(tmp_path):
     assert created.json()["session_chat_language_models"] == load_vans_template()
     assert created.json()["model_allowlist"] == template_model_ids(load_vans_template())
     assert listing.json()["items"][0]["seat_limit"] == 60
-    assert listing.json()["items"][0]["nickname_seat_count"] == 0
+    assert "nickname_seat_count" not in listing.json()["items"][0]
+    assert listing.json()["items"][0]["redemption_count"] == 0
     assert listing.json()["items"][0]["session_chat_language_models"] == load_vans_template()
     assert listing.json()["items"][0]["model_allowlist"] == template_model_ids(load_vans_template())
 

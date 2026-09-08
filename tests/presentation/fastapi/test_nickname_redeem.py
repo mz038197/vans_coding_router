@@ -222,7 +222,7 @@ def test_portal_google_redeem_still_requires_session(tmp_path):
     assert google.json()["api_key"].startswith("vcr_sk_")
 
 
-def test_session_list_counts_nickname_seats_not_google_redemptions(tmp_path):
+def test_session_list_counts_every_redeem_identity_toward_seat_limit(tmp_path):
     client, repo = _client(tmp_path)
     teacher, klass, session = _live_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
@@ -241,7 +241,7 @@ def test_session_list_counts_nickname_seats_not_google_redemptions(tmp_path):
     assert again.status_code == 200
     assert google.status_code == 200
     item = listing.json()["items"][0]
-    assert item["nickname_seat_count"] == 1
+    assert "nickname_seat_count" not in item
     assert item["redemption_count"] == 2
     assert item["seat_limit"] == 60
 
@@ -256,7 +256,7 @@ def test_nickname_redeem_rejects_new_nickname_when_seat_limit_reached(tmp_path):
 
     assert seated.status_code == 200
     assert rejected.status_code == 400
-    assert rejected.json()["detail"] == "此課堂座位已滿，無法以新暱稱領取"
+    assert rejected.json()["detail"] == "此課堂座位已滿，無法領取"
 
 
 def test_nickname_redeem_allows_rejoin_when_seat_limit_is_full(tmp_path):
@@ -272,10 +272,10 @@ def test_nickname_redeem_allows_rejoin_when_seat_limit_is_full(tmp_path):
     assert rejoin.status_code == 200
     assert rejoin.json()["api_key"] == first.json()["api_key"]
     assert blocked.status_code == 400
-    assert blocked.json()["detail"] == "此課堂座位已滿，無法以新暱稱領取"
+    assert blocked.json()["detail"] == "此課堂座位已滿，無法領取"
 
 
-def test_lowering_seat_limit_does_not_kick_existing_nicknames(tmp_path):
+def test_lowering_seat_limit_does_not_evict_existing_students(tmp_path):
     client, repo = _client(tmp_path)
     teacher, klass, session = _live_session(repo)
 
@@ -300,13 +300,13 @@ def test_lowering_seat_limit_does_not_kick_existing_nicknames(tmp_path):
     assert repo.verify_api_key_context(ada.json()["api_key"]) is not None
     assert repo.verify_api_key_context(bob.json()["api_key"]) is not None
     assert charlie.status_code == 400
-    assert charlie.json()["detail"] == "此課堂座位已滿，無法以新暱稱領取"
+    assert charlie.json()["detail"] == "此課堂座位已滿，無法領取"
     item = listing.json()["items"][0]
-    assert item["nickname_seat_count"] == 2
+    assert item["redemption_count"] == 2
     assert item["seat_limit"] == 1
 
 
-def test_google_redeem_succeeds_when_nickname_seats_are_full(tmp_path):
+def test_google_redeem_rejected_when_session_seats_are_full(tmp_path):
     client, repo = _client(tmp_path)
     teacher, klass, session = _live_session(repo)
     repo.update_class_session(klass["id"], session["id"], seat_limit=1)
@@ -324,11 +324,134 @@ def test_google_redeem_succeeds_when_nickname_seats_are_full(tmp_path):
     )
 
     assert seated.status_code == 200
-    assert google.status_code == 200
-    assert google.json()["api_key"].startswith("vcr_sk_")
+    assert google.status_code == 400
+    assert google.json()["detail"] == "此課堂座位已滿，無法領取"
     item = listing.json()["items"][0]
-    assert item["nickname_seat_count"] == 1
-    assert item["redemption_count"] == 2
+    assert item["redemption_count"] == 1
+
+
+def test_google_redeem_allows_rejoin_when_session_seats_are_full(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    repo.update_class_session(klass["id"], session["id"], seat_limit=1)
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    cookies = _portal_cookie(repo, student["id"])
+
+    first = client.post(
+        "/sessions/redeem",
+        json={"invite_code": session["invite_code"]},
+        cookies=cookies,
+    )
+    rejoin = client.post(
+        "/sessions/redeem",
+        json={"invite_code": session["invite_code"]},
+        cookies=cookies,
+    )
+    blocked = _redeem(client, session["invite_code"], "Bob")
+
+    assert first.status_code == 200
+    assert rejoin.status_code == 200
+    assert rejoin.json()["api_key"] == first.json()["api_key"]
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "此課堂座位已滿，無法領取"
+
+
+def test_handoff_redeem_rejected_when_session_seats_are_full(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    repo.update_class_session(klass["id"], session["id"], seat_limit=1)
+    seated = _redeem(client, session["invite_code"], "Ada")
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+
+    redeem = client.post(
+        "/extension/sessions/redeem",
+        json={
+            "handoff_token": login.json()["handoff_token"],
+            "invite_code": session["invite_code"],
+        },
+    )
+
+    assert seated.status_code == 200
+    assert redeem.status_code == 400
+    assert redeem.json()["detail"] == "此課堂座位已滿，無法領取"
+
+
+def test_disabled_student_still_occupies_a_session_seat(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    repo.update_class_session(klass["id"], session["id"], seat_limit=1)
+    first = _redeem(client, session["invite_code"], "Ada")
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+    client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"status": "inactive"},
+    )
+
+    blocked = _redeem(client, session["invite_code"], "Bob")
+    sessions = client.get(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+
+    assert first.status_code == 200
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "此課堂座位已滿，無法領取"
+    assert sessions.json()["items"][0]["redemption_count"] == 1
+
+
+def test_inactive_google_student_cannot_redeem(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, klass, session = _live_session(repo)
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    cookies = _portal_cookie(repo, student["id"])
+    first = client.post(
+        "/sessions/redeem",
+        json={"invite_code": session["invite_code"]},
+        cookies=cookies,
+    )
+    listing = client.get(
+        f"/teacher/classes/{klass['id']}/redemptions",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    student_id = [item for item in listing.json()["items"] if item.get("redeemed_at")][0]["user_id"]
+    client.patch(
+        f"/teacher/classes/{klass['id']}/members/{student_id}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={"status": "inactive"},
+    )
+
+    login = client.post(
+        "/auth/google",
+        json={"email": "student@gmail.com", "name": "Student", "client": "extension"},
+    )
+    handoff = client.post(
+        "/extension/sessions/redeem",
+        json={
+            "handoff_token": login.json()["handoff_token"],
+            "invite_code": session["invite_code"],
+        },
+    )
+
+    assert first.status_code == 200
+    assert repo.verify_api_key_context(first.json()["api_key"]) is None
+    try:
+        repo.redeem_invite(session["invite_code"], student["id"])
+        raised = False
+    except ValueError as exc:
+        raised = True
+        assert str(exc) == "此學生已被停用，無法領取"
+    assert raised
+    assert login.status_code == 200
+    assert handoff.status_code == 400
+    assert handoff.json()["detail"] == "此學生已被停用，無法領取"
 
 
 def test_prior_session_nickname_takes_a_new_seat(tmp_path):
@@ -344,7 +467,7 @@ def test_prior_session_nickname_takes_a_new_seat(tmp_path):
     assert first.status_code == 200
     assert other.status_code == 200
     assert ada_again.status_code == 400
-    assert ada_again.json()["detail"] == "此課堂座位已滿，無法以新暱稱領取"
+    assert ada_again.json()["detail"] == "此課堂座位已滿，無法領取"
 
 
 def test_extension_handoff_redeem_still_works(tmp_path):

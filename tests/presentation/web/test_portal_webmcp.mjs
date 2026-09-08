@@ -143,6 +143,8 @@ test("list Class Sessions sends an explicit target and returns selectable data",
             status: "active",
             invite_code: "VANS-SECRET",
             course_catalog_yaml: "actions: []",
+            nickname_seat_count: 4,
+            redemption_count: 6,
           }],
         }),
       };
@@ -153,7 +155,13 @@ test("list Class Sessions sends an explicit target and returns selectable data",
   const output = await registered.get("list_class_sessions").execute({ class_id: 9 });
   assert.deepEqual(JSON.parse(JSON.stringify(output)), {
     class_id: 9,
-    class_sessions: [{ id: 21, class_id: 9, name: "第一堂", status: "active" }],
+    class_sessions: [{
+      id: 21,
+      class_id: 9,
+      name: "第一堂",
+      status: "active",
+      redemption_count: 6,
+    }],
   });
 });
 

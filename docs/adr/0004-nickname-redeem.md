@@ -13,6 +13,6 @@ Students often have no Google account or cannot finish Google login, but Classro
 ## Consequences
 
 - Identity comparison trims ends only; nicknames cannot be renamed or auto-merged with Google; teacher may disable, not split collisions.
-- Each Class Session has a Session Seat Limit (default 60, teacher-changeable) counting distinct nicknames, not Google redemptions.
+- Each Class Session has a Session Seat Limit (default 60, teacher-changeable). Occupancy counting is superseded by ADR 0013 (every redeem identity in the sitting, not nicknames only).
 - `open_registration` does not gate Nickname Redeem; a valid Invite Code does.
 - Glossary: `CONTEXT.md` (Class, Classroom Nickname, Nickname Redeem, Session Seat Limit).

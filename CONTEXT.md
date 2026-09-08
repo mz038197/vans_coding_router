@@ -88,9 +88,9 @@ _Avoid_: Guest, Guest User, login name, email as identity, 學號 as a separate 
 The exchange of an Invite Code plus a Classroom Nickname for a Classroom API Key bound to that Class Session. It is offered only in the Vans classroom extension Router Lane on VS Code, not on the Portal website and not for Cursor. Every Class Session on this router allows it, up to the Session Seat Limit; the gate is a valid Invite Code, not Portal open registration. It does not use Google or Sign-in Handoff. It does not exist on `pegasi_router`.
 _Avoid_: Guest redeem, shared class-wide API key, teacher long-lived key, dev login, 連線登入 as the name of this path, Pegasi parity for this path, Portal web Nickname Redeem, Cursor Nickname Redeem
 
-**Session Seat Limit**:
-A teacher-set maximum of distinct Classroom Nicknames that may Nickname Redeem into one Class Session. Default 60; the teacher may change it. Rejoin with an existing nickname does not take a new seat. Google redemptions do not count. When the limit is reached, new nicknames are rejected.
-_Avoid_: shared class-wide API key quota, open_registration, capping Google users with this limit
+**Session Seat Limit** (Portal: 課堂座位):
+A teacher-set maximum of distinct student identities that may redeem a Classroom API Key into one Class Session, by Nickname Redeem, Sign-in Handoff, or Portal Google redeem. Default 60; the teacher may change it. Occupancy is one redemption per user in that sitting. Rejoin with an already-redeemed identity does not take a new seat. A disabled student still occupies a seat. Lowering the limit does not evict. When the limit is reached, new identities are rejected on every redeem path.
+_Avoid_: 暱稱座位, nickname-only cap, capping only Nickname Redeem, treating disable as freeing a seat, coupling this limit to open_registration
 
 **Sign-in Handoff**:
 A short-lived, single-use proof issued after Google login for the classroom extension. Delivered via `vscode://` / `cursor://` deep link or a one-time paste code. It authorizes one Invite Code redeem only; it is not a long-lived Portal session and must never carry a Classroom API Key. On this router it is a secondary Google fallback in the VS Code extension, not the default student path.
