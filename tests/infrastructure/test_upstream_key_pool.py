@@ -51,7 +51,7 @@ async def test_round_robin_defers_to_least_in_flight():
 
 
 @pytest.mark.asyncio
-async def test_round_robin_advances_cursor_on_excluded_acquire():
+async def test_round_robin_advances_cursor_on_key_failover_acquire():
     pool = UpstreamKeyPool(
         ["key-a", "key-b"],
         max_concurrent_per_key=0,
@@ -67,7 +67,7 @@ async def test_round_robin_advances_cursor_on_excluded_acquire():
 
 
 @pytest.mark.asyncio
-async def test_round_robin_cursor_follows_acquired_key_during_quarantine():
+async def test_round_robin_cursor_follows_acquired_key_during_key_quarantine():
     pool = UpstreamKeyPool(
         ["key-a", "key-b"],
         max_concurrent_per_key=0,
