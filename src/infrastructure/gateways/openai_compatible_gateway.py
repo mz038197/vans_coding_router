@@ -79,6 +79,7 @@ class OpenAICompatibleGateway:
             queue_timeout_sec=self.provider.queue_timeout_sec,
             acquire_delay_ms=self.provider.acquire_delay_ms,
             quarantine_ttl_sec=self.provider.quarantine_ttl_sec,
+            tie_break_round_robin=self.provider.name == "ollama_cloud",
         )
 
     def _ensure_pool(self) -> UpstreamKeyPool | None:

@@ -12,7 +12,7 @@ class NoSelectableUpstreamKeyError(Exception):
 
 
 class UpstreamKeyPool:
-    """Least-in-flight key selection with optional per-key concurrency limit."""
+    """Least-in-flight key selection with optional round-robin on equal in-flight."""
 
     def __init__(
         self,
@@ -22,6 +22,7 @@ class UpstreamKeyPool:
         queue_timeout_sec: float = 120.0,
         acquire_delay_ms: int = 0,
         quarantine_ttl_sec: float = 3600.0,
+        tie_break_round_robin: bool = False,
     ):
         if not keys:
             raise ValueError("UpstreamKeyPool requires at least one API key")
@@ -30,8 +31,10 @@ class UpstreamKeyPool:
         self._queue_timeout_sec = float(queue_timeout_sec)
         self._acquire_delay_ms = max(0, int(acquire_delay_ms))
         self._quarantine_ttl_sec = max(0.0, float(quarantine_ttl_sec))
+        self._tie_break_round_robin = bool(tie_break_round_robin)
         self._in_flight = [0] * len(self._keys)
         self._quarantined_until: list[float | None] = [None] * len(self._keys)
+        self._last_acquired: int | None = None
         self._last_extra_usage_message: str | None = None
         self._waiting = 0
         self._busy_total = 0
@@ -143,8 +146,8 @@ class UpstreamKeyPool:
         return False
 
     def _pick_index(self, exclude: frozenset[int], now: float) -> int | None:
-        best: int | None = None
-        best_load = 0
+        candidates: list[int] = []
+        best_load: int | None = None
         for index, load in enumerate(self._in_flight):
             if index in exclude:
                 continue
@@ -152,10 +155,22 @@ class UpstreamKeyPool:
                 continue
             if self._max_concurrent_per_key > 0 and load >= self._max_concurrent_per_key:
                 continue
-            if best is None or load < best_load:
-                best = index
+            if best_load is None or load < best_load:
                 best_load = load
-        return best
+                candidates = [index]
+            elif load == best_load:
+                candidates.append(index)
+        if not candidates:
+            return None
+        if not self._tie_break_round_robin or len(candidates) == 1:
+            return candidates[0]
+        last = self._last_acquired if self._last_acquired is not None else -1
+        eligible = frozenset(candidates)
+        for step in range(1, len(self._keys) + 1):
+            index = (last + step) % len(self._keys)
+            if index in eligible:
+                return index
+        return candidates[0]
 
     def _raise_busy(self, message: str, *, cause: BaseException | None = None) -> None:
         self._busy_total += 1
@@ -192,6 +207,7 @@ class UpstreamKeyPool:
                             self._waiting -= 1
                             waiting = False
                         self._in_flight[index] += 1
+                        self._last_acquired = index
                         acquired = index
                         break
                     remaining = deadline - time.monotonic()

@@ -7,6 +7,104 @@ from src.infrastructure.gateways.upstream_key_pool import UpstreamKeyPool
 
 
 @pytest.mark.asyncio
+async def test_round_robin_tie_break_spreads_idle_acquires():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        tie_break_round_robin=True,
+    )
+    seen: list[int] = []
+    for _ in range(4):
+        index = await pool.acquire()
+        seen.append(index)
+        await pool.release(index)
+    assert seen == [0, 1, 0, 1]
+
+
+@pytest.mark.asyncio
+async def test_idle_acquires_stay_on_first_key_without_round_robin():
+    pool = UpstreamKeyPool(["key-a", "key-b"], max_concurrent_per_key=0, acquire_delay_ms=0)
+    seen: list[int] = []
+    for _ in range(4):
+        index = await pool.acquire()
+        seen.append(index)
+        await pool.release(index)
+    assert seen == [0, 0, 0, 0]
+
+
+@pytest.mark.asyncio
+async def test_round_robin_defers_to_least_in_flight():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        tie_break_round_robin=True,
+    )
+    first = await pool.acquire()
+    second = await pool.acquire()
+    await pool.release(first)
+    again = await pool.acquire()
+    assert again == first
+    await pool.release(second)
+    await pool.release(again)
+
+
+@pytest.mark.asyncio
+async def test_round_robin_advances_cursor_on_excluded_acquire():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        tie_break_round_robin=True,
+    )
+    failover = await pool.acquire(exclude=frozenset({0}))
+    assert failover == 1
+    await pool.release(failover)
+    next_idle = await pool.acquire()
+    assert next_idle == 0
+    await pool.release(next_idle)
+
+
+@pytest.mark.asyncio
+async def test_round_robin_cursor_follows_acquired_key_during_quarantine():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        quarantine_ttl_sec=3600,
+        tie_break_round_robin=True,
+    )
+    first = await pool.acquire()
+    assert first == 0
+    await pool.release(first)
+    pool.quarantine(1, "extra usage balance is empty")
+    held_to_first = await pool.acquire()
+    assert held_to_first == 0
+    await pool.release(held_to_first)
+    await pool.release_quarantine(1)
+    after_release = await pool.acquire()
+    assert after_release == 1
+    await pool.release(after_release)
+
+
+@pytest.mark.asyncio
+async def test_round_robin_walks_three_keys():
+    pool = UpstreamKeyPool(
+        ["key-a", "key-b", "key-c"],
+        max_concurrent_per_key=0,
+        acquire_delay_ms=0,
+        tie_break_round_robin=True,
+    )
+    seen: list[int] = []
+    for _ in range(6):
+        index = await pool.acquire()
+        seen.append(index)
+        await pool.release(index)
+    assert seen == [0, 1, 2, 0, 1, 2]
+
+
+@pytest.mark.asyncio
 async def test_least_in_flight_spreads_across_keys():
     pool = UpstreamKeyPool(["key-a", "key-b"], max_concurrent_per_key=0, acquire_delay_ms=0)
     first = await pool.acquire()

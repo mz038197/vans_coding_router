@@ -26,6 +26,23 @@ def _gateway(monkeypatch) -> OpenAICompatibleGateway:
     )
 
 
+def _openrouter_gateway(monkeypatch) -> OpenAICompatibleGateway:
+    monkeypatch.setenv("K1", "key-a")
+    monkeypatch.setenv("K2", "key-b")
+    return OpenAICompatibleGateway(
+        ProviderSettings(
+            name="openrouter",
+            type="openai_compatible",
+            base_url="https://example.test/v1",
+            api_key_envs=("K1", "K2"),
+            max_concurrent_per_key=6,
+            acquire_delay_ms=0,
+            quarantine_ttl_sec=3600,
+        ),
+        timeout=5.0,
+    )
+
+
 def _response(status_code: int, text: str = "", json_body=None) -> MagicMock:
     response = MagicMock()
     response.status_code = status_code
@@ -35,6 +52,35 @@ def _response(status_code: int, text: str = "", json_body=None) -> MagicMock:
     else:
         response.json = MagicMock(side_effect=ValueError("no json"))
     return response
+
+
+@pytest.mark.asyncio
+async def test_ollama_cloud_idle_requests_alternate_pool_keys(monkeypatch):
+    gateway = _gateway(monkeypatch)
+    ok = _response(200, text="{}", json_body={"ok": True})
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(return_value=ok)
+    for _ in range(4):
+        await gateway._request("POST", "/chat/completions", json={"model": "x"})
+    auth_headers = [call.kwargs["headers"]["Authorization"] for call in gateway._client.request.await_args_list]
+    assert auth_headers == [
+        "Bearer key-a",
+        "Bearer key-b",
+        "Bearer key-a",
+        "Bearer key-b",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_idle_requests_stay_on_first_pool_key(monkeypatch):
+    gateway = _openrouter_gateway(monkeypatch)
+    ok = _response(200, text="{}", json_body={"ok": True})
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(return_value=ok)
+    for _ in range(4):
+        await gateway._request("POST", "/chat/completions", json={"model": "x"})
+    auth_headers = [call.kwargs["headers"]["Authorization"] for call in gateway._client.request.await_args_list]
+    assert auth_headers == ["Bearer key-a", "Bearer key-a", "Bearer key-a", "Bearer key-a"]
 
 
 @pytest.mark.asyncio
