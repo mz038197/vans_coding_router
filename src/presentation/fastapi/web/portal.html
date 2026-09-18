@@ -1142,6 +1142,15 @@
 
     let upstreamPoolsTimer = null;
 
+    function currentTeacherTabId() {
+      const active = document.querySelector('.sidebar-nav-btn.tab-active[data-tab]');
+      const id = active && active.dataset ? active.dataset.tab : '';
+      if (id === 'keyTab' || id === 'classTab' || id === 'monitorTab' || id === 'probeTab' || id === 'adminTab') {
+        return id;
+      }
+      return 'keyTab';
+    }
+
     function showTab(id) {
       ['keyTab','classTab','monitorTab','probeTab','adminTab'].forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
@@ -1419,7 +1428,7 @@
         renderTeacherKeyMeta(me.keys || []);
         syncCourseSelect();
         syncMonitorCourseSelect();
-        showTab('keyTab');
+        showTab(currentTeacherTabId());
       }
       enhancePortalWithWebMcp();
     }
