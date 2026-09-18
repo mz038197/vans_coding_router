@@ -59,15 +59,20 @@ function makeClassList(initial = []) {
 }
 
 function loadTeacherTabFns() {
-  const names = ["showTab", "refresh", "reloadSessionViews"];
-  const optional = [];
-  if (portalHtml.includes("function currentTeacherTabId(")) {
-    optional.push("currentTeacherTabId");
-  }
-  const code = [...optional, ...names]
-    .map((name) => extractNamedFunction(portalHtml, name))
-    .join("\n");
-  return { code, names: [...optional, ...names] };
+  const names = [
+    "filterCourses",
+    "escapeHtml",
+    "currentTeacherTabId",
+    "showTab",
+    "syncCourseSelect",
+    "refresh",
+    "reloadSessionViews",
+  ];
+  const code = [
+    "const TEACHER_TAB_IDS = ['keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];",
+    ...names.map((name) => extractNamedFunction(portalHtml, name)),
+  ].join("\n");
+  return { code, names };
 }
 
 function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
@@ -86,6 +91,9 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
   byId.adminBtn = { classList: makeClassList(["hidden"]) };
   byId["sessions-panel"] = { classList: makeClassList([]) };
   byId.courseSelect = { value: selectedCourseId, innerHTML: "" };
+  byId.courseStatusFilter = { value: "active" };
+  byId.courseSearch = { value: "" };
+  byId.courseDetail = { innerHTML: "" };
 
   const sandbox = {
     selectedCourseId,
@@ -124,7 +132,7 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
     },
     renderActiveKeysSection() {},
     renderTeacherKeyMeta() {},
-    syncCourseSelect() {},
+    renderCourseDetailPanel() {},
     syncMonitorCourseSelect() {},
     syncProbeApiKey() {},
     startUpstreamPoolsPoll() {},
@@ -158,6 +166,8 @@ test("session-settings reload keeps 我的課程 when it is current", async () =
   assert.equal(activeTab(navButtons), "classTab");
   assert.equal(byId.classTab.classList.contains("hidden"), false);
   assert.equal(byId.keyTab.classList.contains("hidden"), true);
+  assert.equal(sandbox.selectedCourseId, "7");
+  assert.equal(byId.courseSelect.value, "7");
 });
 
 test("capability toggles do not start personal API Key", () => {
@@ -178,5 +188,19 @@ test("我的課程 mutations do not hard-switch to personal API Key", () => {
   for (const name of ["createClass", "createSession", "disableClass", "disableClassMember"]) {
     const source = extractNamedFunction(portalHtml, name);
     assert.doesNotMatch(source, /showTab\s*\(\s*['"]keyTab['"]\s*\)/);
+  }
+});
+
+test("failed class-settings saves do not switch tab", () => {
+  for (const name of [
+    "saveEditExpiresModal",
+    "saveEditCatalogModal",
+    "saveSessionChatLanguageModels",
+    "beginEditSessionName",
+    "beginEditSessionSeatLimit",
+    "endSessionNow",
+  ]) {
+    const source = extractNamedFunction(portalHtml, name);
+    assert.doesNotMatch(source, /showTab\s*\(/);
   }
 });
