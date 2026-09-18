@@ -62,21 +62,28 @@ def extra_usage_remaining_from_usage_payload(payload: Any) -> float | None:
     return None
 
 
-def included_weekly_usage_from_usage_payload(payload: Any) -> float | None:
-    """Return Included Weekly Usage (already-used 0–1) from an Ollama usage document.
+def included_monthly_usage_from_usage_payload(payload: Any) -> float | None:
+    """Return Included Monthly Usage (already-used 0–1) from an Ollama usage document.
 
     Extra Usage Remaining, session usage, credits, and activity cost are not this value.
-    Zero is a valid used fraction.
+    Zero is a valid used fraction. If monthly is absent, weekly used fraction is accepted.
     """
     if not isinstance(payload, dict):
         return None
     limits = payload.get("limits")
     if not isinstance(limits, dict):
         return None
-    weekly = limits.get("weekly")
-    if not isinstance(weekly, dict):
+    for window in ("monthly", "weekly"):
+        parsed = _included_usage_fraction(limits.get(window))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _included_usage_fraction(window: Any) -> float | None:
+    if not isinstance(window, dict):
         return None
-    parsed = _as_finite_number(weekly.get("usage"))
+    parsed = _as_finite_number(window.get("usage"))
     if parsed is None or parsed < 0.0 or parsed > 1.0:
         return None
     return parsed

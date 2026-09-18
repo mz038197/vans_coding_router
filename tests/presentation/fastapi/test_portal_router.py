@@ -1779,16 +1779,15 @@ def _ollama_usage_router(tmp_path, monkeypatch, handler, envs: dict[str, str]):
     return client, repo
 
 
-def test_teacher_upstream_pools_include_included_weekly_usage(tmp_path, monkeypatch):
+def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-        weekly = 0.125 if key == "secret-a" else 0
+        monthly = 0.125 if key == "secret-a" else 0
         return httpx.Response(
             200,
             json={
                 "limits": {
-                    "session": {"usage": 0.1, "models": []},
-                    "weekly": {"usage": weekly, "models": []},
+                    "monthly": {"usage": monthly, "models": []},
                 }
             },
         )
@@ -1803,8 +1802,8 @@ def test_teacher_upstream_pools_include_included_weekly_usage(tmp_path, monkeypa
     response = http.get("/teacher/upstream-pools", cookies=_portal_cookie(repo, teacher))
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert [item["included_weekly_usage"] for item in keys] == [0.125, 0.0]
-    assert "extra_usage_remaining" not in keys[0]
+    assert [item["included_monthly_usage"] for item in keys] == [0.125, 0.0]
+    assert "included_weekly_usage" not in keys[0]
     assert [item["in_flight"] for item in keys] == [0, 0]
     assert [item["quarantined"] for item in keys] == [False, False]
     text = response.text
@@ -1819,7 +1818,7 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
             return httpx.Response(401, json={"error": "unauthorized"})
         return httpx.Response(
             200,
-            json={"limits": {"weekly": {"usage": 0.08, "models": []}}},
+            json={"limits": {"monthly": {"usage": 0.08, "models": []}}},
         )
 
     http, repo = _ollama_usage_router(
@@ -1832,7 +1831,7 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
     response = http.get("/teacher/upstream-pools", cookies=_portal_cookie(repo, teacher))
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert keys[0]["included_weekly_usage"] is None
-    assert keys[1]["included_weekly_usage"] == 0.08
+    assert keys[0]["included_monthly_usage"] is None
+    assert keys[1]["included_monthly_usage"] == 0.08
     assert [item["in_flight"] for item in keys] == [0, 0]
 

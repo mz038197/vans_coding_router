@@ -33,12 +33,11 @@ def _bearer_key(request: httpx.Request) -> str:
     return auth.removeprefix("Bearer ").strip()
 
 
-def _usage_payload(weekly: float, *, extra_remaining: float | None = 99.0) -> dict:
+def _usage_payload(monthly: float, *, extra_remaining: float | None = 99.0) -> dict:
     payload: dict = {
         "activity": {"cost": "9.99"},
         "limits": {
-            "session": {"usage": 0.1, "models": []},
-            "weekly": {"usage": weekly, "models": []},
+            "monthly": {"usage": monthly, "models": []},
         },
     }
     if extra_remaining is not None:
@@ -47,7 +46,7 @@ def _usage_payload(weekly: float, *, extra_remaining: float | None = 99.0) -> di
 
 
 @pytest.mark.asyncio
-async def test_overlay_attaches_included_weekly_usage_and_hides_secrets(monkeypatch):
+async def test_overlay_attaches_included_monthly_usage_and_hides_secrets(monkeypatch):
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -65,9 +64,9 @@ async def test_overlay_attaches_included_weekly_usage_and_hides_secrets(monkeypa
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
     snapshot = routing.pool_status(limited_only=True)
-    status = await routing.overlay_included_weekly_usage(snapshot)
+    status = await routing.overlay_included_monthly_usage(snapshot)
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert [item["included_weekly_usage"] for item in keys] == [0.125, 0.0]
+    assert [item["included_monthly_usage"] for item in keys] == [0.125, 0.0]
     assert "extra_usage_remaining" not in keys[0]
     assert [item["in_flight"] for item in keys] == [0, 0]
     dumped = str(status)
@@ -92,11 +91,11 @@ async def test_one_key_usage_error_leaves_other_key_and_in_flight(monkeypatch):
         usage_client=client,
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
-    status = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
+    status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert len(keys) == 2
-    assert keys[0]["included_weekly_usage"] is None
-    assert keys[1]["included_weekly_usage"] == 0.08
+    assert keys[0]["included_monthly_usage"] is None
+    assert keys[1]["included_monthly_usage"] == 0.08
     assert keys[0]["in_flight"] == 0
     assert keys[1]["in_flight"] == 0
     await client.aclose()
@@ -116,10 +115,10 @@ async def test_usage_timeout_marks_only_that_key_unavailable(monkeypatch):
         usage_client=client,
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
-    status = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
+    status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert keys[0]["included_weekly_usage"] is None
-    assert keys[1]["included_weekly_usage"] == 0.03
+    assert keys[0]["included_monthly_usage"] is None
+    assert keys[1]["included_monthly_usage"] == 0.03
     await client.aclose()
 
 
@@ -142,10 +141,10 @@ async def test_session_only_usage_is_unavailable(monkeypatch):
         usage_client=client,
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
-    status = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
+    status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert len(keys) == 1
-    assert keys[0]["included_weekly_usage"] is None
+    assert keys[0]["included_monthly_usage"] is None
     await client.aclose()
 
 
@@ -164,7 +163,7 @@ async def test_unset_second_key_fetches_only_configured_key(monkeypatch):
         usage_client=client,
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
-    status = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
+    status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["label"] for item in keys] == ["OLLAMA_CLOUD 1"]
     assert calls == ["secret-a"]
@@ -191,12 +190,12 @@ async def test_successful_weekly_usage_is_cached_failures_are_retried(monkeypatc
         usage_client=client,
     )
     routing = RoutingGateway({"ollama_cloud": ollama})
-    first = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
-    second = await routing.overlay_included_weekly_usage(routing.pool_status(limited_only=True))
-    assert first["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_weekly_usage"] == 0.07
-    assert first["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_weekly_usage"] is None
-    assert second["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_weekly_usage"] == 0.07
-    assert second["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_weekly_usage"] == 0.04
+    first = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
+    second = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
+    assert first["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"] == 0.07
+    assert first["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_monthly_usage"] is None
+    assert second["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"] == 0.07
+    assert second["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_monthly_usage"] == 0.04
     assert calls.count("secret-a") == 1
     assert calls.count("secret-b") == 2
     await client.aclose()

@@ -1413,7 +1413,7 @@
       text-align: right;
     }
 
-    .upstream-weekly-usage {
+    .upstream-monthly-usage {
       color: var(--text-muted);
       font-variant-numeric: tabular-nums;
       font-size: 0.78rem;

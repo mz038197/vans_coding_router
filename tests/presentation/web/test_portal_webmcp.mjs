@@ -504,7 +504,7 @@ test("get upstream pool status preserves provider facts", async () => {
       pool: {
         key_count: 2,
         busy_total: 1,
-        keys: [{ index: 0, included_weekly_usage: 0.125, in_flight: 1 }],
+        keys: [{ index: 0, included_monthly_usage: 0.125, in_flight: 1 }],
       },
     },
   };

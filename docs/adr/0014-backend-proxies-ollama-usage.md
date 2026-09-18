@@ -1,6 +1,6 @@
 # Backend proxies Ollama usage; keys never leave the server
 
-Teachers need usage on Portal without exposing Fly env keys. The router fetches `https://ollama.com/api/usage` server-side with `OLLAMA_CLOUD_API_KEY` and optional `OLLAMA_CLOUD_API_KEY_2`, then returns only a sanitized per-key overlay on the existing teacher upstream-pools path. The displayed quantity is Included Weekly Usage (ADR 0016). The browser never receives provider keys.
+Teachers need usage on Portal without exposing Fly env keys. The router fetches `https://ollama.com/api/usage` server-side with `OLLAMA_CLOUD_API_KEY` and optional `OLLAMA_CLOUD_API_KEY_2`, then returns only a sanitized per-key overlay on the existing teacher upstream-pools path. The displayed quantity is Included Monthly Usage (ADR 0017). The browser never receives provider keys.
 
 ## Considered Options
 

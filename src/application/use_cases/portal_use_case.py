@@ -141,7 +141,7 @@ class PortalUseCase:
         if not callable(status_fn):
             return {"providers": {}}
         snapshot = status_fn(limited_only=True)
-        overlay = getattr(gateway, "overlay_included_weekly_usage", None)
+        overlay = getattr(gateway, "overlay_included_monthly_usage", None)
         if not callable(overlay):
             return snapshot
         try:

@@ -1,6 +1,6 @@
 from src.domain.extra_usage import (
     extra_usage_remaining_from_usage_payload,
-    included_weekly_usage_from_usage_payload,
+    included_monthly_usage_from_usage_payload,
     is_credit_exhaustion,
     is_extra_usage_exhaustion,
 )
@@ -120,29 +120,45 @@ def test_does_not_treat_session_weekly_or_activity_cost_as_extra_usage_remaining
     assert extra_usage_remaining_from_usage_payload(payload) is None
 
 
-def test_maps_included_weekly_usage_and_treats_zero_as_used():
+def test_maps_included_monthly_usage_and_treats_zero_as_used():
     payload = {
         "activity": {"cost": "9.99"},
         "extra_usage": {"remaining": 12.5},
         "limits": {
-            "session": {"usage": 0.4, "models": []},
-            "weekly": {"usage": 0.051, "models": []},
+            "monthly": {"usage": 0.153, "models": []},
         },
     }
-    assert included_weekly_usage_from_usage_payload(payload) == 0.051
-    assert included_weekly_usage_from_usage_payload(
-        {"limits": {"weekly": {"usage": 0}}}
+    assert included_monthly_usage_from_usage_payload(payload) == 0.153
+    assert included_monthly_usage_from_usage_payload(
+        {"limits": {"monthly": {"usage": 0}}}
     ) == 0.0
-    assert included_weekly_usage_from_usage_payload(
-        {"limits": {"weekly": {"usage": 1}}}
+    assert included_monthly_usage_from_usage_payload(
+        {"limits": {"monthly": {"usage": 1}}}
     ) == 1.0
 
 
-def test_rejects_session_only_or_out_of_range_weekly_usage():
-    assert included_weekly_usage_from_usage_payload(
+def test_falls_back_to_weekly_usage_when_monthly_absent():
+    assert included_monthly_usage_from_usage_payload(
+        {"limits": {"weekly": {"usage": 0.051, "models": []}}}
+    ) == 0.051
+
+
+def test_prefers_monthly_usage_over_weekly():
+    assert included_monthly_usage_from_usage_payload(
+        {
+            "limits": {
+                "monthly": {"usage": 0.153, "models": []},
+                "weekly": {"usage": 0.9, "models": []},
+            }
+        }
+    ) == 0.153
+
+
+def test_rejects_session_only_or_out_of_range_included_usage():
+    assert included_monthly_usage_from_usage_payload(
         {"limits": {"session": {"usage": 0.9, "models": []}}}
     ) is None
-    assert included_weekly_usage_from_usage_payload(
-        {"limits": {"weekly": {"usage": 1.2}}}
+    assert included_monthly_usage_from_usage_payload(
+        {"limits": {"monthly": {"usage": 1.2}}}
     ) is None
-    assert included_weekly_usage_from_usage_payload({"extra_usage": {"remaining": 8}}) is None
+    assert included_monthly_usage_from_usage_payload({"extra_usage": {"remaining": 8}}) is None

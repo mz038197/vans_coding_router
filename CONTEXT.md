@@ -17,12 +17,12 @@ An Upstream Refusal that means the upstream account cannot continue under its cu
 _Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (as a separate routing class), Credit Exhaustion
 
 **Extra Usage Remaining**:
-The remaining Extra Usage balance for one upstream key. It is a remaining-entitlement, not Extra Usage Exhaustion, Credit Exhaustion, Key Quarantine, or Included Weekly Usage. It is not shown on the Portal upstream-pool row.
-_Avoid_: credits remaining, quota remaining, Extra Usage Exhaustion (as the displayed number), account balance, session usage, weekly usage, Included Weekly Usage
+The remaining Extra Usage balance for one upstream key. It is a remaining-entitlement, not Extra Usage Exhaustion, Credit Exhaustion, Key Quarantine, or Included Monthly Usage. It is not shown on the Portal upstream-pool row.
+_Avoid_: credits remaining, quota remaining, Extra Usage Exhaustion (as the displayed number), account balance, session usage, weekly usage, Included Monthly Usage
 
-**Included Weekly Usage** (Portal: 週用量):
-The included 7-day plan usage already consumed for the Ollama account of one upstream key, as the 0–1 fraction `limits.weekly.usage` on that key's usage document. Higher means more of the weekly cap is used. It is not Extra Usage Remaining, not session usage, and not Extra Usage Exhaustion.
-_Avoid_: Extra Usage Remaining, weekly remaining, quota remaining, session usage, credits, Extra Usage Exhaustion
+**Included Monthly Usage** (Portal: 月用量):
+The included monthly plan usage already consumed for the Ollama account of one upstream key, as the 0–1 fraction `limits.monthly.usage` on that key's usage document. Higher means more of the monthly cap is used. It is not Extra Usage Remaining, not session usage, and not Extra Usage Exhaustion.
+_Avoid_: Extra Usage Remaining, weekly usage, quota remaining, session usage, credits, Extra Usage Exhaustion
 
 **Credit Exhaustion**:
 An Upstream Refusal that means the upstream account or that key has insufficient credits (account balance or per-key spending cap). It is not Extra Usage Exhaustion and not a rate-limit busy signal.

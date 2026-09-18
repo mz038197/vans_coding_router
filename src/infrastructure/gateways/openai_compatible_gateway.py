@@ -20,7 +20,7 @@ from src.domain.errors import (
 )
 from src.domain.extra_usage import (
     DEFAULT_EXTRA_USAGE_MESSAGE,
-    included_weekly_usage_from_usage_payload,
+    included_monthly_usage_from_usage_payload,
     is_key_failover_exhaustion,
 )
 from src.infrastructure.config import (
@@ -65,7 +65,7 @@ class OpenAICompatibleGateway:
         self._client: httpx.AsyncClient | None = None
         self._usage_client = usage_client
         self._created_usage_client = False
-        self._weekly_usage_cache: dict[int, tuple[float, float]] = {}
+        self._monthly_usage_cache: dict[int, tuple[float, float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
 
@@ -142,18 +142,18 @@ class OpenAICompatibleGateway:
             "keys": keys,
         }
 
-    async def attach_included_weekly_usage(self, pool: dict[str, Any]) -> dict[str, Any]:
-        """Overlay Included Weekly Usage onto ollama_cloud pool keys without touching in-flight."""
+    async def attach_included_monthly_usage(self, pool: dict[str, Any]) -> dict[str, Any]:
+        """Overlay Included Monthly Usage onto ollama_cloud pool keys without touching in-flight."""
         if self.provider.name != "ollama_cloud":
             return pool
         keys = list(pool.get("keys") or [])
         usages = await asyncio.gather(
-            *(self._included_weekly_usage_for_index(int(item["index"])) for item in keys)
+            *(self._included_monthly_usage_for_index(int(item["index"])) for item in keys)
         )
         attached = []
         for item, usage in zip(keys, usages, strict=True):
             row = dict(item)
-            row["included_weekly_usage"] = usage
+            row["included_monthly_usage"] = usage
             attached.append(row)
         return {**pool, "keys": attached}
 
@@ -163,17 +163,17 @@ class OpenAICompatibleGateway:
             self._created_usage_client = True
         return self._usage_client
 
-    async def _included_weekly_usage_for_index(self, index: int) -> float | None:
+    async def _included_monthly_usage_for_index(self, index: int) -> float | None:
         now = time.monotonic()
-        cached = self._weekly_usage_cache.get(index)
+        cached = self._monthly_usage_cache.get(index)
         if cached is not None and cached[1] > now:
             return cached[0]
-        usage = await self._fetch_included_weekly_usage(index)
+        usage = await self._fetch_included_monthly_usage(index)
         if usage is not None:
-            self._weekly_usage_cache[index] = (usage, now + _USAGE_CACHE_TTL_SEC)
+            self._monthly_usage_cache[index] = (usage, now + _USAGE_CACHE_TTL_SEC)
         return usage
 
-    async def _fetch_included_weekly_usage(self, index: int) -> float | None:
+    async def _fetch_included_monthly_usage(self, index: int) -> float | None:
         pool = self._ensure_pool()
         if pool is None or not (0 <= index < pool.key_count):
             return None
@@ -191,7 +191,7 @@ class OpenAICompatibleGateway:
             raise
         except Exception:
             logger.info(
-                "included_weekly_usage_unavailable provider=%s index=%s",
+                "included_monthly_usage_unavailable provider=%s index=%s",
                 self.provider.name,
                 index,
             )
@@ -202,7 +202,7 @@ class OpenAICompatibleGateway:
             payload = response.json()
         except json.JSONDecodeError:
             return None
-        return included_weekly_usage_from_usage_payload(payload)
+        return included_monthly_usage_from_usage_payload(payload)
 
     async def release_key_quarantine(self, index: int) -> None:
         pool = self._ensure_pool()
