@@ -499,7 +499,15 @@ test("get upstream pool status preserves provider facts", async () => {
       },
     },
   };
-  const providers = { ollama_cloud: { pool: { key_count: 2, busy_total: 1 } } };
+  const providers = {
+    ollama_cloud: {
+      pool: {
+        key_count: 2,
+        busy_total: 1,
+        keys: [{ index: 0, extra_usage_remaining: 12.5, in_flight: 1 }],
+      },
+    },
+  };
   const result = adapter.enhance({
     document,
     getWorkingContext: () => ({}),

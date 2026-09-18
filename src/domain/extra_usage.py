@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from src.domain.errors import extract_upstream_error_text
@@ -44,3 +45,56 @@ def is_credit_exhaustion(status_code: int, body: Any) -> bool:
 def is_key_failover_exhaustion(status_code: int, body: Any) -> bool:
     """True when Key Failover should run (Extra Usage Exhaustion or Credit Exhaustion)."""
     return is_extra_usage_exhaustion(status_code, body) or is_credit_exhaustion(status_code, body)
+
+
+def extra_usage_remaining_from_usage_payload(payload: Any) -> float | None:
+    """Return Extra Usage Remaining from an Ollama usage document, or None if unknown.
+
+    Session/weekly included usage, credits, and activity cost are not Extra Usage Remaining.
+    Zero is a valid remaining amount.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for raw in _extra_usage_remaining_candidates(payload):
+        parsed = _as_remaining_number(raw)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extra_usage_remaining_candidates(payload: dict[str, Any]) -> list[Any]:
+    candidates: list[Any] = []
+    if "extra_usage_remaining" in payload:
+        candidates.append(payload["extra_usage_remaining"])
+    extra = payload.get("extra_usage")
+    if isinstance(extra, dict):
+        for key in ("remaining", "remaining_balance", "balance"):
+            if key in extra:
+                candidates.append(extra[key])
+                break
+    limits = payload.get("limits")
+    if isinstance(limits, dict):
+        extra_limit = limits.get("extra_usage")
+        if extra_limit is None:
+            extra_limit = limits.get("extra")
+        if isinstance(extra_limit, dict) and "remaining" in extra_limit:
+            candidates.append(extra_limit["remaining"])
+    return candidates
+
+
+def _as_remaining_number(raw: Any) -> float | None:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+        return value if math.isfinite(value) else None
+    if isinstance(raw, str):
+        text = raw.strip().replace("$", "").replace(",", "")
+        if not text:
+            return None
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+        return value if math.isfinite(value) else None
+    return None

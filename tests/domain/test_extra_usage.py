@@ -1,4 +1,8 @@
-from src.domain.extra_usage import is_credit_exhaustion, is_extra_usage_exhaustion
+from src.domain.extra_usage import (
+    extra_usage_remaining_from_usage_payload,
+    is_credit_exhaustion,
+    is_extra_usage_exhaustion,
+)
 
 
 def test_detects_402_with_extra_usage_balance_empty():
@@ -95,3 +99,20 @@ def test_detects_402_with_insufficient_credits_in_metadata_only():
         }
     }
     assert is_credit_exhaustion(402, body) is True
+
+
+def test_maps_extra_usage_remaining_and_treats_zero_as_remaining():
+    assert extra_usage_remaining_from_usage_payload({"extra_usage": {"remaining": 12.5}}) == 12.5
+    assert extra_usage_remaining_from_usage_payload({"extra_usage": {"remaining": 0}}) == 0.0
+
+
+def test_does_not_treat_session_weekly_or_activity_cost_as_extra_usage_remaining():
+    payload = {
+        "activity": {"cost": "9.99"},
+        "credits": {"remaining": 40},
+        "limits": {
+            "session": {"usage": 0.1, "models": []},
+            "weekly": {"usage": 0.2, "models": []},
+        },
+    }
+    assert extra_usage_remaining_from_usage_payload(payload) is None

@@ -16,6 +16,10 @@ _Avoid_: Copilot bug, no choices, model offline
 An Upstream Refusal that means the upstream account cannot continue under its current Extra Usage or plan/session entitlement for that model (for example Extra Usage balance empty, or a session usage limit whose remedy is upgrade / add Extra Usage). Ollama may signal this with different HTTP statuses; it is not a generic rate-limit busy signal, not Credit Exhaustion, and not a router routing mistake.
 _Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (as a separate routing class), Credit Exhaustion
 
+**Extra Usage Remaining**:
+The remaining Extra Usage balance for one upstream key, shown on that key's Portal upstream-pool row. It is a remaining-entitlement display, not Extra Usage Exhaustion, Credit Exhaustion, or Key Quarantine.
+_Avoid_: credits remaining, quota remaining, Extra Usage Exhaustion (as the displayed number), account balance, session usage, weekly usage
+
 **Credit Exhaustion**:
 An Upstream Refusal that means the upstream account or that key has insufficient credits (account balance or per-key spending cap). It is not Extra Usage Exhaustion and not a rate-limit busy signal.
 _Avoid_: Extra Usage Exhaustion, quota full, rate limit, payment required (as a routing class)

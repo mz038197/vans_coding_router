@@ -1365,7 +1365,7 @@
 
     .upstream-key-row {
       display: grid;
-      grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.2fr) auto auto auto;
+      grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.2fr) auto auto auto auto;
       gap: 8px;
       align-items: center;
       margin: 4px 0;
@@ -1411,6 +1411,13 @@
       font-variant-numeric: tabular-nums;
       min-width: 2.5rem;
       text-align: right;
+    }
+
+    .upstream-extra-usage {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.78rem;
+      white-space: nowrap;
     }
 
     .upstream-quarantine-badge {

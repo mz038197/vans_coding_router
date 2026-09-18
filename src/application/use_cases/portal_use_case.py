@@ -132,7 +132,7 @@ class PortalUseCase:
             raise PermissionError("teacher only")
         return {"api_key": self.repo.issue_long_lived_key(user_id)}
 
-    def upstream_pools(self, user_id: int) -> dict[str, Any]:
+    async def upstream_pools(self, user_id: int) -> dict[str, Any]:
         self._assert_teacher(user_id)
         gateway = self._llm_gateway
         if gateway is None:
@@ -140,7 +140,14 @@ class PortalUseCase:
         status_fn = getattr(gateway, "pool_status", None)
         if not callable(status_fn):
             return {"providers": {}}
-        return status_fn(limited_only=True)
+        snapshot = status_fn(limited_only=True)
+        overlay = getattr(gateway, "overlay_extra_usage_remaining", None)
+        if not callable(overlay):
+            return snapshot
+        try:
+            return await overlay(snapshot)
+        except Exception:
+            return snapshot
 
     async def upstream_model_catalog(self, user_id: int) -> dict[str, Any]:
         self._assert_teacher(user_id)
