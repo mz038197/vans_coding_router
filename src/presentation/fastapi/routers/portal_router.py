@@ -600,7 +600,17 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
 
     @router.get("/teacher/upstream-pools")
     async def upstream_pools(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
-        return portal_call(lambda: portal_use_case.upstream_pools(current_user_id(session_user_id)))
+        try:
+            return await portal_use_case.upstream_pools(current_user_id(session_user_id))
+        except HTTPException:
+            raise
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="權限不足") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except Exception:
+            logger.exception("Upstream pools request failed")
+            raise HTTPException(status_code=500, detail="伺服器錯誤，請稍後再試") from None
 
     @router.get("/teacher/upstream-model-catalog")
     async def upstream_model_catalog(

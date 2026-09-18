@@ -1198,18 +1198,22 @@
           const barWidth = cap != null && cap > 0 ? Math.min(100, Math.round(ratio * 100)) : 0;
           const countLabel = cap != null ? `${inflight}/${cap}` : String(inflight);
           const quarantined = !!key.quarantined;
-          const remaining = key.quarantine_remaining_sec;
-          const remainingLabel = quarantined
-            ? (remaining != null ? `隔離中 · 剩餘 ${formatQuarantineRemaining(remaining)}` : '隔離中')
+          const quarantineRemaining = key.quarantine_remaining_sec;
+          const quarantineLabel = quarantined
+            ? (quarantineRemaining != null ? `隔離中 · 剩餘 ${formatQuarantineRemaining(quarantineRemaining)}` : '隔離中')
             : '';
           const releaseBtn = quarantined
             ? `<button type="button" class="btn subtle upstream-quarantine-release" data-provider="${escapeHtml(name)}" data-index="${Number(key.index)}">解除隔離</button>`
+            : '';
+          const extraUsage = name === 'ollama_cloud'
+            ? `<span class="upstream-extra-usage">${escapeHtml(formatExtraUsageRemaining(key.extra_usage_remaining))}</span>`
             : '';
           return `<div class="upstream-key-row${quarantined ? ' quarantined' : ''}">
             <span class="upstream-key-label">${escapeHtml(key.label)}</span>
             <div class="upstream-bar-track"><div class="upstream-bar-fill${hot ? ' hot' : ''}${quarantined ? ' quarantined' : ''}" style="width:${barWidth}%"></div></div>
             <span class="upstream-key-count">${escapeHtml(countLabel)}</span>
-            ${remainingLabel ? `<span class="upstream-quarantine-badge">${escapeHtml(remainingLabel)}</span>` : ''}
+            ${extraUsage}
+            ${quarantineLabel ? `<span class="upstream-quarantine-badge">${escapeHtml(quarantineLabel)}</span>` : ''}
             ${releaseBtn}
           </div>`;
         }).join('');
@@ -1228,6 +1232,13 @@
       if (hours > 0) return `${hours} 時 ${minutes} 分`;
       if (minutes > 0) return `${minutes} 分 ${seconds} 秒`;
       return `${seconds} 秒`;
+    }
+
+    function formatExtraUsageRemaining(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return `Extra Usage Remaining ${value}`;
+      }
+      return '額度無法取得';
     }
 
     async function loadUpstreamPools() {

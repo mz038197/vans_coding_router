@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from contextlib import aclosing
 from typing import Any, AsyncGenerator
 
@@ -17,7 +18,7 @@ from src.domain.errors import (
     UpstreamServiceError,
     extract_upstream_error_text,
 )
-from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_key_failover_exhaustion
+from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, extra_usage_remaining_from_usage_payload, is_key_failover_exhaustion
 from src.infrastructure.config import (
     CAPABILITY_AUDIO_SPEECH,
     CAPABILITY_AUDIO_TRANSCRIPTION,
@@ -42,13 +43,25 @@ logger = logging.getLogger(__name__)
 
 _ollama_thinking_cache = OllamaThinkingCache()
 _IMAGE_API_PROVIDERS = frozenset({"openrouter"})
+_OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
+_USAGE_TIMEOUT = httpx.Timeout(2.0)
+_USAGE_CACHE_TTL_SEC = 45.0
 
 
 class OpenAICompatibleGateway:
-    def __init__(self, provider: ProviderSettings, timeout: float = 900.0):
+    def __init__(
+        self,
+        provider: ProviderSettings,
+        timeout: float = 900.0,
+        *,
+        usage_client: httpx.AsyncClient | None = None,
+    ):
         self.provider = provider
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
+        self._usage_client = usage_client
+        self._created_usage_client = False
+        self._extra_usage_cache: dict[int, tuple[float, float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
 
@@ -92,6 +105,9 @@ class OpenAICompatibleGateway:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        if self._created_usage_client and self._usage_client is not None:
+            await self._usage_client.aclose()
+            self._usage_client = None
 
     def pool_status(self, *, limited_only: bool = False) -> dict[str, Any] | None:
         """Sanitized upstream key-pool snapshot, or None when unavailable / filtered."""
@@ -121,6 +137,68 @@ class OpenAICompatibleGateway:
             "busy_total": raw["busy_total"],
             "keys": keys,
         }
+
+    async def attach_extra_usage_remaining(self, pool: dict[str, Any]) -> dict[str, Any]:
+        """Overlay Extra Usage Remaining onto ollama_cloud pool keys without touching in-flight."""
+        if self.provider.name != "ollama_cloud":
+            return pool
+        keys = list(pool.get("keys") or [])
+        remainings = await asyncio.gather(
+            *(self._extra_usage_remaining_for_index(int(item["index"])) for item in keys)
+        )
+        attached = []
+        for item, remaining in zip(keys, remainings, strict=True):
+            row = dict(item)
+            row["extra_usage_remaining"] = remaining
+            attached.append(row)
+        return {**pool, "keys": attached}
+
+    async def _ensure_usage_client(self) -> httpx.AsyncClient:
+        if self._usage_client is None:
+            self._usage_client = httpx.AsyncClient(timeout=_USAGE_TIMEOUT)
+            self._created_usage_client = True
+        return self._usage_client
+
+    async def _extra_usage_remaining_for_index(self, index: int) -> float | None:
+        now = time.monotonic()
+        cached = self._extra_usage_cache.get(index)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        remaining = await self._fetch_extra_usage_remaining(index)
+        if remaining is not None:
+            self._extra_usage_cache[index] = (remaining, now + _USAGE_CACHE_TTL_SEC)
+        return remaining
+
+    async def _fetch_extra_usage_remaining(self, index: int) -> float | None:
+        pool = self._ensure_pool()
+        if pool is None or not (0 <= index < pool.key_count):
+            return None
+        api_key = pool.key_at(index)
+        if not api_key:
+            return None
+        try:
+            client = await self._ensure_usage_client()
+            response = await client.get(
+                _OLLAMA_CLOUD_USAGE_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                timeout=_USAGE_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.info(
+                "extra_usage_remaining_unavailable provider=%s index=%s",
+                self.provider.name,
+                index,
+            )
+            return None
+        if response.status_code >= 400:
+            return None
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return None
+        return extra_usage_remaining_from_usage_payload(payload)
 
     async def release_key_quarantine(self, index: int) -> None:
         pool = self._ensure_pool()
