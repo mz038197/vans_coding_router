@@ -1141,9 +1141,16 @@
     }
 
     let upstreamPoolsTimer = null;
+    const TEACHER_TAB_IDS = ['keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];
+
+    function currentTeacherTabId() {
+      const active = document.querySelector('.sidebar-nav-btn.tab-active[data-tab]');
+      const id = active && active.dataset ? active.dataset.tab : '';
+      return TEACHER_TAB_IDS.includes(id) ? id : 'keyTab';
+    }
 
     function showTab(id) {
-      ['keyTab','classTab','monitorTab','probeTab','adminTab'].forEach(x =>
+      TEACHER_TAB_IDS.forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
       document.querySelectorAll('.sidebar-nav-btn[data-tab]').forEach(btn => {
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
@@ -1419,7 +1426,7 @@
         renderTeacherKeyMeta(me.keys || []);
         syncCourseSelect();
         syncMonitorCourseSelect();
-        showTab('keyTab');
+        showTab(currentTeacherTabId());
       }
       enhancePortalWithWebMcp();
     }
