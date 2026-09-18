@@ -54,7 +54,7 @@ class RoutingGateway:
             providers[name] = {"pool": pool}
         return {"providers": providers}
 
-    async def overlay_extra_usage_remaining(self, status: dict[str, Any]) -> dict[str, Any]:
+    async def overlay_included_weekly_usage(self, status: dict[str, Any]) -> dict[str, Any]:
         providers = status.get("providers")
         if not isinstance(providers, dict):
             return status
@@ -62,7 +62,7 @@ class RoutingGateway:
         for name, payload in providers.items():
             item = dict(payload) if isinstance(payload, dict) else payload
             gateway = self.gateways.get(name)
-            attach = getattr(gateway, "attach_extra_usage_remaining", None)
+            attach = getattr(gateway, "attach_included_weekly_usage", None)
             pool = item.get("pool") if isinstance(item, dict) else None
             if callable(attach) and isinstance(pool, dict):
                 try:

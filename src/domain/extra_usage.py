@@ -56,10 +56,30 @@ def extra_usage_remaining_from_usage_payload(payload: Any) -> float | None:
     if not isinstance(payload, dict):
         return None
     for raw in _extra_usage_remaining_candidates(payload):
-        parsed = _as_remaining_number(raw)
+        parsed = _as_finite_number(raw)
         if parsed is not None:
             return parsed
     return None
+
+
+def included_weekly_usage_from_usage_payload(payload: Any) -> float | None:
+    """Return Included Weekly Usage (already-used 0–1) from an Ollama usage document.
+
+    Extra Usage Remaining, session usage, credits, and activity cost are not this value.
+    Zero is a valid used fraction.
+    """
+    if not isinstance(payload, dict):
+        return None
+    limits = payload.get("limits")
+    if not isinstance(limits, dict):
+        return None
+    weekly = limits.get("weekly")
+    if not isinstance(weekly, dict):
+        return None
+    parsed = _as_finite_number(weekly.get("usage"))
+    if parsed is None or parsed < 0.0 or parsed > 1.0:
+        return None
+    return parsed
 
 
 def _extra_usage_remaining_candidates(payload: dict[str, Any]) -> list[Any]:
@@ -72,7 +92,7 @@ def _extra_usage_remaining_candidates(payload: dict[str, Any]) -> list[Any]:
     return candidates
 
 
-def _as_remaining_number(raw: Any) -> float | None:
+def _as_finite_number(raw: Any) -> float | None:
     if isinstance(raw, bool) or raw is None:
         return None
     if isinstance(raw, (int, float)):

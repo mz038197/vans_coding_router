@@ -1205,14 +1205,14 @@
           const releaseBtn = quarantined
             ? `<button type="button" class="btn subtle upstream-quarantine-release" data-provider="${escapeHtml(name)}" data-index="${Number(key.index)}">解除隔離</button>`
             : '';
-          const extraUsage = name === 'ollama_cloud'
-            ? `<span class="upstream-extra-usage">${escapeHtml(formatExtraUsageRemaining(key.extra_usage_remaining))}</span>`
+          const weeklyUsage = name === 'ollama_cloud'
+            ? `<span class="upstream-weekly-usage">${escapeHtml(formatIncludedWeeklyUsage(key.included_weekly_usage))}</span>`
             : '';
           return `<div class="upstream-key-row${quarantined ? ' quarantined' : ''}">
             <span class="upstream-key-label">${escapeHtml(key.label)}</span>
             <div class="upstream-bar-track"><div class="upstream-bar-fill${hot ? ' hot' : ''}${quarantined ? ' quarantined' : ''}" style="width:${barWidth}%"></div></div>
             <span class="upstream-key-count">${escapeHtml(countLabel)}</span>
-            ${extraUsage}
+            ${weeklyUsage}
             ${quarantineLabel ? `<span class="upstream-quarantine-badge">${escapeHtml(quarantineLabel)}</span>` : ''}
             ${releaseBtn}
           </div>`;
@@ -1234,11 +1234,12 @@
       return `${seconds} 秒`;
     }
 
-    function formatExtraUsageRemaining(value) {
+    function formatIncludedWeeklyUsage(value) {
       if (typeof value === 'number' && Number.isFinite(value)) {
-        return `Extra Usage Remaining ${value}`;
+        const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
+        return `週用量 ${pct}%`;
       }
-      return '額度無法取得';
+      return '週用量無法取得';
     }
 
     async function loadUpstreamPools() {
