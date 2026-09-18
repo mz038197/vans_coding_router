@@ -1797,6 +1797,7 @@ def test_teacher_upstream_pools_include_extra_usage_remaining(tmp_path, monkeypa
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["extra_usage_remaining"] for item in keys] == [12.5, 0.0]
     assert [item["in_flight"] for item in keys] == [0, 0]
+    assert [item["quarantined"] for item in keys] == [False, False]
     text = response.text
     assert "secret-a" not in text
     assert "secret-b" not in text

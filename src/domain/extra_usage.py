@@ -67,18 +67,8 @@ def _extra_usage_remaining_candidates(payload: dict[str, Any]) -> list[Any]:
     if "extra_usage_remaining" in payload:
         candidates.append(payload["extra_usage_remaining"])
     extra = payload.get("extra_usage")
-    if isinstance(extra, dict):
-        for key in ("remaining", "remaining_balance", "balance"):
-            if key in extra:
-                candidates.append(extra[key])
-                break
-    limits = payload.get("limits")
-    if isinstance(limits, dict):
-        extra_limit = limits.get("extra_usage")
-        if extra_limit is None:
-            extra_limit = limits.get("extra")
-        if isinstance(extra_limit, dict) and "remaining" in extra_limit:
-            candidates.append(extra_limit["remaining"])
+    if isinstance(extra, dict) and "remaining" in extra:
+        candidates.append(extra["remaining"])
     return candidates
 
 
@@ -89,7 +79,7 @@ def _as_remaining_number(raw: Any) -> float | None:
         value = float(raw)
         return value if math.isfinite(value) else None
     if isinstance(raw, str):
-        text = raw.strip().replace("$", "").replace(",", "")
+        text = raw.strip()
         if not text:
             return None
         try:

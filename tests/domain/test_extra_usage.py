@@ -110,6 +110,7 @@ def test_does_not_treat_session_weekly_or_activity_cost_as_extra_usage_remaining
     payload = {
         "activity": {"cost": "9.99"},
         "credits": {"remaining": 40},
+        "extra_usage": {"balance": "40.00"},
         "limits": {
             "session": {"usage": 0.1, "models": []},
             "weekly": {"usage": 0.2, "models": []},
