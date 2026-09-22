@@ -12,11 +12,6 @@ def is_decision_model_id(model_id: str) -> bool:
     return model_id in DECISION_MODEL_SHELF
 
 
-def decision_upstream_model(model_id: str) -> str:
-    _provider, _sep, upstream = model_id.partition("@")
-    return upstream
-
-
 def parse_decision_model_allowlist_json(raw: str | None) -> list[str]:
     if raw is None or raw == "":
         return []
