@@ -319,6 +319,22 @@
         return updateSession(input, { seat_limit: input.seat_limit });
       },
     }, {
+      name: "change_session_decision_model",
+      title: "Change Session Decision Model",
+      description: "Set or clear the Decision Model for an explicit Class Session or the current Portal Class Session. Empty turns Decision off.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...sessionTargetProperties,
+          decision_model: { type: "string" },
+        },
+        required: ["decision_model"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        return updateSession(input, { decision_model: input.decision_model });
+      },
+    }, {
       name: "get_class_usage",
       title: "Get Class Usage",
       description: "Return existing usage facts for an explicit Class or the current Portal Class.",

@@ -71,6 +71,7 @@ test("supported browsers discover working context and list Classes", async () =>
       "update_session_capabilities",
       "change_session_expiry",
       "change_session_seat_limit",
+      "change_session_decision_model",
       "get_class_usage",
       "get_upstream_pool_status",
       "release_key_quarantine",
@@ -353,6 +354,9 @@ test("session write capabilities resolve live context and preserve grouped parti
     expires_at: "2026-09-30T16:00:00Z",
   });
   await registered.get("change_session_seat_limit").execute({ seat_limit: 75 });
+  await registered.get("change_session_decision_model").execute({
+    decision_model: "openrouter@minimax/minimax-m3",
+  });
 
   assert.deepEqual(requests, [
     ["/teacher/classes/9/sessions/31", {
@@ -361,6 +365,7 @@ test("session write capabilities resolve live context and preserve grouped parti
     }],
     ["/teacher/classes/7/sessions/21", { expires_at: "2026-09-30T16:00:00Z" }],
     ["/teacher/classes/7/sessions/21", { seat_limit: 75 }],
+    ["/teacher/classes/7/sessions/21", { decision_model: "openrouter@minimax/minimax-m3" }],
   ]);
 });
 

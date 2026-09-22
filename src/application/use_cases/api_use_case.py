@@ -344,12 +344,9 @@ class ApiUseCase:
         del api_key, client_ip
         decision_model = self._effective_decision_model(auth_context)
         model_id = body.get("model")
-        if auth_context is not None and auth_context.session_id is not None:
-            if not decision_model:
-                raise DecisionDisabledError()
-            if not isinstance(model_id, str) or model_id != decision_model:
-                raise ModelNotAllowedError()
-        elif not isinstance(model_id, str) or not model_id:
+        if not decision_model:
+            raise DecisionDisabledError()
+        if not isinstance(model_id, str) or model_id != decision_model:
             raise ModelNotAllowedError()
         payload = {
             "model": model_id,

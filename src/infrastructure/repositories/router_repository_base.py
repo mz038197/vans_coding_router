@@ -1310,9 +1310,6 @@ class RouterRepositoryBase(ABC):
             stored = row["decision_model"] if "decision_model" in row.keys() else ""
             return effective_decision_model(stored if isinstance(stored, str) else "", document)
 
-    def is_decision_enabled(self, session_id: int) -> bool:
-        return bool(self.get_effective_decision_model(session_id))
-
     def is_speech_transcription_enabled(self, session_id: int) -> bool:
         with self._connect() as conn:
             row = conn.execute(

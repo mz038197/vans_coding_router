@@ -191,9 +191,6 @@ class RouterRepositoryPort(Protocol):
     def get_effective_decision_model(self, session_id: int) -> str:
         ...
 
-    def is_decision_enabled(self, session_id: int) -> bool:
-        ...
-
     def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
         ...
 
