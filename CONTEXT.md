@@ -64,6 +64,26 @@ _Avoid_: Realtime transcription, live microphone session
 Speech-to-text over a live audio stream in a persistent realtime session.
 _Avoid_: File transcription, streamed file transcript
 
+**Decision** (Portal: 決策):
+A class-session permission for a student to submit a Decision Request. It does not grant chat, Speech, or Speech Transcription. New sessions leave this off by default. Ending the sitting expires it with the Classroom API Key.
+_Avoid_: Session Chat Language Model, Jev as a chat model, Copilot model, 聊天
+
+**Decision Request**:
+One student call that brings only its own state, its own typed questions, and a Model ID. Anything else is not part of the call. The questions belong to that call, not to the Class Session. The reply is the upstream decision body for that call, including its answers and the model and usage it attaches, not assistant text. That model string is not a Model ID. It draws the same upstream keys as chat for that provider, so Key Quarantine on one blocks the other.
+_Avoid_: chat completion, a session-owned rubric, a fixed router questionnaire, assistant message, a second key pool per capability, provider preferences, trace, session id, user
+
+**Decision Refusal**:
+The provider refusal of a Decision Request that was sent upstream, returned to the student as that refusal. It is not Readable Upstream Error. A router refusal before any upstream call, such as Decision off or a Model ID absent from the Decision Model Allowlist, is not a Decision Refusal.
+_Avoid_: Readable Upstream Error, chat choice, assistant message, hiding the provider refusal behind a generic router error
+
+**Decision Model Shelf** (Portal: 決策模型):
+The router's own set of decision Model IDs a teacher may check into a Decision Model Allowlist. It is not the Upstream Model Catalog and not a live chat model fetch. Its members are `openrouter@typesafe/jev-1.13` and `openrouter@~typesafe/jev-latest`. Those Model IDs are not Session Chat Language Models. If a chat provider lists them, the Upstream Model Catalog omits them.
+_Avoid_: Upstream Model Catalog, Session Chat Language Models, Course Catalog YAML, a student-facing model list
+
+**Decision Model Allowlist**:
+The Model IDs one Class Session allows on a Decision Request, checked from the Decision Model Shelf. It is not the Session Model Allowlist and it is not shown to students. Comparison uses the Model ID on that request, exactly. The model string in the upstream reply does not add a Model ID and does not authorize a later request. A Model ID absent from the allowlist, or not on the shelf, is refused before any upstream call. An empty list allows no Decision Request.
+_Avoid_: Session Model Allowlist, Session Chat Language Models, Upstream Model Catalog, Course Catalog YAML, a student keyed model-list GET, treating the reply model as permission
+
 **Theme**:
 A named Portal visual identity that changes colors and material treatment only. It does not change branding assets or page structure. The two Themes are Dark Theme and Light Theme. One Theme applies across Portal login, the signed-in Portal, and lobby host. The user's Theme choice is remembered on that browser. When no choice is stored, Light Theme is the default.
 _Avoid_: Mode, skin, style, dark mode
@@ -117,20 +137,20 @@ A teacher-managed classroom instance under a Class: invite lifecycle, Session Se
 _Avoid_: lesson plan, curriculum repo, student workspace
 
 **Session Chat Language Models**:
-A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template.
-_Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML
+A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. Decision Model Shelf IDs are not members of it.
+_Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML, Decision Model Shelf
+
+**Upstream Model Catalog**:
+The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription, and excluding Decision Model Shelf IDs. Teachers use it as a shelf to check models into Session Chat Language Models. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
+_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document, Decision Model Shelf
 
 **Session Model Allowlist**:
-The Model IDs inside that session’s Session Chat Language Models, not a second teacher-edited list.
-_Avoid_: a second teacher-edited id list, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
+The Model IDs inside that session’s Session Chat Language Models. It is the chat allowlist only, not a second chat list beside that document.
+_Avoid_: a second chat-model id list, Decision Model Allowlist, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
 The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`.
 _Avoid_: a second curated catalog, picking a whole upstream by provider name only, treating the live file as the student keyed GET
-
-**Upstream Model Catalog**:
-The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription. Teachers use it as a shelf to check models into Session Chat Language Models. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
-_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document
 
 **VCRouter Stencil**:
 The locked classroom provider identity and routing fields for Session Chat Language Models: `VCRouter` / `customendpoint` / `responses` / router url / `Authorization: Bearer ${apiKey}`. Teacher save and upload force these fields; display name, thinking, and token limits may differ.

@@ -15,6 +15,7 @@ from src.infrastructure.config import (
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from src.domain.decision_model_shelf import is_decision_model_id, validate_decision_model_allowlist
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -36,6 +37,7 @@ _SESSION_CAPABILITY_FIELDS = frozenset(
         "tts_enabled",
         "speech_transcription_enabled",
         "prompt_logging_enabled",
+        "decision_enabled",
     }
 )
 
@@ -172,6 +174,8 @@ class PortalUseCase:
             if not isinstance(model_id, str) or not model_id:
                 continue
             if provider not in allowed:
+                continue
+            if is_decision_model_id(model_id):
                 continue
             name = item.get("name")
             models.append(
@@ -418,6 +422,8 @@ class PortalUseCase:
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        decision_enabled: bool | None = None,
+        decision_model_allowlist: list[str] | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -441,6 +447,8 @@ class PortalUseCase:
             session_chat_language_models = normalize_session_chat_language_models(
                 session_chat_language_models
             )
+        if decision_model_allowlist is not None:
+            decision_model_allowlist = validate_decision_model_allowlist(decision_model_allowlist)
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
             existing = self.get_session(user_id, class_id, session_id)
             document = (existing or {}).get("session_chat_language_models") or []
@@ -452,6 +460,7 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            decision_enabled=decision_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
@@ -460,6 +469,8 @@ class PortalUseCase:
             changes["model_allowlist"] = model_allowlist
         if invocation_arguments is None and session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
             changes["session_chat_language_models"] = session_chat_language_models
+        if invocation_arguments is None and decision_model_allowlist is not None:
+            changes["decision_model_allowlist"] = decision_model_allowlist
         session = self.repo.update_class_session(
             class_id,
             session_id,
@@ -469,11 +480,13 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            decision_enabled=decision_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
             model_allowlist=model_allowlist,
             session_chat_language_models=session_chat_language_models,
+            decision_model_allowlist=decision_model_allowlist,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=user_id,
                 action=self._session_action(changes),

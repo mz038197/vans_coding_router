@@ -14,6 +14,14 @@ class FakeGateway:
         self.provider = ProviderSettings(name=name, capabilities=capabilities)
         self.requests: list[str] = []
         self.last_chat_req: ChatCompletionRequest | None = None
+        self.last_decision_body: dict[str, Any] | None = None
+        self.decision_error: Exception | None = None
+        self.decision_response: dict[str, Any] = {
+            "id": "gen-dec-fake",
+            "model": "typesafe/jev-1.13",
+            "answers": {},
+            "usage": {"input_tokens": 1, "output_tokens": 1, "cost": 0},
+        }
 
     async def startup(self) -> None:
         return None
@@ -81,6 +89,13 @@ class FakeGateway:
         self.last_transcription_fields = fields
         self.last_transcription_file = file
         yield b"data: [DONE]\n\n"
+
+    async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.last_decision_body = body
+        self.requests.append(str(body.get("model")))
+        if self.decision_error is not None:
+            raise self.decision_error
+        return self.decision_response
 
 
 @pytest.fixture

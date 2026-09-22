@@ -1381,6 +1381,64 @@ def test_session_speech_transcription_toggle(tmp_path):
     assert repo.is_speech_transcription_enabled(session_id) is False
 
 
+def test_new_session_decision_is_off_and_allowlist_is_empty(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = _portal_cookie(repo, teacher)
+
+    create = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    )
+    assert create.status_code == 200
+    body = create.json()
+    assert repo.is_decision_enabled(body["id"]) is False
+    assert body["decision_model_allowlist"] == []
+
+
+def test_teacher_checks_decision_shelf_into_the_session(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = _portal_cookie(repo, teacher)
+    session_id = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    ).json()["id"]
+
+    saved = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={
+            "decision_enabled": True,
+            "decision_model_allowlist": [
+                "openrouter@typesafe/jev-1.13",
+                "openrouter@~typesafe/jev-latest",
+            ],
+        },
+    )
+    assert saved.status_code == 200
+    assert repo.is_decision_enabled(session_id) is True
+    assert saved.json()["decision_model_allowlist"] == [
+        "openrouter@typesafe/jev-1.13",
+        "openrouter@~typesafe/jev-latest",
+    ]
+
+    rejected = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"decision_model_allowlist": ["openrouter@anthropic/claude-sonnet"]},
+    )
+    assert rejected.status_code == 400
+    assert repo.get_decision_model_allowlist(session_id) == [
+        "openrouter@typesafe/jev-1.13",
+        "openrouter@~typesafe/jev-latest",
+    ]
+
+
 def test_session_prompt_logging_toggle(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")

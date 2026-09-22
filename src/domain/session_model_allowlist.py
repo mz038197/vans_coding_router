@@ -4,6 +4,8 @@ import copy
 import json
 from typing import Any
 
+from src.domain.decision_model_shelf import is_decision_model_id
+
 MODEL_ALLOWLIST_UNCHANGED = object()
 SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
 
@@ -158,6 +160,8 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
             model_id = model.get("id")
             if not isinstance(model_id, str) or not model_id.strip():
                 raise ValueError("模型缺少 id")
+            if is_decision_model_id(model_id):
+                raise ValueError("決策模型不能放進聊天模型")
             if model_id in seen:
                 continue
             seen.add(model_id)

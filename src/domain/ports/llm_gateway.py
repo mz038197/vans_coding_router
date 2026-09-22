@@ -53,3 +53,6 @@ class LLMGatewayPort(Protocol):
         file: tuple[str, bytes, str | None],
     ) -> AsyncGenerator[bytes, None]:
         ...
+
+    async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        ...

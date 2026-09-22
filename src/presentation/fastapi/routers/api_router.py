@@ -329,6 +329,20 @@ def create_api_router(
         )
         return JSONResponse(content=data)
 
+    @router.post("/v1/decisions")
+    async def decisions_create(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        body = await request.json()
+        data = await api_use_case.decisions_create(body, api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
     def _extract_ws_api_key(ws: WebSocket) -> str | None:
         auth_header = ws.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):

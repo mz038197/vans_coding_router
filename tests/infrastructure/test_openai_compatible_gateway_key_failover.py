@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import UpstreamServiceError
 from src.infrastructure.config import ProviderSettings
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
@@ -287,3 +288,44 @@ async def test_stream_failovers_on_credit_exhaustion(monkeypatch):
     assert gateway._client.stream.call_count == 2
     assert gateway._pool.status()["keys"][0]["quarantined"] or gateway._pool.status()["keys"][1]["quarantined"]
     assert gateway._pool.in_flight_snapshot() == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_decision_extra_usage_quarantine_blocks_following_chat(monkeypatch):
+    gateway = _openrouter_gateway(monkeypatch)
+    exhausted = _response(
+        402,
+        text='{"error":"extra usage balance is empty, add extra usage"}',
+        json_body={"error": "extra usage balance is empty, add extra usage"},
+    )
+    decision_ok = _response(
+        200,
+        text="{}",
+        json_body={"model": "typesafe/jev-1.13", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 1}},
+    )
+    chat_ok = _response(
+        200,
+        text="{}",
+        json_body={
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+        },
+    )
+    gateway._client = MagicMock()
+    gateway._client.request = AsyncMock(side_effect=[exhausted, decision_ok, chat_ok])
+
+    await gateway.decisions_create(
+        {"model": "typesafe/jev-1.13", "state": "付款失敗", "questions": {"urgent": {"type": "noul"}}}
+    )
+    await gateway.chat_completions_nonstream(
+        ChatCompletionRequest(model="anthropic/claude", messages=[ChatMessage(role="user", content="hi")])
+    )
+
+    auth_headers = [call.kwargs["headers"]["Authorization"] for call in gateway._client.request.await_args_list]
+    assert auth_headers == ["Bearer key-a", "Bearer key-b", "Bearer key-b"]
+    paths = [call.args[1] for call in gateway._client.request.await_args_list]
+    assert paths[0].endswith("/systemone")
+    assert paths[2].endswith("/chat/completions")
+    assert gateway._pool.status()["keys"][0]["quarantined"] is True
+    assert gateway._pool.status()["keys"][1]["quarantined"] is False

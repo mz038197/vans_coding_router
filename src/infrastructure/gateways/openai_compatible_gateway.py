@@ -267,6 +267,10 @@ class OpenAICompatibleGateway:
         response = await self._request("POST", "/images", json=body)
         return self._json_or_error(response)
 
+    async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request("POST", "/systemone", json=body)
+        return self._json_or_error(response)
+
     async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         self._assert_image_provider()
         payload = dict(body)

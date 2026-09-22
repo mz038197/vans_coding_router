@@ -903,16 +903,19 @@
       const ttsOn = sessionTtsEnabled(session);
       const speechOn = sessionSpeechTranscriptionEnabled(session);
       const promptOn = sessionPromptLoggingEnabled(session);
+      const decisionOn = sessionDecisionEnabled(session);
       if (!allowOwnerActions) {
         const bit = (name, on) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}">${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
         return `<div class="session-capabilities session-capabilities-readonly">
-          ${bit('生圖', imageOn)}${bit('語音', ttsOn)}${bit('語音轉寫', speechOn)}${bit('Prompt', promptOn)}
+          ${bit('生圖', imageOn)}${bit('語音', ttsOn)}${bit('語音轉寫', speechOn)}${bit('決策', decisionOn)}${bit('Prompt', promptOn)}
         </div>`;
       }
       return `<div class="session-capabilities">
         ${capabilityToggleHtml('session-image-toggle', '', imageOn, `toggleSessionImageGen(${classId}, ${session.id}, this.checked, this)`, `生圖 ${imageOn ? '開' : '關'}`)}
         ${capabilityToggleHtml('session-tts-toggle', '', ttsOn, `toggleSessionTts(${classId}, ${session.id}, this.checked, this)`, `語音 ${ttsOn ? '開' : '關'}`)}
         ${capabilityToggleHtml('session-speech-transcription-toggle', '上傳音檔／即時語音轉寫', speechOn, `toggleSessionSpeechTranscription(${classId}, ${session.id}, this.checked, this)`, `語音轉寫 ${speechOn ? '開' : '關'}`)}
+        ${capabilityToggleHtml('session-decision-toggle', '學生用程式送決策', decisionOn, `toggleSessionDecision(${classId}, ${session.id}, this.checked, this)`, `決策 ${decisionOn ? '開' : '關'}`)}
+        ${decisionShelfHtml(classId, session)}
         ${capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)}
       </div>`;
     }
@@ -2511,6 +2514,56 @@ snippets:
         if (label) label.textContent = enabled ? '生圖 開' : '生圖 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    function sessionDecisionEnabled(session) {
+      const value = session.decision_enabled;
+      if (value === undefined || value === null) return false;
+      return value === true || value === 1 || value === '1';
+    }
+
+    const DECISION_MODEL_SHELF = [
+      { id: 'openrouter@typesafe/jev-1.13', label: 'Jev 1.13' },
+      { id: 'openrouter@~typesafe/jev-latest', label: 'Jev Latest' },
+    ];
+
+    function decisionShelfHtml(classId, session) {
+      const selected = new Set(session.decision_model_allowlist || []);
+      return DECISION_MODEL_SHELF.map((item) => `
+        <label class="session-decision-model" title="${escapeHtml(item.id)}">
+          <input type="checkbox" value="${escapeHtml(item.id)}" ${selected.has(item.id) ? 'checked' : ''} onchange="toggleDecisionModel(${classId}, ${session.id}, this)" />
+          <span>${escapeHtml(item.label)}</span>
+        </label>`).join('');
+    }
+
+    async function toggleSessionDecision(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-decision-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ decision_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '決策 開' : '決策 關';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    async function toggleDecisionModel(classId, sessionId, inputEl) {
+      const cell = inputEl.closest('.session-capabilities');
+      const ids = [...cell.querySelectorAll('.session-decision-model input:checked')].map((el) => el.value);
+      const previous = !inputEl.checked;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ decision_model_allowlist: ids }),
+        });
+      } catch (err) {
+        inputEl.checked = previous;
         throw err;
       }
     }

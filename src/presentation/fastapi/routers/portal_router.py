@@ -123,6 +123,8 @@ class SessionPatchRequest(BaseModel):
     tts_enabled: bool | None = None
     speech_transcription_enabled: bool | None = None
     prompt_logging_enabled: bool | None = None
+    decision_enabled: bool | None = None
+    decision_model_allowlist: list[str] | None = None
     status: str | None = None
     course_catalog_yaml: str | None = None
     seat_limit: int | None = None
@@ -550,6 +552,13 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             invocation_arguments["model_allowlist"] = data.model_allowlist
         if "session_chat_language_models" in data.model_fields_set:
             invocation_arguments["session_chat_language_models"] = data.session_chat_language_models
+        decision_model_allowlist = (
+            data.decision_model_allowlist
+            if "decision_model_allowlist" in data.model_fields_set
+            else None
+        )
+        if "decision_model_allowlist" in data.model_fields_set:
+            invocation_arguments["decision_model_allowlist"] = data.decision_model_allowlist
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -561,6 +570,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 tts_enabled=data.tts_enabled,
                 speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
+                decision_enabled=data.decision_enabled,
+                decision_model_allowlist=decision_model_allowlist,
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,
                 seat_limit=data.seat_limit,

@@ -252,6 +252,15 @@ class SpeechTranscriptionDisabledError(AppError):
         )
 
 
+class DecisionDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放決策"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="decision_disabled",
+        )
+
+
 class StatefulResponsesNotSupportedError(AppError):
     def __init__(
         self,

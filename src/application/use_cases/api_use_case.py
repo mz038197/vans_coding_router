@@ -16,10 +16,12 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.domain.decision_model_shelf import is_decision_model_id
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import is_model_allowed
 from src.domain.errors import (
+    DecisionDisabledError,
     ImageGenerationDisabledError,
     ModelNotAllowedError,
     SpeechTranscriptionDisabledError,
@@ -321,6 +323,38 @@ class ApiUseCase:
             return
         if not self.api_key_repo.is_speech_transcription_enabled(auth_context.session_id):
             raise SpeechTranscriptionDisabledError()
+
+    async def decisions_create(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        del api_key, client_ip
+        self._assert_decision_allowed(auth_context)
+        model_id = body.get("model")
+        if not isinstance(model_id, str) or not is_decision_model_id(model_id):
+            raise ModelNotAllowedError()
+        if auth_context is not None and auth_context.session_id is not None:
+            getter = getattr(self.api_key_repo, "get_decision_model_allowlist", None)
+            allowlist = getter(auth_context.session_id) if callable(getter) else []
+            if model_id not in allowlist:
+                raise ModelNotAllowedError()
+        payload = {
+            "model": model_id,
+            "state": body.get("state"),
+            "questions": body.get("questions"),
+        }
+        return await self.gateway.decisions_create(payload)
+
+    def _assert_decision_allowed(self, auth_context: AuthContext | None) -> None:
+        if auth_context is None or auth_context.session_id is None:
+            return
+        if not hasattr(self.api_key_repo, "is_decision_enabled"):
+            return
+        if not self.api_key_repo.is_decision_enabled(auth_context.session_id):
+            raise DecisionDisabledError()
 
     def validate_realtime_request(
         self,

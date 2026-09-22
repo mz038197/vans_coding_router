@@ -14,6 +14,7 @@ IMAGES_PATH = "/v1/images"
 IMAGES_MODELS_PATH = "/v1/images/models"
 AUDIO_SPEECH_PATH = "/v1/audio/speech"
 AUDIO_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
+DECISIONS_PATH = "/v1/decisions"
 OPENAI_COMPAT_PATHS = frozenset({
     CHAT_COMPLETIONS_PATH,
     RESPONSES_PATH,
@@ -21,6 +22,7 @@ OPENAI_COMPAT_PATHS = frozenset({
     IMAGES_MODELS_PATH,
     AUDIO_SPEECH_PATH,
     AUDIO_TRANSCRIPTIONS_PATH,
+    DECISIONS_PATH,
 })
 
 

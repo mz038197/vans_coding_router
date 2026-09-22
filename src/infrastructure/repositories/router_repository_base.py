@@ -11,6 +11,11 @@ from typing import Any, Iterator
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
+from src.domain.decision_model_shelf import (
+    dump_decision_model_allowlist_json,
+    parse_decision_model_allowlist_json,
+    validate_decision_model_allowlist,
+)
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -985,11 +990,15 @@ class RouterRepositoryBase(ABC):
     def _public_class_session(row: Any) -> dict[str, Any]:
         data = dict(row)
         data.pop("model_allowlist_json", None)
+        data.pop("decision_model_allowlist_json", None)
         document = parse_session_chat_language_models_json(
             data.pop("session_chat_language_models_json", None)
         )
         data["session_chat_language_models"] = document
         data["model_allowlist"] = allowlist_from_document(document)
+        data["decision_model_allowlist"] = parse_decision_model_allowlist_json(
+            row["decision_model_allowlist_json"] if "decision_model_allowlist_json" in row.keys() else None
+        )
         return data
 
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
@@ -1032,6 +1041,8 @@ class RouterRepositoryBase(ABC):
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
+        decision_enabled: bool | None = None,
+        decision_model_allowlist: list[str] | None = None,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
@@ -1046,6 +1057,8 @@ class RouterRepositoryBase(ABC):
             and seat_limit is None
             and model_allowlist is MODEL_ALLOWLIST_UNCHANGED
             and session_chat_language_models is SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
+            and decision_enabled is None
+            and decision_model_allowlist is None
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -1091,6 +1104,23 @@ class RouterRepositoryBase(ABC):
                         "UPDATE class_sessions SET speech_transcription_enabled = ? WHERE id = ?"
                     ),
                     (self._bool_storage_value(speech_transcription_enabled), session_id),
+                )
+            if decision_enabled is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET decision_enabled = ? WHERE id = ?"),
+                    (self._bool_storage_value(decision_enabled), session_id),
+                )
+            if decision_model_allowlist is not None:
+                conn.execute(
+                    self._sql(
+                        "UPDATE class_sessions SET decision_model_allowlist_json = ? WHERE id = ?"
+                    ),
+                    (
+                        dump_decision_model_allowlist_json(
+                            validate_decision_model_allowlist(decision_model_allowlist)
+                        ),
+                        session_id,
+                    ),
                 )
             if prompt_logging_enabled is not None:
                 conn.execute(
@@ -1256,6 +1286,31 @@ class RouterRepositoryBase(ABC):
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))
+
+    def is_decision_enabled(self, session_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT decision_enabled FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            value = row["decision_enabled"]
+            if value is None:
+                return False
+            if isinstance(value, bool):
+                return value
+            return bool(int(value or 0))
+
+    def get_decision_model_allowlist(self, session_id: int) -> list[str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT decision_model_allowlist_json FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return []
+            return parse_decision_model_allowlist_json(row["decision_model_allowlist_json"])
 
     def is_speech_transcription_enabled(self, session_id: int) -> bool:
         with self._connect() as conn:

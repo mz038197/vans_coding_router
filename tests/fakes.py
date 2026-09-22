@@ -229,6 +229,13 @@ class FakeLLMGateway:
         ]
         self.last_audio_speech_body: dict[str, Any] | None = None
         self.audio_speech_stream_chunks = [b"\x00\x01", b"\x00\x02"]
+        self.last_decision_body: dict[str, Any] | None = None
+        self.decision_response = {
+            "id": "gen-dec-fake",
+            "model": "typesafe/jev-1.13",
+            "answers": {},
+            "usage": {"input_tokens": 1, "output_tokens": 1, "cost": 0},
+        }
         self.last_audio_transcriptions_fields: dict[str, Any] | None = None
         self.last_audio_transcriptions_file: tuple[str, bytes, str | None] | None = None
         self.audio_transcriptions_response = {"text": "hello from audio"}
@@ -287,6 +294,10 @@ class FakeLLMGateway:
         self.last_audio_speech_body = body
         for chunk in self.audio_speech_stream_chunks:
             yield chunk
+
+    async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.last_decision_body = body
+        return self.decision_response
 
     async def audio_transcriptions_create(
         self,

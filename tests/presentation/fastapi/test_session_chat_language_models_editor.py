@@ -328,6 +328,45 @@ def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tm
     assert ids.count("openrouter@minimax/minimax-m3") == 1
 
 
+def test_upstream_model_catalog_omits_decision_model_shelf(tmp_path):
+    gateway = _catalog_gateway()
+    gateway.gateways["openrouter"].models_response["data"].append(
+        {"id": "typesafe/jev-1.13", "name": "Jev 1.13"}
+    )
+    gateway.gateways["openrouter"].models_response["data"].append(
+        {"id": "~typesafe/jev-latest", "name": "Jev Latest"}
+    )
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
+    teacher, _, _ = _owner_session(repo)
+    response = client.get(
+        "/teacher/upstream-model-catalog",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    ids = [item["id"] for item in response.json()["models"]]
+    assert "openrouter@minimax/minimax-m3" in ids
+    assert "openrouter@typesafe/jev-1.13" not in ids
+    assert "openrouter@~typesafe/jev-latest" not in ids
+
+
+def test_session_chat_language_models_reject_decision_shelf_ids(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher, klass, session = _owner_session(repo)
+    rejected = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={
+            "session_chat_language_models": [
+                {
+                    "name": "VCRouter",
+                    "vendor": "customendpoint",
+                    "models": [{"id": "openrouter@typesafe/jev-1.13", "name": "Jev"}],
+                }
+            ]
+        },
+    )
+    assert rejected.status_code == 400
+
+
 class _AllChatProvidersFailedGateway:
     async def models(self):
         return {
