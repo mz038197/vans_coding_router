@@ -70,8 +70,9 @@ def create_api_router(
         return await api_use_case.health()
 
     @router.get("/v1/models")
-    async def list_models():
-        return await api_use_case.models()
+    async def list_models(request: Request):
+        auth_context = getattr(request.state, "auth_context", None)
+        return await api_use_case.models(auth_context)
 
     @router.get("/v1/auth/check")
     async def auth_check(request: Request):

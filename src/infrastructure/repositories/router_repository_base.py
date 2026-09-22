@@ -11,10 +11,11 @@ from typing import Any, Iterator
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
-from src.domain.decision_model_shelf import (
-    dump_decision_model_allowlist_json,
-    parse_decision_model_allowlist_json,
-    validate_decision_model_allowlist,
+from src.domain.decision_model import (
+    DECISION_MODEL_UNCHANGED,
+    effective_decision_model,
+    normalize_decision_model,
+    omit_decision_model_from_document,
 )
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
@@ -991,14 +992,14 @@ class RouterRepositoryBase(ABC):
         data = dict(row)
         data.pop("model_allowlist_json", None)
         data.pop("decision_model_allowlist_json", None)
+        data.pop("decision_enabled", None)
         document = parse_session_chat_language_models_json(
             data.pop("session_chat_language_models_json", None)
         )
         data["session_chat_language_models"] = document
         data["model_allowlist"] = allowlist_from_document(document)
-        data["decision_model_allowlist"] = parse_decision_model_allowlist_json(
-            row["decision_model_allowlist_json"] if "decision_model_allowlist_json" in row.keys() else None
-        )
+        stored = data.get("decision_model")
+        data["decision_model"] = stored if isinstance(stored, str) else ""
         return data
 
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
@@ -1041,8 +1042,7 @@ class RouterRepositoryBase(ABC):
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
-        decision_enabled: bool | None = None,
-        decision_model_allowlist: list[str] | None = None,
+        decision_model: Any = DECISION_MODEL_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
@@ -1057,8 +1057,7 @@ class RouterRepositoryBase(ABC):
             and seat_limit is None
             and model_allowlist is MODEL_ALLOWLIST_UNCHANGED
             and session_chat_language_models is SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
-            and decision_enabled is None
-            and decision_model_allowlist is None
+            and decision_model is DECISION_MODEL_UNCHANGED
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -1105,22 +1104,10 @@ class RouterRepositoryBase(ABC):
                     ),
                     (self._bool_storage_value(speech_transcription_enabled), session_id),
                 )
-            if decision_enabled is not None:
+            if decision_model is not DECISION_MODEL_UNCHANGED:
                 conn.execute(
-                    self._sql("UPDATE class_sessions SET decision_enabled = ? WHERE id = ?"),
-                    (self._bool_storage_value(decision_enabled), session_id),
-                )
-            if decision_model_allowlist is not None:
-                conn.execute(
-                    self._sql(
-                        "UPDATE class_sessions SET decision_model_allowlist_json = ? WHERE id = ?"
-                    ),
-                    (
-                        dump_decision_model_allowlist_json(
-                            validate_decision_model_allowlist(decision_model_allowlist)
-                        ),
-                        session_id,
-                    ),
+                    self._sql("UPDATE class_sessions SET decision_model = ? WHERE id = ?"),
+                    (normalize_decision_model(decision_model), session_id),
                 )
             if prompt_logging_enabled is not None:
                 conn.execute(
@@ -1210,7 +1197,7 @@ class RouterRepositoryBase(ABC):
                 self._sql(
                     """
                     SELECT k.enabled, k.session_id, u.status AS user_status,
-                           s.session_chat_language_models_json
+                           s.session_chat_language_models_json, s.decision_model
                     FROM api_keys k
                     JOIN users u ON u.id = k.user_id
                     LEFT JOIN class_sessions s ON s.id = k.session_id
@@ -1228,7 +1215,16 @@ class RouterRepositoryBase(ABC):
             document = parse_session_chat_language_models_json(
                 row["session_chat_language_models_json"]
             )
-            return True, [] if document is None else document
+            if document is None:
+                return True, []
+            stored = ""
+            if "decision_model" in row.keys():
+                raw = row["decision_model"]
+                stored = raw if isinstance(raw, str) else ""
+            return True, omit_decision_model_from_document(
+                document,
+                effective_decision_model(stored, document),
+            )
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
@@ -1287,30 +1283,32 @@ class RouterRepositoryBase(ABC):
                 return value
             return bool(int(value or 0))
 
-    def is_decision_enabled(self, session_id: int) -> bool:
+    def get_decision_model(self, session_id: int) -> str:
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT decision_enabled FROM class_sessions WHERE id = ?"),
+                self._sql("SELECT decision_model FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
             if not row:
-                return False
-            value = row["decision_enabled"]
-            if value is None:
-                return False
-            if isinstance(value, bool):
-                return value
-            return bool(int(value or 0))
+                return ""
+            value = row["decision_model"] if "decision_model" in row.keys() else ""
+            return value if isinstance(value, str) else ""
 
-    def get_decision_model_allowlist(self, session_id: int) -> list[str]:
+    def get_effective_decision_model(self, session_id: int) -> str:
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT decision_model_allowlist_json FROM class_sessions WHERE id = ?"),
+                self._sql(
+                    "SELECT decision_model, session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                ),
                 (session_id,),
             ).fetchone()
             if not row:
-                return []
-            return parse_decision_model_allowlist_json(row["decision_model_allowlist_json"])
+                return ""
+            document = parse_session_chat_language_models_json(
+                row["session_chat_language_models_json"]
+            )
+            stored = row["decision_model"] if "decision_model" in row.keys() else ""
+            return effective_decision_model(stored if isinstance(stored, str) else "", document)
 
     def is_speech_transcription_enabled(self, session_id: int) -> bool:
         with self._connect() as conn:

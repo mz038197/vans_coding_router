@@ -208,6 +208,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(
                 conn,
                 "class_sessions",
+                "decision_model",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            self._ensure_column(
+                conn,
+                "class_sessions",
                 "prompt_logging_enabled",
                 "INTEGER NOT NULL DEFAULT 1",
             )

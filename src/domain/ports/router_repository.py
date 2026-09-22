@@ -180,16 +180,15 @@ class RouterRepositoryPort(Protocol):
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
-        decision_enabled: bool | None = None,
-        decision_model_allowlist: Any = None,
+        decision_model: Any = None,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         ...
 
-    def is_decision_enabled(self, session_id: int) -> bool:
+    def get_decision_model(self, session_id: int) -> str:
         ...
 
-    def get_decision_model_allowlist(self, session_id: int) -> list[str]:
+    def get_effective_decision_model(self, session_id: int) -> str:
         ...
 
     def get_session_model_allowlist(self, session_id: int) -> list[str] | None:

@@ -16,7 +16,6 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
-from src.domain.decision_model_shelf import is_decision_model_id
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import is_model_allowed
@@ -49,8 +48,17 @@ class ApiUseCase:
     async def health(self) -> dict[str, Any]:
         return await self.gateway.health()
 
-    async def models(self) -> dict[str, Any]:
-        return await self.gateway.models()
+    async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
+        payload = await self.gateway.models()
+        decision_model = self._effective_decision_model(auth_context)
+        if not decision_model:
+            return payload
+        data = [
+            item
+            for item in payload.get("data") or []
+            if not (isinstance(item, dict) and item.get("id") == decision_model)
+        ]
+        return {**payload, "data": data}
 
     async def chat_nonstream(
         self,
@@ -242,6 +250,8 @@ class ApiUseCase:
             return
         if not is_model_allowed(model_id, getter(auth_context.session_id)):
             raise ModelNotAllowedError()
+        if model_id and model_id == self._effective_decision_model(auth_context):
+            raise ModelNotAllowedError()
 
     def validate_model_allowed(
         self,
@@ -332,15 +342,12 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        self._assert_decision_allowed(auth_context)
+        decision_model = self._effective_decision_model(auth_context)
         model_id = body.get("model")
-        if not isinstance(model_id, str) or not is_decision_model_id(model_id):
+        if not decision_model:
+            raise DecisionDisabledError()
+        if not isinstance(model_id, str) or model_id != decision_model:
             raise ModelNotAllowedError()
-        if auth_context is not None and auth_context.session_id is not None:
-            getter = getattr(self.api_key_repo, "get_decision_model_allowlist", None)
-            allowlist = getter(auth_context.session_id) if callable(getter) else []
-            if model_id not in allowlist:
-                raise ModelNotAllowedError()
         payload = {
             "model": model_id,
             "state": body.get("state"),
@@ -348,13 +355,13 @@ class ApiUseCase:
         }
         return await self.gateway.decisions_create(payload)
 
-    def _assert_decision_allowed(self, auth_context: AuthContext | None) -> None:
+    def _effective_decision_model(self, auth_context: AuthContext | None) -> str:
         if auth_context is None or auth_context.session_id is None:
-            return
-        if not hasattr(self.api_key_repo, "is_decision_enabled"):
-            return
-        if not self.api_key_repo.is_decision_enabled(auth_context.session_id):
-            raise DecisionDisabledError()
+            return ""
+        getter = getattr(self.api_key_repo, "get_effective_decision_model", None)
+        if not callable(getter):
+            return ""
+        return getter(auth_context.session_id) or ""
 
     def validate_realtime_request(
         self,

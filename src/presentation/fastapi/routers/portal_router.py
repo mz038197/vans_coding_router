@@ -18,6 +18,7 @@ from src.infrastructure.auth.extension_handoff import (
 )
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
+from src.domain.decision_model import DECISION_MODEL_UNCHANGED
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -125,6 +126,7 @@ class SessionPatchRequest(BaseModel):
     prompt_logging_enabled: bool | None = None
     decision_enabled: bool | None = None
     decision_model_allowlist: list[str] | None = None
+    decision_model: str | None = None
     status: str | None = None
     course_catalog_yaml: str | None = None
     seat_limit: int | None = None
@@ -552,13 +554,15 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             invocation_arguments["model_allowlist"] = data.model_allowlist
         if "session_chat_language_models" in data.model_fields_set:
             invocation_arguments["session_chat_language_models"] = data.session_chat_language_models
-        decision_model_allowlist = (
-            data.decision_model_allowlist
-            if "decision_model_allowlist" in data.model_fields_set
-            else None
+        if "decision_enabled" in data.model_fields_set or "decision_model_allowlist" in data.model_fields_set:
+            raise HTTPException(status_code=400, detail="課堂決策改為單一決策模型，請設定 decision_model")
+        decision_model = (
+            data.decision_model
+            if "decision_model" in data.model_fields_set
+            else DECISION_MODEL_UNCHANGED
         )
-        if "decision_model_allowlist" in data.model_fields_set:
-            invocation_arguments["decision_model_allowlist"] = data.decision_model_allowlist
+        if "decision_model" in data.model_fields_set:
+            invocation_arguments["decision_model"] = data.decision_model
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -570,8 +574,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 tts_enabled=data.tts_enabled,
                 speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
-                decision_enabled=data.decision_enabled,
-                decision_model_allowlist=decision_model_allowlist,
+                decision_model=decision_model,
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,
                 seat_limit=data.seat_limit,

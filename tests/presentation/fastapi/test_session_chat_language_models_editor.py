@@ -89,14 +89,15 @@ def _settings(tmp_path, providers=None) -> RouterSettings:
     )
 
 
-def _client(tmp_path, *, llm_gateway=None, providers=None):
+def _client(tmp_path, *, llm_gateway=None, providers=None, api_gateway=None):
     settings = _settings(tmp_path, providers=providers)
     repo = SqliteRouterRepository(settings.database.path, settings)
     app = FastAPI()
     register_error_handlers(app)
     auth_use_case = AuthUseCase(api_key_repo=repo)
+    gateway = api_gateway or FakeLLMGateway()
     api_use_case = ApiUseCase(
-        gateway=FakeLLMGateway(),
+        gateway=gateway,
         api_key_repo=repo,
         logger=FakeRequestLogger(),
     )
@@ -305,6 +306,74 @@ def test_empty_document_means_zero_chat_models_on_keyed_get_and_v1(tmp_path):
     assert blocked.json()["error"]["code"] == "model_not_allowed"
 
 
+def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
+    api_gateway = FakeLLMGateway()
+    api_gateway.models_response = {
+        "object": "list",
+        "data": [
+            {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+            {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
+        ],
+    }
+    client, repo, _ = _client(tmp_path, api_gateway=api_gateway)
+    teacher, klass, session = _owner_session(repo)
+    document = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "models": [
+                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+                {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
+            ],
+        }
+    ]
+    saved = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={
+            "session_chat_language_models": document,
+            "decision_model": "openrouter@typesafe/jev-1.13",
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["decision_model"] == "openrouter@typesafe/jev-1.13"
+    teacher_ids = [
+        model["id"] for model in saved.json()["session_chat_language_models"][0]["models"]
+    ]
+    assert "openrouter@typesafe/jev-1.13" in teacher_ids
+    api_key = _redeem_student_key(client, session["invite_code"])
+
+    keyed = client.get(
+        "/extension/chat-language-models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert keyed.status_code == 200
+    keyed_ids = [model["id"] for model in keyed.json()[0]["models"]]
+    assert keyed_ids == ["openrouter@minimax/minimax-m3"]
+
+    public = client.get("/extension/chat-language-models")
+    assert public.json() == load_vans_template()
+
+    models = client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+    listed = [item["id"] for item in models.json()["data"]]
+    assert "openrouter@typesafe/jev-1.13" not in listed
+
+    blocked = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": "openrouter@typesafe/jev-1.13", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "model_not_allowed"
+
+    allowed = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": "openrouter@minimax/minimax-m3", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert allowed.status_code == 200
+
+
 def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tmp_path):
     client, repo, _ = _client(
         tmp_path,
@@ -328,7 +397,7 @@ def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tm
     assert ids.count("openrouter@minimax/minimax-m3") == 1
 
 
-def test_upstream_model_catalog_omits_decision_model_shelf(tmp_path):
+def test_upstream_model_catalog_includes_openrouter_jev_ids(tmp_path):
     gateway = _catalog_gateway()
     gateway.gateways["openrouter"].models_response["data"].append(
         {"id": "typesafe/jev-1.13", "name": "Jev 1.13"}
@@ -344,14 +413,14 @@ def test_upstream_model_catalog_omits_decision_model_shelf(tmp_path):
     )
     ids = [item["id"] for item in response.json()["models"]]
     assert "openrouter@minimax/minimax-m3" in ids
-    assert "openrouter@typesafe/jev-1.13" not in ids
-    assert "openrouter@~typesafe/jev-latest" not in ids
+    assert "openrouter@typesafe/jev-1.13" in ids
+    assert "openrouter@~typesafe/jev-latest" in ids
 
 
-def test_session_chat_language_models_reject_decision_shelf_ids(tmp_path):
+def test_session_chat_language_models_accept_openrouter_jev_ids(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher, klass, session = _owner_session(repo)
-    rejected = client.patch(
+    saved = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
         cookies=_portal_cookie(repo, teacher["id"]),
         json={
@@ -364,7 +433,9 @@ def test_session_chat_language_models_reject_decision_shelf_ids(tmp_path):
             ]
         },
     )
-    assert rejected.status_code == 400
+    assert saved.status_code == 200
+    ids = [model["id"] for model in saved.json()["session_chat_language_models"][0]["models"]]
+    assert ids == ["openrouter@typesafe/jev-1.13"]
 
 
 class _AllChatProvidersFailedGateway:
