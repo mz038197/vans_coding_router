@@ -1381,7 +1381,7 @@ def test_session_speech_transcription_toggle(tmp_path):
     assert repo.is_speech_transcription_enabled(session_id) is False
 
 
-def test_new_session_decision_is_off_and_allowlist_is_empty(tmp_path):
+def test_new_session_decision_model_is_empty(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
@@ -1394,11 +1394,12 @@ def test_new_session_decision_is_off_and_allowlist_is_empty(tmp_path):
     )
     assert create.status_code == 200
     body = create.json()
-    assert repo.is_decision_enabled(body["id"]) is False
-    assert body["decision_model_allowlist"] == []
+    assert body["decision_model"] == ""
+    assert "decision_enabled" not in body
+    assert "decision_model_allowlist" not in body
 
 
-def test_teacher_checks_decision_shelf_into_the_session(tmp_path):
+def test_teacher_sets_decision_model_from_sitting_openrouter_ids(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
@@ -1408,35 +1409,101 @@ def test_teacher_checks_decision_shelf_into_the_session(tmp_path):
         cookies=cookies,
         json={"name": "第一堂", "ttl_hours": 2},
     ).json()["id"]
+    document = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "models": [
+                {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
+                {"id": "openrouter@anthropic/claude-sonnet", "name": "Claude"},
+                {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi"},
+            ],
+        }
+    ]
+    seeded = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"session_chat_language_models": document},
+    )
+    assert seeded.status_code == 200
 
     saved = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
         cookies=cookies,
-        json={
-            "decision_enabled": True,
-            "decision_model_allowlist": [
-                "openrouter@typesafe/jev-1.13",
-                "openrouter@~typesafe/jev-latest",
-            ],
-        },
+        json={"decision_model": "openrouter@anthropic/claude-sonnet"},
     )
     assert saved.status_code == 200
-    assert repo.is_decision_enabled(session_id) is True
-    assert saved.json()["decision_model_allowlist"] == [
-        "openrouter@typesafe/jev-1.13",
-        "openrouter@~typesafe/jev-latest",
-    ]
+    assert saved.json()["decision_model"] == "openrouter@anthropic/claude-sonnet"
 
-    rejected = client.patch(
+    ollama_choice = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
         cookies=cookies,
-        json={"decision_model_allowlist": ["openrouter@anthropic/claude-sonnet"]},
+        json={"decision_model": "ollama_cloud@kimi-k3:cloud"},
     )
-    assert rejected.status_code == 400
-    assert repo.get_decision_model_allowlist(session_id) == [
-        "openrouter@typesafe/jev-1.13",
-        "openrouter@~typesafe/jev-latest",
+    assert ollama_choice.status_code == 200
+    assert ollama_choice.json()["decision_model"] == ""
+    assert "OpenRouter" in (ollama_choice.json().get("decision_model_warning") or "")
+
+    rejected_flag = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"decision_enabled": True},
+    )
+    assert rejected_flag.status_code == 400
+
+    student = repo.upsert_google_user("student@school.edu", "Student")
+    student_cookies = _portal_cookie(repo, student)
+    forbidden = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=student_cookies,
+        json={"decision_model": "openrouter@minimax/minimax-m3"},
+    )
+    assert forbidden.status_code == 403
+
+
+def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = _portal_cookie(repo, teacher)
+    session_id = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    ).json()["id"]
+    with_decision = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "models": [
+                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+                {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
+            ],
+        }
     ]
+    client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={
+            "session_chat_language_models": with_decision,
+            "decision_model": "openrouter@typesafe/jev-1.13",
+        },
+    )
+    without_jev = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "models": [{"id": "openrouter@minimax/minimax-m3", "name": "Minimax"}],
+        }
+    ]
+    saved = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"session_chat_language_models": without_jev},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["decision_model"] == ""
+    assert saved.json().get("decision_model_warning")
 
 
 def test_session_prompt_logging_toggle(tmp_path):

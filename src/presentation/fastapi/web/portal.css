@@ -1002,6 +1002,14 @@
       margin: 0 0 12px;
     }
 
+    .session-decision-model-row {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px 12px;
+      align-items: center;
+      margin: 0 0 12px;
+    }
+
     .session-chat-models-list {
       display: grid;
       gap: 10px;

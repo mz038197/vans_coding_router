@@ -196,6 +196,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS decision_model_allowlist_json TEXT"
             )
             conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS decision_model TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS prompt_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
             conn.execute(

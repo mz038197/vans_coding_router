@@ -44,6 +44,7 @@
       "tts_enabled",
       "speech_transcription_enabled",
       "prompt_logging_enabled",
+      "decision_model",
       "seat_limit",
       "redemption_count",
     ]);
