@@ -253,7 +253,11 @@ class FakeLLMGateway:
     async def health(self) -> dict[str, Any]:
         return self.health_response
 
-    async def models(self) -> dict[str, Any]:
+    async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
+        self.last_output_modalities = output_modalities
+        by_modality = getattr(self, "models_by_modality", None) or {}
+        if output_modalities and output_modalities in by_modality:
+            return by_modality[output_modalities]
         return self.models_response
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:

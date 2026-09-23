@@ -13,9 +13,9 @@ from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.decision_model import (
     DECISION_MODEL_UNCHANGED,
-    effective_decision_model,
+    decision_model_ids,
     normalize_decision_model,
-    omit_decision_model_from_document,
+    omit_decision_models_from_document,
 )
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
@@ -997,7 +997,9 @@ class RouterRepositoryBase(ABC):
             data.pop("session_chat_language_models_json", None)
         )
         data["session_chat_language_models"] = document
-        data["model_allowlist"] = allowlist_from_document(document)
+        data["model_allowlist"] = allowlist_from_document(
+            omit_decision_models_from_document(document)
+        )
         stored = data.get("decision_model")
         data["decision_model"] = stored if isinstance(stored, str) else ""
         return data
@@ -1174,7 +1176,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return []
-            return allowlist_from_document(document)
+            return allowlist_from_document(omit_decision_models_from_document(document))
 
     def classroom_api_key_session_allowlist(
         self, api_key: str
@@ -1197,7 +1199,7 @@ class RouterRepositoryBase(ABC):
                 self._sql(
                     """
                     SELECT k.enabled, k.session_id, u.status AS user_status,
-                           s.session_chat_language_models_json, s.decision_model
+                           s.session_chat_language_models_json
                     FROM api_keys k
                     JOIN users u ON u.id = k.user_id
                     LEFT JOIN class_sessions s ON s.id = k.session_id
@@ -1217,14 +1219,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return True, []
-            stored = ""
-            if "decision_model" in row.keys():
-                raw = row["decision_model"]
-                stored = raw if isinstance(raw, str) else ""
-            return True, omit_decision_model_from_document(
-                document,
-                effective_decision_model(stored, document),
-            )
+            return True, omit_decision_models_from_document(document)
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
@@ -1294,21 +1289,20 @@ class RouterRepositoryBase(ABC):
             value = row["decision_model"] if "decision_model" in row.keys() else ""
             return value if isinstance(value, str) else ""
 
-    def get_effective_decision_model(self, session_id: int) -> str:
+    def get_decision_model_ids(self, session_id: int) -> list[str]:
         with self._connect() as conn:
             row = conn.execute(
                 self._sql(
-                    "SELECT decision_model, session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
                 ),
                 (session_id,),
             ).fetchone()
             if not row:
-                return ""
+                return []
             document = parse_session_chat_language_models_json(
                 row["session_chat_language_models_json"]
             )
-            stored = row["decision_model"] if "decision_model" in row.keys() else ""
-            return effective_decision_model(stored if isinstance(stored, str) else "", document)
+            return decision_model_ids(document)
 
     def is_speech_transcription_enabled(self, session_id: int) -> bool:
         with self._connect() as conn:

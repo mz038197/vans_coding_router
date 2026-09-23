@@ -312,6 +312,7 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
         "object": "list",
         "data": [
             {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+            {"id": "openrouter@~typesafe/jev-latest", "name": "Jev Latest"},
             {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
         ],
     }
@@ -322,7 +323,8 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
             "name": "VCRouter",
             "vendor": "customendpoint",
             "models": [
-                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
+                {"id": "openrouter@~typesafe/jev-latest", "name": "Jev Latest", "decisionShelf": True},
                 {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
             ],
         }
@@ -330,13 +332,10 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     saved = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
         cookies=_portal_cookie(repo, teacher["id"]),
-        json={
-            "session_chat_language_models": document,
-            "decision_model": "openrouter@typesafe/jev-1.13",
-        },
+        json={"session_chat_language_models": document},
     )
     assert saved.status_code == 200
-    assert saved.json()["decision_model"] == "openrouter@typesafe/jev-1.13"
+    assert saved.json()["decision_model"] == ""
     teacher_ids = [
         model["id"] for model in saved.json()["session_chat_language_models"][0]["models"]
     ]
@@ -357,6 +356,7 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     models = client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
     listed = [item["id"] for item in models.json()["data"]]
     assert "openrouter@typesafe/jev-1.13" not in listed
+    assert "openrouter@~typesafe/jev-latest" not in listed
 
     blocked = client.post(
         "/v1/chat/completions",
@@ -365,6 +365,14 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     )
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "model_not_allowed"
+
+    blocked_responses = client.post(
+        "/v1/responses",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": "openrouter@~typesafe/jev-latest", "input": "hi"},
+    )
+    assert blocked_responses.status_code == 403
+    assert blocked_responses.json()["error"]["code"] == "model_not_allowed"
 
     allowed = client.post(
         "/v1/chat/completions",
@@ -395,6 +403,40 @@ def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tm
     assert all(not item["id"].startswith("openai@") for item in body["models"])
     assert ids.count("ollama_cloud@minimax-m3:cloud") == 1
     assert ids.count("openrouter@minimax/minimax-m3") == 1
+
+
+def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_path):
+    gateway = _catalog_gateway()
+    openrouter = gateway.gateways["openrouter"]
+    openrouter.models_by_modality = {
+        "decisions": {
+            "object": "list",
+            "data": [{"id": "typesafe/jev-1.13", "name": "Jev 1.13"}],
+        },
+        "text": {
+            "object": "list",
+            "data": [{"id": "minimax/minimax-m3", "name": "minimax-m3"}],
+        },
+    }
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
+    teacher, _, _ = _owner_session(repo)
+    cookies = _portal_cookie(repo, teacher["id"])
+
+    decisions = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=decisions",
+        cookies=cookies,
+    )
+    decision_ids = [item["id"] for item in decisions.json()["models"] if item["provider"] == "openrouter"]
+    assert decision_ids == ["openrouter@typesafe/jev-1.13"]
+    assert openrouter.last_output_modalities == "decisions"
+
+    text = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=text",
+        cookies=cookies,
+    )
+    text_ids = [item["id"] for item in text.json()["models"] if item["provider"] == "openrouter"]
+    assert text_ids == ["openrouter@minimax/minimax-m3"]
+    assert openrouter.last_output_modalities == "text"
 
 
 def test_upstream_model_catalog_includes_openrouter_jev_ids(tmp_path):

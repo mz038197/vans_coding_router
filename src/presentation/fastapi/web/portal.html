@@ -346,13 +346,16 @@
         <p id="sessionChatModelsCatalogMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
         <div class="session-chat-models-toolbar">
           <label class="modal-field-label" for="sessionChatModelsProvider">廠商</label>
-          <select id="sessionChatModelsProvider" class="modal-datetime-input" onchange="renderSessionChatModelsList()"></select>
+          <select id="sessionChatModelsProvider" class="modal-datetime-input" onchange="onSessionChatModelsProviderChange()"></select>
           <label class="modal-field-label" for="sessionChatModelsSearch">搜尋</label>
           <input id="sessionChatModelsSearch" type="search" class="modal-datetime-input" placeholder="名稱或 id" oninput="renderSessionChatModelsList()" />
         </div>
-        <div id="sessionDecisionModelRow" class="session-decision-model-row hidden">
-          <label class="modal-field-label" for="sessionDecisionModel">決策模型</label>
-          <select id="sessionDecisionModel" class="modal-datetime-input" onchange="onSessionDecisionModelChange()"></select>
+        <div id="sessionDecisionShelfRow" class="session-decision-model-row hidden">
+          <label class="modal-field-label" for="sessionDecisionShelf">模型種類</label>
+          <select id="sessionDecisionShelf" class="modal-datetime-input" onchange="onSessionDecisionShelfChange()">
+            <option value="text">文字</option>
+            <option value="decisions">決策</option>
+          </select>
         </div>
         <div id="sessionChatModelsList" class="session-chat-models-list"></div>
         <p id="sessionChatModelsSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
@@ -2521,25 +2524,15 @@ snippets:
       }
     }
 
-    function sessionDecisionModel(session) {
-      return typeof session.decision_model === 'string' ? session.decision_model : '';
-    }
-
-    function sessionOpenRouterModelIds(session) {
-      const ids = [];
+    function sessionHasDecisionModel(session) {
       for (const provider of session.session_chat_language_models || []) {
         for (const model of (provider && provider.models) || []) {
-          if (model && typeof model.id === 'string' && model.id.startsWith('openrouter@')) {
-            ids.push(model.id);
+          if (model && model.decisionShelf === true && typeof model.id === 'string' && model.id.startsWith('openrouter@')) {
+            return true;
           }
         }
       }
-      return ids;
-    }
-
-    function sessionHasDecisionModel(session) {
-      const model = sessionDecisionModel(session);
-      return Boolean(model) && sessionOpenRouterModelIds(session).includes(model);
+      return false;
     }
 
     function sessionTtsEnabled(session) {
@@ -2806,7 +2799,7 @@ snippets:
     };
 
     let sessionChatModelsContext = null;
-    let sessionChatModelsDraft = { models: [], removed: {}, decisionModel: '' };
+    let sessionChatModelsDraft = { models: [], removed: {} };
     let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false };
     let sessionChatModelsDropzoneBound = false;
     let sessionChatModelsLocked = false;
@@ -2880,7 +2873,11 @@ snippets:
           }
         }
       }
-      return modelsFromDocument(parsed).map(stencilDraftModel);
+      return modelsFromDocument(parsed).map((model) => {
+        const next = stencilDraftModel(model);
+        delete next.decisionShelf;
+        return next;
+      });
     }
 
     function setSessionChatModelsMsg(id, text, isError) {
@@ -2961,7 +2958,6 @@ snippets:
           sessionChatModelsDraft = {
             models,
             removed: { ...sessionChatModelsDraft.removed },
-            decisionModel: sessionChatModelsDraft.decisionModel || '',
           };
           setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
           renderSessionChatModelsList();
@@ -3051,44 +3047,47 @@ snippets:
       }
       return rows.filter((row) => {
         if (provider && row.provider !== provider) return false;
+        if (provider === 'openrouter' && !rowMatchesOpenRouterShelf(row)) return false;
         if (!q) return true;
         return `${row.id} ${row.name}`.toLowerCase().includes(q);
       });
     }
 
-    function draftOpenRouterIds() {
-      return (sessionChatModelsDraft.models || [])
-        .map((model) => model && model.id)
-        .filter((id) => typeof id === 'string' && id.startsWith('openrouter@'));
+    function currentDecisionShelf() {
+      return document.getElementById('sessionDecisionShelf')?.value || 'text';
     }
 
-    function onSessionDecisionModelChange() {
-      const select = document.getElementById('sessionDecisionModel');
-      if (select) sessionChatModelsDraft.decisionModel = select.value || '';
+    function rowMatchesOpenRouterShelf(row) {
+      const remembered = draftModelById(row.id) || sessionChatModelsDraft.removed[row.id];
+      const isDecision = Boolean(remembered && remembered.decisionShelf === true);
+      const onDecisions = currentDecisionShelf() === 'decisions';
+      if (row.checked) return onDecisions ? isDecision : !isDecision;
+      if (onDecisions) return isDecision || !row.missing;
+      return !isDecision || !row.missing;
     }
 
-    function renderSessionDecisionModelPicker() {
-      const row = document.getElementById('sessionDecisionModelRow');
-      const select = document.getElementById('sessionDecisionModel');
-      if (!row || !select) return;
+    function renderSessionDecisionShelf() {
+      const row = document.getElementById('sessionDecisionShelfRow');
+      if (!row) return;
       const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
-      const show = provider === 'openrouter';
-      row.classList.toggle('hidden', !show);
-      if (!show) return;
-      const ids = draftOpenRouterIds();
-      const current = sessionChatModelsDraft.decisionModel || '';
-      const options = ['<option value="">（無，決策關閉）</option>'];
-      for (const id of ids) {
-        options.push(`<option value="${escapeHtml(id)}"${id === current ? ' selected' : ''}>${escapeHtml(id)}</option>`);
+      row.classList.toggle('hidden', provider !== 'openrouter');
+    }
+
+    async function onSessionChatModelsProviderChange() {
+      renderSessionDecisionShelf();
+      if ((document.getElementById('sessionChatModelsProvider')?.value || '') === 'openrouter') {
+        await loadSessionChatModelsCatalog(currentDecisionShelf());
       }
-      if (current && !ids.includes(current)) {
-        options.push(`<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}（已不在本課 OpenRouter 清單）</option>`);
-      }
-      select.innerHTML = options.join('');
+      renderSessionChatModelsList();
+    }
+
+    async function onSessionDecisionShelfChange() {
+      await loadSessionChatModelsCatalog(currentDecisionShelf());
+      renderSessionChatModelsList();
     }
 
     function renderSessionChatModelsList() {
-      renderSessionDecisionModelPicker();
+      renderSessionDecisionShelf();
       const listEl = document.getElementById('sessionChatModelsList');
       if (!listEl) return;
       const rows = visibleCatalogRows();
@@ -3135,6 +3134,12 @@ snippets:
         const next = restored
           ? { ...restored }
           : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
+        if ((document.getElementById('sessionChatModelsProvider')?.value || '') === 'openrouter'
+            && currentDecisionShelf() === 'decisions') {
+          next.decisionShelf = true;
+        } else {
+          delete next.decisionShelf;
+        }
         sessionChatModelsDraft.models.push(next);
         delete sessionChatModelsDraft.removed[modelId];
       } else {
@@ -3167,7 +3172,7 @@ snippets:
       const modal = document.getElementById('editSessionChatModelsModal');
       if (modal) modal.classList.remove('show');
       sessionChatModelsContext = null;
-      sessionChatModelsDraft = { models: [], removed: {}, decisionModel: '' };
+      sessionChatModelsDraft = { models: [], removed: {} };
       sessionChatModelsLocked = false;
       setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
       setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
@@ -3180,9 +3185,11 @@ snippets:
         && window.__sessionById[sessionChatModelsContext.sessionId];
       const saved = modelsFromDocument(session && session.session_chat_language_models);
       const current = sessionChatModelsDraft.models || [];
-      if ((sessionChatModelsDraft.decisionModel || '') !== sessionDecisionModel(session || {})) return true;
       if (saved.length !== current.length) return true;
-      return JSON.stringify(saved.map((m) => m.id).sort()) !== JSON.stringify(current.map((m) => m.id).sort());
+      const mark = (models) => models
+        .map((model) => `${model.id}:${model.decisionShelf === true ? '1' : '0'}`)
+        .sort();
+      return JSON.stringify(mark(saved)) !== JSON.stringify(mark(current));
     }
 
     function requestCloseSessionChatModelsModal() {
@@ -3193,29 +3200,10 @@ snippets:
       closeSessionChatModelsModal();
     }
 
-    async function beginEditSessionChatLanguageModels(classId, sessionId) {
-      const modal = document.getElementById('editSessionChatModelsModal');
-      const title = document.getElementById('editSessionChatModelsTitle');
-      if (!modal) return;
-      ensureSessionChatModelsDropzoneBound();
-      const session = window.__sessionById && window.__sessionById[sessionId];
-      sessionChatModelsContext = { classId, sessionId };
-      sessionChatModelsLocked = false;
-      sessionChatModelsDraft = {
-        models: modelsFromDocument(session && session.session_chat_language_models),
-        removed: {},
-        decisionModel: sessionDecisionModel(session || {}),
-      };
-      if (title) {
-        const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
-        title.textContent = `編輯本課對話模型 · ${label}`;
-      }
-      setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
-      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
-      const search = document.getElementById('sessionChatModelsSearch');
-      if (search) search.value = '';
+    async function loadSessionChatModelsCatalog(outputModalities) {
+      const shelf = outputModalities === 'decisions' ? 'decisions' : 'text';
       try {
-        const catalog = await api('/teacher/upstream-model-catalog');
+        const catalog = await api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`);
         sessionChatModelsCatalog = {
           providers: Array.isArray(catalog.providers) ? catalog.providers : [],
           models: Array.isArray(catalog.models) ? catalog.models : [],
@@ -3236,6 +3224,31 @@ snippets:
           true,
         );
       }
+    }
+
+    async function beginEditSessionChatLanguageModels(classId, sessionId) {
+      const modal = document.getElementById('editSessionChatModelsModal');
+      const title = document.getElementById('editSessionChatModelsTitle');
+      if (!modal) return;
+      ensureSessionChatModelsDropzoneBound();
+      const session = window.__sessionById && window.__sessionById[sessionId];
+      sessionChatModelsContext = { classId, sessionId };
+      sessionChatModelsLocked = false;
+      sessionChatModelsDraft = {
+        models: modelsFromDocument(session && session.session_chat_language_models),
+        removed: {},
+      };
+      const shelf = document.getElementById('sessionDecisionShelf');
+      if (shelf) shelf.value = 'text';
+      if (title) {
+        const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
+        title.textContent = `編輯本課對話模型 · ${label}`;
+      }
+      setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
+      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
+      const search = document.getElementById('sessionChatModelsSearch');
+      if (search) search.value = '';
+      await loadSessionChatModelsCatalog('text');
       populateSessionChatModelsProviders();
       renderSessionChatModelsList();
       modal.classList.add('show');
@@ -3249,22 +3262,12 @@ snippets:
       if (saveBtn) saveBtn.disabled = true;
       setSessionChatModelsMsg('sessionChatModelsSaveMsg', '儲存中…', false);
       try {
-        let decisionModel = sessionChatModelsDraft.decisionModel || '';
-        const openrouterIds = draftOpenRouterIds();
-        let warning = '';
-        if (decisionModel && !openrouterIds.includes(decisionModel)) {
-          decisionModel = '';
-          warning = '所選決策模型已不在本課 OpenRouter 清單，已改為空（決策關閉）。';
-        }
-        const saved = await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
           body: JSON.stringify({
             session_chat_language_models: documentFromDraft(sessionChatModelsDraft),
-            decision_model: decisionModel,
           }),
         });
-        const message = warning || (saved && saved.decision_model_warning);
-        if (message) window.alert(message);
         closeSessionChatModelsModal();
         await reloadSessionViews(classId);
       } catch (err) {

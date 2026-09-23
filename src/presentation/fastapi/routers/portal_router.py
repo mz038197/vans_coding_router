@@ -555,14 +555,24 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         if "session_chat_language_models" in data.model_fields_set:
             invocation_arguments["session_chat_language_models"] = data.session_chat_language_models
         if "decision_enabled" in data.model_fields_set or "decision_model_allowlist" in data.model_fields_set:
-            raise HTTPException(status_code=400, detail="課堂決策改為單一決策模型，請設定 decision_model")
+            raise HTTPException(status_code=400, detail="課堂決策改由決策側勾選的模型決定，不再使用這個欄位")
         decision_model = (
             data.decision_model
             if "decision_model" in data.model_fields_set
             else DECISION_MODEL_UNCHANGED
         )
-        if "decision_model" in data.model_fields_set:
-            invocation_arguments["decision_model"] = data.decision_model
+        invocation_arguments.pop("decision_model", None)
+        if data.model_fields_set and data.model_fields_set <= {"decision_model"}:
+            session = portal_call(
+                lambda: portal_use_case.get_session(
+                    current_user_id(session_user_id),
+                    class_id,
+                    session_id,
+                )
+            )
+            if session is None:
+                raise HTTPException(status_code=404, detail="找不到課堂")
+            return session
         session = portal_call(
             lambda: portal_use_case.update_session(
                 current_user_id(session_user_id),
@@ -628,10 +638,14 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
 
     @router.get("/teacher/upstream-model-catalog")
     async def upstream_model_catalog(
+        output_modalities: str | None = None,
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         try:
-            return await portal_use_case.upstream_model_catalog(current_user_id(session_user_id))
+            return await portal_use_case.upstream_model_catalog(
+                current_user_id(session_user_id),
+                output_modalities=output_modalities,
+            )
         except HTTPException:
             raise
         except PermissionError:

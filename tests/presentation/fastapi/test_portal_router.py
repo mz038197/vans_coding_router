@@ -1399,7 +1399,7 @@ def test_new_session_decision_model_is_empty(tmp_path):
     assert "decision_model_allowlist" not in body
 
 
-def test_teacher_sets_decision_model_from_sitting_openrouter_ids(tmp_path):
+def test_teacher_checks_openrouter_models_onto_the_decision_shelf(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
@@ -1415,8 +1415,9 @@ def test_teacher_sets_decision_model_from_sitting_openrouter_ids(tmp_path):
             "vendor": "customendpoint",
             "models": [
                 {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
-                {"id": "openrouter@anthropic/claude-sonnet", "name": "Claude"},
-                {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi"},
+                {"id": "openrouter@anthropic/claude-sonnet", "name": "Claude", "decisionShelf": True},
+                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
+                {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi", "decisionShelf": True},
             ],
         }
     ]
@@ -1426,23 +1427,22 @@ def test_teacher_sets_decision_model_from_sitting_openrouter_ids(tmp_path):
         json={"session_chat_language_models": document},
     )
     assert seeded.status_code == 200
+    saved_models = {
+        model["id"]: model
+        for model in seeded.json()["session_chat_language_models"][0]["models"]
+    }
+    assert saved_models["openrouter@anthropic/claude-sonnet"]["decisionShelf"] is True
+    assert saved_models["openrouter@typesafe/jev-1.13"]["decisionShelf"] is True
+    assert "decisionShelf" not in saved_models["openrouter@minimax/minimax-m3"]
+    assert seeded.json()["decision_model"] == ""
 
-    saved = client.patch(
+    ignored = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
         cookies=cookies,
-        json={"decision_model": "openrouter@anthropic/claude-sonnet"},
+        json={"decision_model": "openrouter@minimax/minimax-m3"},
     )
-    assert saved.status_code == 200
-    assert saved.json()["decision_model"] == "openrouter@anthropic/claude-sonnet"
-
-    ollama_choice = client.patch(
-        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
-        cookies=cookies,
-        json={"decision_model": "ollama_cloud@kimi-k3:cloud"},
-    )
-    assert ollama_choice.status_code == 200
-    assert ollama_choice.json()["decision_model"] == ""
-    assert "OpenRouter" in (ollama_choice.json().get("decision_model_warning") or "")
+    assert ignored.status_code == 200
+    assert ignored.json()["decision_model"] == ""
 
     rejected_flag = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
@@ -1461,6 +1461,46 @@ def test_teacher_sets_decision_model_from_sitting_openrouter_ids(tmp_path):
     assert forbidden.status_code == 403
 
 
+def test_chat_allowlist_does_not_drop_decision_shelf_models(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    cookies = _portal_cookie(repo, teacher)
+    session_id = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "第一堂", "ttl_hours": 2},
+    ).json()["id"]
+    seeded = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={
+            "session_chat_language_models": [
+                {
+                    "name": "VCRouter",
+                    "vendor": "customendpoint",
+                    "models": [
+                        {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
+                        {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
+                    ],
+                }
+            ]
+        },
+    )
+    assert seeded.status_code == 200
+    assert seeded.json()["model_allowlist"] == ["openrouter@minimax/minimax-m3"]
+
+    narrowed = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={"model_allowlist": ["openrouter@minimax/minimax-m3"]},
+    )
+    assert narrowed.status_code == 200
+    remaining = [model["id"] for model in narrowed.json()["session_chat_language_models"][0]["models"]]
+    assert remaining == ["openrouter@typesafe/jev-1.13", "openrouter@minimax/minimax-m3"]
+    assert narrowed.json()["model_allowlist"] == ["openrouter@minimax/minimax-m3"]
+
+
 def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
@@ -1476,7 +1516,7 @@ def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
             "name": "VCRouter",
             "vendor": "customendpoint",
             "models": [
-                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev"},
+                {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
                 {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
             ],
         }
@@ -1484,10 +1524,7 @@ def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
     client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
         cookies=cookies,
-        json={
-            "session_chat_language_models": with_decision,
-            "decision_model": "openrouter@typesafe/jev-1.13",
-        },
+        json={"session_chat_language_models": with_decision},
     )
     without_jev = [
         {
@@ -1503,7 +1540,9 @@ def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
     )
     assert saved.status_code == 200
     assert saved.json()["decision_model"] == ""
-    assert saved.json().get("decision_model_warning")
+    assert saved.json().get("decision_model_warning") is None
+    remaining = [model["id"] for model in saved.json()["session_chat_language_models"][0]["models"]]
+    assert remaining == ["openrouter@minimax/minimax-m3"]
 
 
 def test_session_prompt_logging_toggle(tmp_path):

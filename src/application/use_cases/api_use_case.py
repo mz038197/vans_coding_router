@@ -50,13 +50,13 @@ class ApiUseCase:
 
     async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
         payload = await self.gateway.models()
-        decision_model = self._effective_decision_model(auth_context)
-        if not decision_model:
+        decision_ids = set(self._decision_model_ids(auth_context))
+        if not decision_ids:
             return payload
         data = [
             item
             for item in payload.get("data") or []
-            if not (isinstance(item, dict) and item.get("id") == decision_model)
+            if not (isinstance(item, dict) and item.get("id") in decision_ids)
         ]
         return {**payload, "data": data}
 
@@ -250,7 +250,7 @@ class ApiUseCase:
             return
         if not is_model_allowed(model_id, getter(auth_context.session_id)):
             raise ModelNotAllowedError()
-        if model_id and model_id == self._effective_decision_model(auth_context):
+        if model_id and model_id in self._decision_model_ids(auth_context):
             raise ModelNotAllowedError()
 
     def validate_model_allowed(
@@ -342,11 +342,11 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        decision_model = self._effective_decision_model(auth_context)
+        decision_ids = self._decision_model_ids(auth_context)
         model_id = body.get("model")
-        if not decision_model:
+        if not decision_ids:
             raise DecisionDisabledError()
-        if not isinstance(model_id, str) or model_id != decision_model:
+        if not isinstance(model_id, str) or model_id not in decision_ids:
             raise ModelNotAllowedError()
         payload = {
             "model": model_id,
@@ -355,13 +355,14 @@ class ApiUseCase:
         }
         return await self.gateway.decisions_create(payload)
 
-    def _effective_decision_model(self, auth_context: AuthContext | None) -> str:
+    def _decision_model_ids(self, auth_context: AuthContext | None) -> list[str]:
         if auth_context is None or auth_context.session_id is None:
-            return ""
-        getter = getattr(self.api_key_repo, "get_effective_decision_model", None)
+            return []
+        getter = getattr(self.api_key_repo, "get_decision_model_ids", None)
         if not callable(getter):
-            return ""
-        return getter(auth_context.session_id) or ""
+            return []
+        ids = getter(auth_context.session_id) or []
+        return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
     def validate_realtime_request(
         self,

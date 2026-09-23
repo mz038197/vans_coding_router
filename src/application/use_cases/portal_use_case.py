@@ -15,10 +15,7 @@ from src.infrastructure.config import (
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
-from src.domain.decision_model import (
-    DECISION_MODEL_UNCHANGED,
-    reconcile_decision_model,
-)
+from src.domain.decision_model import DECISION_MODEL_UNCHANGED
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -153,8 +150,14 @@ class PortalUseCase:
         except Exception:
             return snapshot
 
-    async def upstream_model_catalog(self, user_id: int) -> dict[str, Any]:
+    async def upstream_model_catalog(
+        self,
+        user_id: int,
+        output_modalities: str | None = None,
+    ) -> dict[str, Any]:
         self._assert_teacher(user_id)
+        if output_modalities not in (None, "text", "decisions"):
+            raise ValueError("output_modalities 必須是 text 或 decisions")
         providers = classroom_chat_provider_names(self.settings.providers)
         gateway = self._llm_gateway
         if gateway is None:
@@ -163,7 +166,10 @@ class PortalUseCase:
         if not callable(models_fn):
             return {"providers": providers, "models": [], "unavailable": True}
         try:
-            raw = await models_fn()
+            if output_modalities:
+                raw = await models_fn(output_modalities=output_modalities)
+            else:
+                raw = await models_fn()
         except Exception:
             return {"providers": providers, "models": [], "unavailable": True}
         allowed = set(providers)
@@ -450,23 +456,6 @@ class PortalUseCase:
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
             document = (existing or {}).get("session_chat_language_models") or []
             model_allowlist = validate_allowlist(model_allowlist, document)
-        persist_decision = DECISION_MODEL_UNCHANGED
-        warning = None
-        if (
-            decision_model is not DECISION_MODEL_UNCHANGED
-            or session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
-        ):
-            document = (
-                session_chat_language_models
-                if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
-                else (existing or {}).get("session_chat_language_models")
-            )
-            stored = (
-                decision_model
-                if decision_model is not DECISION_MODEL_UNCHANGED
-                else (existing or {}).get("decision_model")
-            )
-            persist_decision, warning = reconcile_decision_model(stored, document)
         changes = invocation_arguments or self._session_change_arguments(
             expires_at=expires_at,
             name=name,
@@ -482,8 +471,7 @@ class PortalUseCase:
             changes["model_allowlist"] = model_allowlist
         if invocation_arguments is None and session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
             changes["session_chat_language_models"] = session_chat_language_models
-        if persist_decision is not DECISION_MODEL_UNCHANGED:
-            changes["decision_model"] = persist_decision
+        changes.pop("decision_model", None)
         changes.pop("decision_model_allowlist", None)
         changes.pop("decision_enabled", None)
         session = self.repo.update_class_session(
@@ -500,7 +488,7 @@ class PortalUseCase:
             seat_limit=seat_limit,
             model_allowlist=model_allowlist,
             session_chat_language_models=session_chat_language_models,
-            decision_model=persist_decision,
+            decision_model=DECISION_MODEL_UNCHANGED,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=user_id,
                 action=self._session_action(changes),
@@ -510,8 +498,6 @@ class PortalUseCase:
                 invocation_channel=invocation_channel,
             ),
         )
-        if session is not None and warning:
-            session = {**session, "decision_model_warning": warning}
         return session
 
     @staticmethod

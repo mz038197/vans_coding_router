@@ -53,23 +53,31 @@ def _student_key(repo: SqliteRouterRepository) -> tuple[dict, dict, str]:
     return klass, session, redeem["api_key"]
 
 
-def _openrouter_document(*model_ids: str) -> list[dict]:
+def _openrouter_document(*model_ids: str, decision_ids: tuple[str, ...] = ()) -> list[dict]:
+    marked = set(decision_ids)
     return [
         {
             "name": "VCRouter",
             "vendor": "customendpoint",
-            "models": [{"id": model_id, "name": model_id} for model_id in model_ids],
+            "models": [
+                {
+                    "id": model_id,
+                    "name": model_id,
+                    **({"decisionShelf": True} if model_id in marked else {}),
+                }
+                for model_id in model_ids
+            ],
         }
     ]
 
 
 def _set_decision_model(repo, klass, session, model_id: str, extra_ids: tuple[str, ...] = ()) -> None:
-    ids = (model_id, *extra_ids) if model_id else extra_ids
+    ids = (model_id, *extra_ids) if model_id else tuple(extra_ids)
+    decision_ids = (model_id,) if model_id else ()
     repo.update_class_session(
         klass["id"],
         session["id"],
-        session_chat_language_models=_openrouter_document(*ids) if ids else [],
-        decision_model=model_id,
+        session_chat_language_models=_openrouter_document(*ids, decision_ids=decision_ids) if ids else [],
     )
 
 
@@ -235,6 +243,57 @@ def test_stale_decision_model_treated_as_off(tmp_path):
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "decision_disabled"
     assert openrouter.last_decision_body is None
+
+
+def test_previously_stored_single_choice_does_not_enable_decision(tmp_path):
+    client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=_openrouter_document("openrouter@typesafe/jev-1.13"),
+        decision_model="openrouter@typesafe/jev-1.13",
+    )
+
+    blocked = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json=_DECISION_BODY,
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "decision_disabled"
+    assert gateway.last_decision_body is None
+
+
+def test_every_decision_shelf_model_can_receive_a_decision_request(tmp_path):
+    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=_openrouter_document(
+            "openrouter@typesafe/jev-1.13",
+            "openrouter@~typesafe/jev-latest",
+            decision_ids=(
+                "openrouter@typesafe/jev-1.13",
+                "openrouter@~typesafe/jev-latest",
+            ),
+        ),
+    )
+    openrouter.decision_response = {
+        "id": "gen-dec-2",
+        "model": "typesafe/jev-latest",
+        "answers": {"urgent": {"type": "noul", "noul": 0.5}},
+        "usage": {"input_tokens": 1, "output_tokens": 1, "cost": 0},
+    }
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={**_DECISION_BODY, "model": "openrouter@~typesafe/jev-latest"},
+    )
+    assert response.status_code == 200
+    assert openrouter.last_decision_body["model"] == "~typesafe/jev-latest"
 
 
 def test_legacy_decision_columns_do_not_enable_decision(tmp_path):

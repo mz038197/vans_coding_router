@@ -4,6 +4,8 @@ import copy
 import json
 from typing import Any
 
+from src.domain.decision_model import is_decision_shelf_model
+
 MODEL_ALLOWLIST_UNCHANGED = object()
 SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
 
@@ -111,7 +113,8 @@ def filter_chat_language_models(
         provider["models"] = [
             model
             for model in models
-            if isinstance(model, dict) and model.get("id") in allowed
+            if isinstance(model, dict)
+            and (model.get("id") in allowed or is_decision_shelf_model(model))
         ]
     return result
 

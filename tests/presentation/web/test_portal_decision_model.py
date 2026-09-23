@@ -7,8 +7,10 @@ def test_portal_moves_decision_model_into_classroom_models():
     assert "decision_enabled" not in html
     assert "DECISION_MODEL_SHELF" not in html
     assert "decision_model_allowlist" not in html
-    assert 'id="sessionDecisionModel"' in html
-    assert "決策模型" in html
+    assert 'id="sessionDecisionModel"' not in html
+    assert 'id="sessionDecisionShelf"' in html
+    assert "output_modalities=" in html
+    assert "delete next.decisionShelf" in html
     modal_at = html.index('id="editSessionChatModelsModal"')
-    picker_at = html.index('id="sessionDecisionModel"')
-    assert picker_at > modal_at
+    shelf_at = html.index('id="sessionDecisionShelf"')
+    assert shelf_at > modal_at

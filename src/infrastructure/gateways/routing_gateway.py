@@ -90,12 +90,15 @@ class RoutingGateway:
             raise ValueError(f"provider「{provider}」不支援查詢隔離狀態")
         return bool(status_fn(index))
 
-    async def models(self) -> dict[str, Any]:
+    async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}
         for name, gateway in self.gateways.items():
             try:
-                models = await gateway.models()
+                if name == "openrouter" and output_modalities:
+                    models = await gateway.models(output_modalities=output_modalities)
+                else:
+                    models = await gateway.models()
                 for item in models.get("data", []):
                     if not isinstance(item, dict):
                         continue

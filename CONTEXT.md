@@ -65,20 +65,20 @@ Speech-to-text over a live audio stream in a persistent realtime session.
 _Avoid_: File transcription, streamed file transcript
 
 **Decision** (Portal: 決策):
-A Class Session setting that lets a student submit a Decision Request when the sitting has a Decision Model. Empty Decision Model means Decision is off. It is not a capability checkbox and does not grant chat, Speech, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
-_Avoid_: Session Chat Language Model, Jev as a chat model, Copilot model, 聊天, decision_enabled, 學生用程式送決策
+A Class Session lets a student submit a Decision Request when its Session Chat Language Models include at least one decision-shelf Model ID. None checked means Decision is off. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
+_Avoid_: Session Chat Language Model, Jev as a chat model, Copilot model, 聊天, decision_enabled, 學生用程式送決策, a single Decision Model field
 
 **Decision Request**:
 One student call that brings only its own state, its own typed questions, and a Model ID. Anything else is not part of the call. The questions belong to that call, not to the Class Session. The reply is the upstream decision body for that call, including its answers and the model and usage it attaches, not assistant text. That model string is not a Model ID. It draws the same upstream keys as chat for that provider, so Key Quarantine on one blocks the other.
 _Avoid_: chat completion, a session-owned rubric, a fixed router questionnaire, assistant message, a second key pool per capability, provider preferences, trace, session id, user
 
 **Decision Refusal**:
-The provider refusal of a Decision Request that was sent upstream, returned to the student as that refusal. It is not Readable Upstream Error. A router refusal before any upstream call, such as an empty Decision Model or a Model ID that is not this sitting’s Decision Model, is not a Decision Refusal.
+The provider refusal of a Decision Request that was sent upstream, returned to the student as that refusal. It is not Readable Upstream Error. A router refusal before any upstream call, such as no decision-shelf Model ID checked or a Model ID that is not one of them, is not a Decision Refusal.
 _Avoid_: Readable Upstream Error, chat choice, assistant message, hiding the provider refusal behind a generic router error
 
-**Decision Model** (Portal: 決策模型):
-The optional Model ID one Class Session uses for Decision Requests. Options are the OpenRouter Model IDs in that sitting’s Session Chat Language Models. Empty means Decision is off. Student-facing chat model lists omit this id. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request.
-_Avoid_: Decision Model Shelf, Decision Model Allowlist, Session Model Allowlist, capability checkbox, fixed Jev shelf, a student keyed chat-picker entry, treating the reply model as permission
+**Decision Model**:
+An OpenRouter Model ID the teacher checked from the decision shelf into that sitting’s Session Chat Language Models. A Decision Request may use any of them. Chat and Responses with that id are refused, and student-facing chat model lists omit every one. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request. A text-shelf model, a file upload, or a previously stored single choice is not a Decision Model.
+_Avoid_: Decision Model Shelf, Decision Model Allowlist, Session Model Allowlist, capability checkbox, fixed Jev shelf, a text-shelf OpenRouter model, a single chosen field, a dropdown that picks one, a student keyed chat-picker entry, treating the reply model as permission, promoting an uploaded id or an old single choice
 
 **Theme**:
 A named Portal visual identity that changes colors and material treatment only. It does not change branding assets or page structure. The two Themes are Dark Theme and Light Theme. One Theme applies across Portal login, the signed-in Portal, and lobby host. The user's Theme choice is remembered on that browser. When no choice is stored, Light Theme is the default.
@@ -129,20 +129,20 @@ A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_�
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
 
 **Class Session**:
-A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, optional Decision Model, and the optional Course Catalog for that sitting. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
+A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, and the optional Course Catalog for that sitting. Decision is carried by the decision-shelf Model IDs inside Session Chat Language Models. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
 _Avoid_: lesson plan, curriculum repo, student workspace
 
 **Session Chat Language Models**:
-A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. A sitting’s Decision Model may be one of its OpenRouter ids; student-facing chat listings omit that id.
-_Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML, Decision Model Shelf
+A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. It may hold decision-shelf OpenRouter Model IDs checked the same way as text-shelf models. A Model ID checked from the decision shelf stays a decision-shelf id in that sitting until the teacher unchecks it. A file upload arrives on the text shelf. Student-facing chat listings omit every decision-shelf id in the document.
+_Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML, Decision Model Shelf, reclassifying a checked id from a later upstream list
 
 **Upstream Model Catalog**:
-The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription. Teachers use it as a shelf to check models into Session Chat Language Models. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
-_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document, Decision Model Shelf, omitting Jev as a special catalog class
+The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription. Teachers use it as a shelf to check models into Session Chat Language Models. OpenRouter has two shelves: text models and decision models. Other providers have a text shelf only. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
+_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document, Decision Model Shelf, one OpenRouter shelf that mixes text and decision models, a fixed Jev shelf
 
 **Session Model Allowlist**:
-The Model IDs inside that session’s Session Chat Language Models. It is the chat allowlist only, not a second chat list beside that document.
-_Avoid_: a second chat-model id list, Decision Model Allowlist, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
+The text-shelf Model IDs inside that session’s Session Chat Language Models. Decision-shelf ids in the same document are not on it. It is the chat allowlist only, not a second chat list beside that document.
+_Avoid_: a second chat-model id list, Decision Model Allowlist, counting a Decision Model as a chat id, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
 The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`.

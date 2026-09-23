@@ -231,8 +231,11 @@ class OpenAICompatibleGateway:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "pool": pool}
 
-    async def models(self) -> dict[str, Any]:
-        response = await self._request("GET", "/models", use_pool=False)
+    async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
+        path = "/models"
+        if self.provider.name == "openrouter" and output_modalities in {"text", "decisions"}:
+            path = f"/models?output_modalities={output_modalities}"
+        response = await self._request("GET", path, use_pool=False)
         return self._json_or_error(response)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
