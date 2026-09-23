@@ -342,12 +342,13 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        decision_ids = self._decision_model_ids(auth_context)
         model_id = body.get("model")
-        if not decision_ids:
-            raise DecisionDisabledError()
-        if not isinstance(model_id, str) or model_id not in decision_ids:
-            raise ModelNotAllowedError()
+        if auth_context is None or auth_context.session_id is not None:
+            decision_ids = self._decision_model_ids(auth_context)
+            if not decision_ids:
+                raise DecisionDisabledError()
+            if not isinstance(model_id, str) or model_id not in decision_ids:
+                raise ModelNotAllowedError()
         payload = {
             "model": model_id,
             "state": body.get("state"),

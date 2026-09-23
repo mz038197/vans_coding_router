@@ -65,11 +65,11 @@ Speech-to-text over a live audio stream in a persistent realtime session.
 _Avoid_: File transcription, streamed file transcript
 
 **Decision** (Portal: 決策):
-A Class Session lets a student submit a Decision Request when its Session Chat Language Models include at least one decision-shelf Model ID. None checked means Decision is off. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
+A Class Session lets a Classroom API Key submit a Decision Request when its Session Chat Language Models include at least one decision-shelf Model ID. None checked means Decision is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
 _Avoid_: Session Chat Language Model, Jev as a chat model, Copilot model, 聊天, decision_enabled, 學生用程式送決策, a single Decision Model field
 
 **Decision Request**:
-One student call that brings only its own state, its own typed questions, and a Model ID. Anything else is not part of the call. The questions belong to that call, not to the Class Session. The reply is the upstream decision body for that call, including its answers and the model and usage it attaches, not assistant text. That model string is not a Model ID. It draws the same upstream keys as chat for that provider, so Key Quarantine on one blocks the other.
+One call that brings only its own state, its own typed questions, and a Model ID. Anything else is not part of the call. The questions belong to that call, not to the Class Session. The reply is the upstream decision body for that call, including its answers and the model and usage it attaches, not assistant text. That model string is not a Model ID. It draws the same upstream keys as chat for that provider, so Key Quarantine on one blocks the other.
 _Avoid_: chat completion, a session-owned rubric, a fixed router questionnaire, assistant message, a second key pool per capability, provider preferences, trace, session id, user
 
 **Decision Refusal**:
@@ -127,6 +127,10 @@ _Avoid_: session cookie, login cookie, Class Session, Sign-in Handoff
 **Invite Code**:
 A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_…`). In the Vans VS Code extension the default redeem is Nickname Redeem; Google users may still redeem with Sign-in Handoff (extension, secondary) or a Portal session (website). Portal web redeem stays Google-only.
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
+
+**Personal API Key** (Portal: 個人 API Key):
+A long-lived key held by one teacher or admin and bound to no Class Session. Class Session permissions do not apply to it. It is not a Classroom API Key.
+_Avoid_: admin key, 老師個人金鑰, teacher long-lived key, dev key, upstream key
 
 **Class Session**:
 A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, and the optional Course Catalog for that sitting. Decision is carried by the decision-shelf Model IDs inside Session Chat Language Models. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.

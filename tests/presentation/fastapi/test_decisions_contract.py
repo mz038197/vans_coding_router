@@ -296,6 +296,38 @@ def test_every_decision_shelf_model_can_receive_a_decision_request(tmp_path):
     assert openrouter.last_decision_body["model"] == "~typesafe/jev-latest"
 
 
+def test_personal_api_key_decision_forwards_any_model_id(tmp_path):
+    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    repo.update_user(teacher["id"], roles=["teacher"])
+    personal = repo.issue_long_lived_key(teacher["id"])
+    openrouter.decision_response = {
+        "id": "gen-dec-personal",
+        "model": "typesafe/jev-9.9",
+        "answers": {"urgent": {"type": "noul", "noul": 0.4}},
+        "usage": {"input_tokens": 10, "output_tokens": 2, "cost": 0},
+    }
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={
+            **_DECISION_BODY,
+            "model": "openrouter@typesafe/jev-9.9",
+            "provider": {"order": ["somewhere"]},
+            "user": "teacher",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == openrouter.decision_response
+    assert openrouter.last_decision_body == {
+        "model": "typesafe/jev-9.9",
+        "state": "付款失敗三天了",
+        "questions": _DECISION_BODY["questions"],
+    }
+
+
 def test_legacy_decision_columns_do_not_enable_decision(tmp_path):
     client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     _klass, session, student_key = _student_key(repo)
