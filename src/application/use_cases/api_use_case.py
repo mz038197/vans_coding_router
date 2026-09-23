@@ -343,18 +343,24 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         del api_key, client_ip
         model_id = body.get("model")
-        if auth_context is None or auth_context.session_id is not None:
-            decision_ids = self._decision_model_ids(auth_context)
-            if not decision_ids:
-                raise DecisionDisabledError()
-            if not isinstance(model_id, str) or model_id not in decision_ids:
-                raise ModelNotAllowedError()
+        if not self._is_personal_api_key(auth_context):
+            self._assert_classroom_decision_allowed(auth_context, model_id)
         payload = {
             "model": model_id,
             "state": body.get("state"),
             "questions": body.get("questions"),
         }
         return await self.gateway.decisions_create(payload)
+
+    def _is_personal_api_key(self, auth_context: AuthContext | None) -> bool:
+        return auth_context is not None and auth_context.session_id is None
+
+    def _assert_classroom_decision_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
+        decision_ids = self._decision_model_ids(auth_context)
+        if not decision_ids:
+            raise DecisionDisabledError()
+        if not isinstance(model_id, str) or model_id not in decision_ids:
+            raise ModelNotAllowedError()
 
     def _decision_model_ids(self, auth_context: AuthContext | None) -> list[str]:
         if auth_context is None or auth_context.session_id is None:
