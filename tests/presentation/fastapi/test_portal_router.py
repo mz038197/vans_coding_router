@@ -1,6 +1,7 @@
 import re
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -654,7 +655,12 @@ def test_admin_clear_archive_endpoint(tmp_path):
     assert context is not None
     repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
     repo.set_class_status(ended["id"], "ended")
-    repo.archive_prompt_logs()
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?",
+            ("2026-05-01T00:00:00+00:00", "ended log"),
+        )
+    repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))
 
     response = client.post(
         "/admin/archive/clear",

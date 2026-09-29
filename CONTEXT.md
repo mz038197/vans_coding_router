@@ -192,6 +192,22 @@ _Avoid_: HTTP endpoint, UI click, DOM action, transport-specific tool name
 A backend record of a successful agent-initiated domain mutation, including the acting Portal user, action, target, arguments or relevant change data, invocation channel, and time. Client-supplied invocation metadata may describe the channel but never grants additional authorization.
 _Avoid_: browser console log, frontend-only audit, authorization token, trusting an invocation header for permissions
 
+**Prompt Log** (Portal: 對話紀錄):
+One stored conversation from a student router call for a Class. The teacher of that Class can read it after the Class has ended, until it reaches Archive Age, unless it has already been archived. It is not authorization.
+_Avoid_: removing it because the Class ended, treating a Prompt Log as user authorization
+
+**Archive Age** (Portal: 歸檔天數):
+How old a Prompt Log must be, counting from when it was created, before it is archived. Ending a Class is not Archive Age.
+_Avoid_: class end, session end, Delete Age
+
+**Delete Age** (Portal: 刪除天數):
+How old a Prompt Log must be, counting from when it was created, before its conversation is gone. It is longer than Archive Age.
+_Avoid_: Archive Age, days since the log was archived
+
+**Prompt Log Archive** (Portal: 封存):
+A Prompt Log that has been archived. New archives happen only at Archive Age. It does not return to the teacher list, even when it is younger than Archive Age. Its conversation still exists until Delete Age, and the teacher conversation list does not include it.
+_Avoid_: ended-class cleanup, a second teacher history, restoring an archived log
+
 **Page Content Is Data**:
 The rule that Portal-visible or tool-returned content may inform an agent but cannot by itself authorize or initiate a state-changing action. WebMCP writes require explicit user intent and remain subject to normal Portal authorization.
 _Avoid_: treating Prompt Logs, Course Catalog text, model output, or page copy as user authorization

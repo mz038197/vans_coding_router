@@ -28,6 +28,8 @@ from src.domain.session_model_allowlist import (
 from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
 
+_ARCHIVE_BATCH_SIZE = 20
+
 
 class RouterRepositoryBase(ABC):
     def __init__(self, settings: RouterSettings):
@@ -47,9 +49,8 @@ class RouterRepositoryBase(ABC):
     def _init_schema(self) -> None:
         ...
 
-    @abstractmethod
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
-        ...
+        raise NotImplementedError
 
     def _sql(self, query: str) -> str:
         if self.dialect == "postgres":
@@ -1763,29 +1764,38 @@ class RouterRepositoryBase(ABC):
             if archive_after_days is not None
             else self.settings.prompt_logs.archive_after_days
         )
+        archived = 0
+        while True:
+            moved = self._archive_prompt_log_batch(dt(cutoff), current, _ARCHIVE_BATCH_SIZE)
+            archived += moved
+            if moved < _ARCHIVE_BATCH_SIZE:
+                break
+        self._after_archive(archived)
+        return {"archived": archived}
+
+    def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:
             rows = conn.execute(
                 self._sql(
                     """
                     SELECT l.*
                     FROM prompt_logs l
-                    LEFT JOIN classes c ON c.id = l.class_id
-                    WHERE c.status = 'ended' OR l.created_at < ?
-                    ORDER BY l.created_at
+                    WHERE l.created_at < ?
+                    ORDER BY l.created_at, l.id
+                    LIMIT ?
                     """
                 ),
-                (dt(cutoff),),
+                (cutoff, limit),
             ).fetchall()
             for row in rows:
-                self._archive_row(dict(row), current)
+                self._archive_row(dict(row), archived_at)
             if rows:
                 self._executemany(
                     conn,
                     "DELETE FROM prompt_logs WHERE id = ?",
                     [(row["id"],) for row in rows],
                 )
-        self._after_archive(len(rows))
-        return {"archived": len(rows)}
+        return len(rows)
 
     def purge_archived_prompt_logs(
         self, now: datetime | None = None, delete_after_days: int | None = None

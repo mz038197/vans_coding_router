@@ -225,7 +225,7 @@ def test_prompt_logs_can_be_filtered_by_time_range(tmp_path):
     assert [log["raw_prompt"] for log in logs] == ["new prompt"]
 
 
-def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(tmp_path):
+def test_archive_prompt_logs_moves_old_logs_and_keeps_young_logs_on_an_ended_class(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
         prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
@@ -263,21 +263,43 @@ def test_archive_prompt_logs_moves_retention_and_ended_class_logs_to_year_files(
     repo.log_prompt(active_context, "recent active", "recent active", "fake-model", "ok", None)
     with repo._connect() as conn:
         conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2025-01-01T00:00:00+00:00", "old active"))
-        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-01T00:00:00+00:00", "recent ended"))
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-16T00:00:00+00:00", "recent ended"))
         conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-06-10T00:00:00+00:00", "recent active"))
 
     result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)
 
-    assert result["archived"] == 2
-    remaining = repo.list_prompt_logs(teacher["id"], active["id"])
-    assert [log["raw_prompt"] for log in remaining] == ["recent active"]
+    assert result["archived"] == 1
+    assert [log["raw_prompt"] for log in repo.list_prompt_logs(teacher["id"], active["id"])] == ["recent active"]
+    assert [log["raw_prompt"] for log in repo.list_prompt_logs(teacher["id"], ended["id"])] == ["recent ended"]
     with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
         archived_2025 = conn.execute("SELECT raw_prompt, archived_at FROM prompt_logs_archive").fetchall()
-    with sqlite3.connect(tmp_path / "archive" / "archive_2026.db") as conn:
-        archived_2026 = conn.execute("SELECT raw_prompt, archived_at FROM prompt_logs_archive").fetchall()
-    assert archived_2025[0][0] == "old active"
+    assert [row[0] for row in archived_2025] == ["old active"]
     assert archived_2025[0][1]
-    assert archived_2026[0][0] == "recent ended"
+
+
+def test_archive_prompt_logs_finishes_a_backlog_larger_than_one_batch(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    context = repo.verify_api_key_context(key)
+    assert context is not None
+    for index in range(21):
+        repo.log_prompt(context, f"old {index}", f"old {index}", "fake-model", "ok", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ?", ("2026-01-01T00:00:00+00:00",))
+
+    result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)
+
+    assert result["archived"] == 21
+    assert repo.list_prompt_logs(teacher["id"], klass["id"]) == []
 
 
 def test_purge_archived_prompt_logs_deletes_by_created_at(tmp_path):
@@ -324,6 +346,11 @@ def test_clear_all_archived_prompt_logs(tmp_path):
     assert context is not None
     repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
     repo.set_class_status(ended["id"], "ended")
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?",
+            ("2026-05-01T00:00:00+00:00", "ended log"),
+        )
     assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))["archived"] == 1
     cleared = repo.clear_all_archived_prompt_logs()
     assert cleared["deleted"] == 1
@@ -352,6 +379,8 @@ def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
     repo.log_prompt(ctx_a, "a-live", "a-live", "fake-model", "ok", None)
     repo.log_prompt(ctx_b, "b-live", "b-live", "fake-model", "ok", None)
     repo.set_class_status(klass["id"], "ended")
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ?", ("2026-05-01T00:00:00+00:00",))
     assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))["archived"] == 2
 
     # new class for fresh live logs after archive

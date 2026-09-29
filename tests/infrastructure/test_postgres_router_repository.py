@@ -89,6 +89,11 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     context = repo.verify_api_key_context(ended_key)
     assert context is not None
     repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE prompt_logs SET created_at = %s WHERE raw_prompt = %s",
+            ("2026-05-01T00:00:00+00:00", "ended log"),
+        )
 
     result = repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)
     assert result["archived"] == 1

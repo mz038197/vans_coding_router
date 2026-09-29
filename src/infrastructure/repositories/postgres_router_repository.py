@@ -299,39 +299,48 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 """
             )
 
-    def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
+    def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:
-            conn.execute(
+            cur = conn.execute(
                 self._sql(
                     """
-                    INSERT INTO prompt_logs_archive(
-                        id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
-                        prompt_tokens, completion_tokens, total_tokens, client_ip, created_at, archived_at,
-                        message_preview, messages_json, api_endpoint, response_preview
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    WITH picked AS (
+                        SELECT id
+                        FROM prompt_logs
+                        WHERE created_at < ?
+                        ORDER BY created_at, id
+                        LIMIT ?
+                    ),
+                    inserted AS (
+                        INSERT INTO prompt_logs_archive(
+                            id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
+                            prompt_tokens, completion_tokens, total_tokens, client_ip, created_at, archived_at,
+                            message_preview, messages_json, api_endpoint, response_preview
+                        )
+                        SELECT
+                            l.id, l.user_id, l.class_id, l.session_id, l.raw_prompt, l.final_prompt,
+                            l.model, l.status,
+                            COALESCE(l.prompt_tokens, 0), COALESCE(l.completion_tokens, 0),
+                            COALESCE(l.total_tokens, 0),
+                            l.client_ip, l.created_at, ?,
+                            COALESCE(l.message_preview, ''), COALESCE(l.messages_json, ''),
+                            COALESCE(l.api_endpoint, ''), COALESCE(l.response_preview, '')
+                        FROM prompt_logs l
+                        JOIN picked ON picked.id = l.id
+                        RETURNING id
+                    ),
+                    deleted AS (
+                        DELETE FROM prompt_logs
+                        WHERE id IN (SELECT id FROM inserted)
+                        RETURNING id
+                    )
+                    SELECT COUNT(*) AS n FROM deleted
                     """
                 ),
-                (
-                    row["id"],
-                    row["user_id"],
-                    row["class_id"],
-                    row["session_id"],
-                    row["raw_prompt"],
-                    row["final_prompt"],
-                    row["model"],
-                    row["status"],
-                    row.get("prompt_tokens") or 0,
-                    row.get("completion_tokens") or 0,
-                    row.get("total_tokens") or 0,
-                    row["client_ip"],
-                    row["created_at"],
-                    dt(archived_at),
-                    row.get("message_preview") or "",
-                    row.get("messages_json") or "",
-                    row.get("api_endpoint") or "",
-                    row.get("response_preview") or "",
-                ),
+                (cutoff, limit, dt(archived_at)),
             )
+            row = cur.fetchone()
+            return int(row["n"] if row is not None else 0)
 
     def _purge_archived_before(self, cutoff: str) -> int:
         with self._connect() as conn:
