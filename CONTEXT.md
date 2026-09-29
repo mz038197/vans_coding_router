@@ -49,12 +49,28 @@ A router rewrite of Responses API thinking so the student client always sees Ope
 _Avoid_: include_reasoning, thinking toggle, OpenRouter-specific hack, client-side parser
 
 **Speech** (Portal: 語音):
-A class-session permission for text-to-speech. It does not grant speech-to-text.
-_Avoid_: Voice, 語音轉寫, transcription
+A Class Session lets a Classroom API Key call text-to-speech when its Session Chat Language Models include at least one speech-shelf Model ID. None checked means Speech is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Image Generation, Speech Transcription, or Decision. New sessions start with the speech shelf empty. An existing sitting is not filled from the old speech switch.
+_Avoid_: Voice, 語音轉寫, transcription, tts_enabled, a capability checkbox
+
+**Speech Model**:
+A Model ID the teacher checked from the speech shelf into that sitting’s Session Chat Language Models. A Speech call may use any of them. Comparison uses the Model ID on that request, exactly. A text-shelf model, an Image Generation Model, a Speech Transcription Model, or a Decision Model is not a Speech Model. There is no student list of Speech Models.
+_Avoid_: a capability checkbox, a single chosen speech field, a text-shelf model
 
 **Speech Transcription** (Portal: 語音轉寫):
-A class-session permission for speech-to-text, covering both file transcription and realtime transcription. New sessions leave this off by default.
-_Avoid_: Speech, 語音, TTS
+A Class Session lets a Classroom API Key call File Transcription or Realtime Transcription when its Session Chat Language Models include at least one speech-transcription-shelf Model ID. None checked means Speech Transcription is off for that key. Both calls share that one shelf. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, Image Generation, or Decision. New sessions start with that shelf empty. An existing sitting is not filled from the old speech-transcription switch.
+_Avoid_: Speech, 語音, TTS, a second shelf for realtime, a capability checkbox
+
+**Speech Transcription Model**:
+A Model ID the teacher checked from the speech-transcription shelf into that sitting’s Session Chat Language Models. File Transcription and Realtime Transcription may use any of them. Comparison uses the Model ID on that request, exactly. A text-shelf model, a Speech Model, an Image Generation Model, or a Decision Model is not a Speech Transcription Model. There is no student list of Speech Transcription Models.
+_Avoid_: a file-only shelf, a realtime-only shelf, a capability checkbox
+
+**Image Generation** (Portal: 生圖):
+A Class Session lets a Classroom API Key call image generation when its Session Chat Language Models include at least one image-shelf Model ID. None checked means Image Generation is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, Speech Transcription, or Decision. New sessions start with the image shelf empty. An existing sitting is not filled from the old image-generation switch.
+_Avoid_: image_generation_enabled, a capability checkbox, 生圖開關
+
+**Image Generation Model**:
+An OpenRouter Model ID the teacher checked from the image shelf into that sitting’s Session Chat Language Models. An image generation call may use any of them. Comparison uses the Model ID on that request, exactly. For a Classroom API Key, the image model list is those checked ids; none checked means that list is refused. A Personal API Key sees the live image shelf. A text-shelf model, a Speech Model, a Speech Transcription Model, or a Decision Model is not an Image Generation Model.
+_Avoid_: a capability checkbox, a single chosen image field, the live image catalog as the classroom permission, a student list of unchecked image models
 
 **File Transcription**:
 Speech-to-text over a completed audio upload, including optional streamed transcript output while that file is processed.
@@ -65,7 +81,7 @@ Speech-to-text over a live audio stream in a persistent realtime session.
 _Avoid_: File transcription, streamed file transcript
 
 **Decision** (Portal: 決策):
-A Class Session lets a Classroom API Key submit a Decision Request when its Session Chat Language Models include at least one decision-shelf Model ID. None checked means Decision is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
+A Class Session lets a Classroom API Key submit a Decision Request when its Session Chat Language Models include at least one decision-shelf Model ID. None checked means Decision is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, Image Generation, or Speech Transcription. New sessions start empty. Ending the sitting expires it with the Classroom API Key.
 _Avoid_: Session Chat Language Model, Jev as a chat model, Copilot model, 聊天, decision_enabled, 學生用程式送決策, a single Decision Model field
 
 **Decision Request**:
@@ -77,7 +93,7 @@ The provider refusal of a Decision Request that was sent upstream, returned to t
 _Avoid_: Readable Upstream Error, chat choice, assistant message, hiding the provider refusal behind a generic router error
 
 **Decision Model**:
-An OpenRouter Model ID the teacher checked from the decision shelf into that sitting’s Session Chat Language Models. A Decision Request may use any of them. Chat and Responses with that id are refused, and student-facing chat model lists omit every one. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request. A text-shelf model, a file upload, or a previously stored single choice is not a Decision Model.
+An OpenRouter Model ID the teacher checked from the decision shelf into that sitting’s Session Chat Language Models. A Decision Request may use any of them. Chat and Responses with that id are refused, and student-facing chat model lists omit every one. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request. A text-shelf model, an Image Generation Model, a Speech Model, a Speech Transcription Model, a file upload, or a previously stored single choice is not a Decision Model.
 _Avoid_: Decision Model Shelf, Decision Model Allowlist, Session Model Allowlist, capability checkbox, fixed Jev shelf, a text-shelf OpenRouter model, a single chosen field, a dropdown that picks one, a student keyed chat-picker entry, treating the reply model as permission, promoting an uploaded id or an old single choice
 
 **Theme**:
@@ -133,19 +149,19 @@ A long-lived key held by one teacher or admin and bound to no Class Session. Cla
 _Avoid_: admin key, 老師個人金鑰, teacher long-lived key, dev key, upstream key
 
 **Class Session**:
-A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, and the optional Course Catalog for that sitting. Decision is carried by the decision-shelf Model IDs inside Session Chat Language Models. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
+A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, capability switches, and the optional Course Catalog for that sitting. Decision, Speech, Image Generation, and Speech Transcription are carried by the shelf Model IDs inside Session Chat Language Models. Prompt logging stays a capability switch. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
 _Avoid_: lesson plan, curriculum repo, student workspace
 
 **Session Chat Language Models**:
-A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. It may hold decision-shelf OpenRouter Model IDs checked the same way as text-shelf models. A Model ID checked from the decision shelf stays a decision-shelf id in that sitting until the teacher unchecks it. A file upload arrives on the text shelf. Student-facing chat listings omit every decision-shelf id in the document.
+A Copilot-shaped document owned by one Class Session, same array shape as the Router Model Template. It may hold decision-shelf, image-shelf, speech-shelf, and speech-transcription-shelf Model IDs checked the same way as text-shelf models. A Model ID belongs to at most one shelf in that sitting. Checking it onto a shelf removes it from every other shelf. It stays on that shelf until the teacher unchecks it. An id already on the text shelf stays there until the teacher checks it onto another shelf. A file upload arrives on the text shelf and does not check those shelves. Student-facing chat listings omit every decision-shelf, image-shelf, speech-shelf, and speech-transcription-shelf id in the document.
 _Avoid_: live Template file as the student list, a second model-list GET, Course Catalog YAML, Decision Model Shelf, reclassifying a checked id from a later upstream list
 
 **Upstream Model Catalog**:
-The live `/models` list of enabled classroom chat providers, excluding a provider that exists only for Speech or Speech Transcription. Teachers use it as a shelf to check models into Session Chat Language Models. OpenRouter has two shelves: text models and decision models. Other providers have a text shelf only. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
-_Avoid_: hardcoded two-vendor picker, speech-only openai as a Copilot check, treating a fetch failure as an empty document, Decision Model Shelf, one OpenRouter shelf that mixes text and decision models, a fixed Jev shelf
+The live model lists teachers check into Session Chat Language Models. OpenRouter has a text shelf, a decision shelf, and an image shelf. A provider that can speak has a speech shelf; a provider that can transcribe has a speech-transcription shelf. A provider that exists only for Speech or Speech Transcription does not appear on a text shelf. Same upstream on two providers is two rows. It is not the student keyed GET and is not stored in Course Catalog YAML.
+_Avoid_: hardcoded two-vendor picker, speech-only openai as a text-shelf check, treating a fetch failure as an empty document, Decision Model Shelf, one OpenRouter shelf that mixes text and decision models, a fixed Jev shelf
 
 **Session Model Allowlist**:
-The text-shelf Model IDs inside that session’s Session Chat Language Models. Decision-shelf ids in the same document are not on it. It is the chat allowlist only, not a second chat list beside that document.
+The text-shelf Model IDs inside that session’s Session Chat Language Models. Decision-shelf, image-shelf, speech-shelf, and speech-transcription-shelf ids in the same document are not on it. It is the chat allowlist only, not a second chat list beside that document.
 _Avoid_: a second chat-model id list, Decision Model Allowlist, counting a Decision Model as a chat id, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
