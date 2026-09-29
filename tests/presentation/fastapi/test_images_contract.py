@@ -106,7 +106,21 @@ def test_images_models_contract(fake_repo, fake_gateway, fake_logger):
     assert response.json()["data"][0]["id"] == "flux.2-pro"
 
 
-def test_session_image_toggle_blocks_and_reopens(tmp_path):
+def _check_image_shelf(repo, klass, session, model_id: str) -> None:
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=[
+            {
+                "name": "VCRouter",
+                "vendor": "customendpoint",
+                "models": [{"id": model_id, "name": model_id, "imageShelf": True}],
+            }
+        ],
+    )
+
+
+def test_classroom_image_generation_follows_the_image_shelf(tmp_path):
     client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
@@ -114,25 +128,36 @@ def test_session_image_toggle_blocks_and_reopens(tmp_path):
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     student = repo.upsert_google_user("student@school.edu", "Student")
     redeem = repo.redeem_invite(session["invite_code"], student["id"])
-    student_key = redeem["api_key"]
-    headers = {"Authorization": f"Bearer {student_key}"}
+    headers = {"Authorization": f"Bearer {redeem['api_key']}"}
     body = {"model": "openrouter@black-forest-labs/flux.2-pro", "prompt": "cat"}
 
     assert repo.is_image_generation_enabled(session["id"]) is True
-    ok = client.post("/v1/images", headers=headers, json=body)
-    assert ok.status_code == 200
-
-    repo.update_class_session(klass["id"], session["id"], image_generation_enabled=False)
     blocked = client.post("/v1/images", headers=headers, json=body)
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "image_generation_disabled"
+    assert gateway.last_images_body is None
 
     blocked_models = client.get("/v1/images/models", headers=headers)
     assert blocked_models.status_code == 403
 
-    repo.update_class_session(klass["id"], session["id"], image_generation_enabled=True)
-    reopened = client.post("/v1/images", headers=headers, json=body)
-    assert reopened.status_code == 200
+    _check_image_shelf(repo, klass, session, "openrouter@black-forest-labs/flux.2-pro")
+    ok = client.post("/v1/images", headers=headers, json=body)
+    assert ok.status_code == 200
+    assert gateway.last_images_body["model"] == "openrouter@black-forest-labs/flux.2-pro"
+
+    listed = client.get("/v1/images/models", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["data"] == [
+        {"id": "openrouter@black-forest-labs/flux.2-pro", "object": "model"}
+    ]
+
+    wrong = client.post(
+        "/v1/images",
+        headers=headers,
+        json={"model": "openrouter@other/flux", "prompt": "cat"},
+    )
+    assert wrong.status_code == 403
+    assert wrong.json()["error"]["code"] == "model_not_allowed"
     assert gateway.last_images_body["model"] == "openrouter@black-forest-labs/flux.2-pro"
 
 

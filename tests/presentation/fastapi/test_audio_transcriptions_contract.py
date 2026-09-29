@@ -113,7 +113,7 @@ def test_audio_transcriptions_rejects_unsupported_provider(fake_repo, fake_logge
     assert response.json()["error"]["code"] == "speech_transcription_not_supported"
 
 
-def test_session_speech_transcription_toggle_blocks_and_reopens(tmp_path):
+def test_session_speech_transcription_follows_the_shelf(tmp_path):
     client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
@@ -121,24 +121,47 @@ def test_session_speech_transcription_toggle_blocks_and_reopens(tmp_path):
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     student = repo.upsert_google_user("student@school.edu", "Student")
     redeem = repo.redeem_invite(session["invite_code"], student["id"])
-    student_key = redeem["api_key"]
-    headers = {"Authorization": f"Bearer {student_key}"}
+    headers = {"Authorization": f"Bearer {redeem['api_key']}"}
     data = {"model": "openai@gpt-transcribe"}
     files = {"file": ("speech.wav", b"RIFF....", "audio/wav")}
 
-    assert repo.is_speech_transcription_enabled(session["id"]) is False
     blocked = client.post("/v1/audio/transcriptions", headers=headers, data=data, files=files)
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "speech_transcription_disabled"
 
     repo.update_class_session(klass["id"], session["id"], speech_transcription_enabled=True)
+    still_blocked = client.post("/v1/audio/transcriptions", headers=headers, data=data, files=files)
+    assert still_blocked.status_code == 403
+
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=[
+            {
+                "name": "VCRouter",
+                "vendor": "customendpoint",
+                "models": [
+                    {
+                        "id": "openai@gpt-transcribe",
+                        "name": "Transcribe",
+                        "speechTranscriptionShelf": True,
+                    }
+                ],
+            }
+        ],
+    )
     ok = client.post("/v1/audio/transcriptions", headers=headers, data=data, files=files)
     assert ok.status_code == 200
     assert gateway.last_audio_transcriptions_fields["model"] == "openai@gpt-transcribe"
 
-    repo.update_class_session(klass["id"], session["id"], speech_transcription_enabled=False)
-    blocked_again = client.post("/v1/audio/transcriptions", headers=headers, data=data, files=files)
-    assert blocked_again.status_code == 403
+    wrong = client.post(
+        "/v1/audio/transcriptions",
+        headers=headers,
+        data={"model": "openai@gpt-live-transcribe"},
+        files=files,
+    )
+    assert wrong.status_code == 403
+    assert wrong.json()["error"]["code"] == "model_not_allowed"
 
 
 def test_teacher_long_lived_key_bypasses_speech_transcription_toggle(tmp_path):

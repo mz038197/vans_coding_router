@@ -106,11 +106,11 @@ Supported endpoints:
 - `GET /v1/images/models`
 - `POST /v1/audio/speech` (TTS via providers with `audio_speech` capability; model ID e.g. `openai@gpt-4o-mini-tts`)
 - `POST /v1/audio/transcriptions` (file STT via providers with `audio_transcription` capability; model ID e.g. `openai@gpt-transcribe`; supports `stream=true`)
-- `WS /v1/realtime?model=openai@gpt-live-transcribe` (Realtime transcription proxy; same `audio_transcription` capability and **語音轉寫** toggle)
+- `WS /v1/realtime?model=openai@gpt-live-transcribe` (Realtime transcription proxy; same speech-transcription shelf as file transcription)
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.
 
-Image generation for student session keys follows each class session's **生圖** toggle in Portal (default on). TTS follows each session's **語音** toggle (default on). File and realtime speech-to-text follow each session's **語音轉寫** toggle (default off). Teacher long-lived keys are not restricted by session toggles.
+Image generation, Speech, and Speech Transcription for a Classroom API Key follow the Model IDs checked onto that sitting's image, speech, and speech-transcription shelves. None checked means that call is off. `GET /v1/images/models` for a Classroom API Key returns only the checked Image Generation Models. A Personal API Key is outside the sitting. Prompt logging stays a session switch.
 
 ## Portal Flow
 

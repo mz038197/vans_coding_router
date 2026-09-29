@@ -107,7 +107,7 @@ def test_audio_speech_rejects_unsupported_provider(fake_repo, fake_logger):
     assert response.json()["error"]["code"] == "tts_not_supported"
 
 
-def test_session_tts_toggle_blocks_and_reopens(tmp_path):
+def test_session_tts_follows_the_speech_shelf(tmp_path):
     client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
@@ -115,8 +115,7 @@ def test_session_tts_toggle_blocks_and_reopens(tmp_path):
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     student = repo.upsert_google_user("student@school.edu", "Student")
     redeem = repo.redeem_invite(session["invite_code"], student["id"])
-    student_key = redeem["api_key"]
-    headers = {"Authorization": f"Bearer {student_key}"}
+    headers = {"Authorization": f"Bearer {redeem['api_key']}"}
     body = {
         "model": "openai@gpt-4o-mini-tts",
         "input": "你好",
@@ -125,18 +124,39 @@ def test_session_tts_toggle_blocks_and_reopens(tmp_path):
     }
 
     assert repo.is_tts_enabled(session["id"]) is True
-    ok = client.post("/v1/audio/speech", headers=headers, json=body)
-    assert ok.status_code == 200
-
-    repo.update_class_session(klass["id"], session["id"], tts_enabled=False)
     blocked = client.post("/v1/audio/speech", headers=headers, json=body)
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "tts_disabled"
+    assert gateway.last_audio_speech_body is None
 
-    repo.update_class_session(klass["id"], session["id"], tts_enabled=True)
-    reopened = client.post("/v1/audio/speech", headers=headers, json=body)
-    assert reopened.status_code == 200
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=[
+            {
+                "name": "VCRouter",
+                "vendor": "customendpoint",
+                "models": [
+                    {
+                        "id": "openai@gpt-4o-mini-tts",
+                        "name": "TTS",
+                        "speechShelf": True,
+                    }
+                ],
+            }
+        ],
+    )
+    ok = client.post("/v1/audio/speech", headers=headers, json=body)
+    assert ok.status_code == 200
     assert gateway.last_audio_speech_body["model"] == "openai@gpt-4o-mini-tts"
+
+    wrong = client.post(
+        "/v1/audio/speech",
+        headers=headers,
+        json={**body, "model": "openai@gpt-4o-mini-tts-other"},
+    )
+    assert wrong.status_code == 403
+    assert wrong.json()["error"]["code"] == "model_not_allowed"
 
 
 @pytest.mark.asyncio

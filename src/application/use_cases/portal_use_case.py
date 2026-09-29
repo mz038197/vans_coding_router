@@ -8,9 +8,12 @@ from src.domain.errors import ApiKeyExpiredError, MissingTargetError, Quarantine
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import (
+    CAPABILITY_AUDIO_SPEECH,
+    CAPABILITY_AUDIO_TRANSCRIPTION,
     RouterSettings,
     apply_runtime_settings,
     classroom_chat_provider_names,
+    providers_with_capability,
     settings_summary,
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
@@ -156,22 +159,33 @@ class PortalUseCase:
         output_modalities: str | None = None,
     ) -> dict[str, Any]:
         self._assert_teacher(user_id)
-        if output_modalities not in (None, "text", "decisions"):
-            raise ValueError("output_modalities 必須是 text 或 decisions")
-        providers = classroom_chat_provider_names(self.settings.providers)
+        if output_modalities not in (None, "text", "decisions", "image", "speech", "speech_transcription"):
+            raise ValueError("output_modalities 必須是 text、decisions、image、speech 或 speech_transcription")
+        speech_providers = providers_with_capability(self.settings.providers, CAPABILITY_AUDIO_SPEECH)
+        transcription_providers = providers_with_capability(
+            self.settings.providers,
+            CAPABILITY_AUDIO_TRANSCRIPTION,
+        )
+        chat_providers = classroom_chat_provider_names(self.settings.providers)
+        if output_modalities == "image":
+            providers = [name for name in chat_providers if name == "openrouter"]
+        elif output_modalities == "speech":
+            providers = speech_providers
+        elif output_modalities == "speech_transcription":
+            providers = transcription_providers
+        else:
+            providers = chat_providers
         gateway = self._llm_gateway
+        extras = {
+            "speech_providers": speech_providers,
+            "transcription_providers": transcription_providers,
+        }
         if gateway is None:
-            return {"providers": providers, "models": [], "unavailable": True}
-        models_fn = getattr(gateway, "models", None)
-        if not callable(models_fn):
-            return {"providers": providers, "models": [], "unavailable": True}
+            return {"providers": providers, "models": [], "unavailable": True, **extras}
         try:
-            if output_modalities:
-                raw = await models_fn(output_modalities=output_modalities)
-            else:
-                raw = await models_fn()
+            raw = await self._catalog_models(gateway, output_modalities)
         except Exception:
-            return {"providers": providers, "models": [], "unavailable": True}
+            return {"providers": providers, "models": [], "unavailable": True, **extras}
         allowed = set(providers)
         models: list[dict[str, Any]] = []
         for item in (raw or {}).get("data") or []:
@@ -194,7 +208,27 @@ class PortalUseCase:
         errors = (raw or {}).get("provider_errors") or {}
         chat_errors = {name: errors[name] for name in providers if name in errors}
         unavailable = bool(providers) and not models and set(providers) <= set(chat_errors)
-        return {"providers": providers, "models": models, "unavailable": unavailable}
+        return {
+            "providers": providers,
+            "models": models,
+            "unavailable": unavailable,
+            "speech_providers": speech_providers,
+            "transcription_providers": transcription_providers,
+        }
+
+    @staticmethod
+    async def _catalog_models(gateway: Any, output_modalities: str | None) -> dict[str, Any]:
+        if output_modalities == "image":
+            images_fn = getattr(gateway, "images_models", None)
+            if not callable(images_fn):
+                raise RuntimeError("images catalog unavailable")
+            return await images_fn()
+        models_fn = getattr(gateway, "models", None)
+        if not callable(models_fn):
+            raise RuntimeError("models catalog unavailable")
+        if output_modalities in {"text", "decisions"}:
+            return await models_fn(output_modalities=output_modalities)
+        return await models_fn()
 
     async def release_key_quarantine(
         self,

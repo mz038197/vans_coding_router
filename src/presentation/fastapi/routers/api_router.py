@@ -11,6 +11,7 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.domain.errors import (
     InvalidModelIdError,
+    ModelNotAllowedError,
     ServiceUnavailableError,
     SpeechTranscriptionDisabledError,
     SpeechTranscriptionNotSupportedError,
@@ -371,6 +372,9 @@ def create_api_router(
             return
         except SpeechTranscriptionDisabledError:
             await ws.close(code=1008, reason="speech_transcription_disabled")
+            return
+        except ModelNotAllowedError:
+            await ws.close(code=1008, reason="model_not_allowed")
             return
         except SpeechTranscriptionNotSupportedError:
             await ws.close(code=1008, reason="speech_transcription_not_supported")

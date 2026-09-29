@@ -16,6 +16,11 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.domain.model_shelf import (
+    IMAGE_SHELF_KEY,
+    SPEECH_SHELF_KEY,
+    SPEECH_TRANSCRIPTION_SHELF_KEY,
+)
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import is_model_allowed
@@ -50,13 +55,16 @@ class ApiUseCase:
 
     async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
         payload = await self.gateway.models()
-        decision_ids = set(self._decision_model_ids(auth_context))
-        if not decision_ids:
+        hidden_ids = set(self._decision_model_ids(auth_context))
+        hidden_ids.update(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
+        hidden_ids.update(self._shelf_model_ids(auth_context, SPEECH_SHELF_KEY))
+        hidden_ids.update(self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY))
+        if not hidden_ids:
             return payload
         data = [
             item
             for item in payload.get("data") or []
-            if not (isinstance(item, dict) and item.get("id") in decision_ids)
+            if not (isinstance(item, dict) and item.get("id") in hidden_ids)
         ]
         return {**payload, "data": data}
 
@@ -160,7 +168,7 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        self._assert_image_generation_allowed(auth_context)
+        self._assert_image_generation_allowed(auth_context, body.get("model"))
         response = await self.gateway.images_create(body)
         self._log_images_request(
             body,
@@ -180,7 +188,7 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
-        self._assert_image_generation_allowed(auth_context)
+        self._assert_image_generation_allowed(auth_context, body.get("model"))
         tracker = _ImageSseStreamTracker()
         async with aclosing(self.gateway.images_create_stream(body)) as stream:
             async for chunk in stream:
@@ -202,8 +210,15 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        self._assert_image_generation_allowed(auth_context)
-        return await self.gateway.images_models()
+        if self._is_personal_api_key(auth_context):
+            return await self.gateway.images_models()
+        ids = self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY)
+        if not ids:
+            raise ImageGenerationDisabledError()
+        return {
+            "object": "list",
+            "data": [{"id": model_id, "object": "model"} for model_id in ids],
+        }
 
     async def audio_speech_stream(
         self,
@@ -226,21 +241,25 @@ class ApiUseCase:
             api_endpoint=AUDIO_SPEECH_PATH,
         )
 
-    def _assert_image_generation_allowed(self, auth_context: AuthContext | None) -> None:
-        if auth_context is None or auth_context.session_id is None:
-            return
-        if not hasattr(self.api_key_repo, "is_image_generation_enabled"):
-            return
-        if not self.api_key_repo.is_image_generation_enabled(auth_context.session_id):
-            raise ImageGenerationDisabledError()
+    def _assert_image_generation_allowed(
+        self,
+        auth_context: AuthContext | None,
+        model_id: Any,
+    ) -> None:
+        self._assert_classroom_shelf(
+            auth_context,
+            IMAGE_SHELF_KEY,
+            model_id,
+            ImageGenerationDisabledError,
+        )
 
-    def _assert_tts_allowed(self, auth_context: AuthContext | None) -> None:
-        if auth_context is None or auth_context.session_id is None:
-            return
-        if not hasattr(self.api_key_repo, "is_tts_enabled"):
-            return
-        if not self.api_key_repo.is_tts_enabled(auth_context.session_id):
-            raise TtsDisabledError()
+    def _assert_tts_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
+        self._assert_classroom_shelf(
+            auth_context,
+            SPEECH_SHELF_KEY,
+            model_id,
+            TtsDisabledError,
+        )
 
     def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
         if auth_context is None or auth_context.session_id is None:
@@ -265,7 +284,7 @@ class ApiUseCase:
         body: dict[str, Any],
         auth_context: AuthContext | None = None,
     ) -> None:
-        self._assert_tts_allowed(auth_context)
+        self._assert_tts_allowed(auth_context, body.get("model"))
         self._prepare_audio_speech_body(body)
 
     def _prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
@@ -323,16 +342,44 @@ class ApiUseCase:
         fields: dict[str, Any],
         auth_context: AuthContext | None = None,
     ) -> None:
-        self._assert_speech_transcription_allowed(auth_context)
+        self._assert_speech_transcription_allowed(auth_context, fields.get("model"))
         self._prepare_audio_transcriptions_fields(fields)
 
-    def _assert_speech_transcription_allowed(self, auth_context: AuthContext | None) -> None:
+    def _assert_speech_transcription_allowed(
+        self,
+        auth_context: AuthContext | None,
+        model_id: Any,
+    ) -> None:
+        self._assert_classroom_shelf(
+            auth_context,
+            SPEECH_TRANSCRIPTION_SHELF_KEY,
+            model_id,
+            SpeechTranscriptionDisabledError,
+        )
+
+    def _assert_classroom_shelf(
+        self,
+        auth_context: AuthContext | None,
+        shelf_key: str,
+        model_id: Any,
+        disabled_error: type[Exception],
+    ) -> None:
+        if self._is_personal_api_key(auth_context):
+            return
+        ids = self._shelf_model_ids(auth_context, shelf_key)
+        if not ids:
+            raise disabled_error()
+        if not isinstance(model_id, str) or model_id not in ids:
+            raise ModelNotAllowedError()
+
+    def _shelf_model_ids(self, auth_context: AuthContext | None, shelf_key: str) -> list[str]:
         if auth_context is None or auth_context.session_id is None:
-            return
-        if not hasattr(self.api_key_repo, "is_speech_transcription_enabled"):
-            return
-        if not self.api_key_repo.is_speech_transcription_enabled(auth_context.session_id):
-            raise SpeechTranscriptionDisabledError()
+            return []
+        getter = getattr(self.api_key_repo, "get_shelf_model_ids", None)
+        if not callable(getter):
+            return []
+        ids = getter(auth_context.session_id, shelf_key) or []
+        return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
     async def decisions_create(
         self,
@@ -376,7 +423,7 @@ class ApiUseCase:
         model_id: str,
         auth_context: AuthContext | None = None,
     ) -> RealtimeUpstreamTarget:
-        self._assert_speech_transcription_allowed(auth_context)
+        self._assert_speech_transcription_allowed(auth_context, model_id)
         resolve = getattr(self.gateway, "resolve_realtime", None)
         if not callable(resolve):
             raise SpeechTranscriptionNotSupportedError(

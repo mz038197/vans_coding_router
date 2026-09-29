@@ -347,8 +347,7 @@ test("session write capabilities resolve live context and preserve grouped parti
   await registered.get("update_session_capabilities").execute({
     class_id: 9,
     session_id: 31,
-    image_generation_enabled: false,
-    speech_transcription_enabled: true,
+    prompt_logging_enabled: false,
   });
   await registered.get("change_session_expiry").execute({
     expires_at: "2026-09-30T16:00:00Z",
@@ -360,8 +359,7 @@ test("session write capabilities resolve live context and preserve grouped parti
 
   assert.deepEqual(requests, [
     ["/teacher/classes/9/sessions/31", {
-      image_generation_enabled: false,
-      speech_transcription_enabled: true,
+      prompt_logging_enabled: false,
     }],
     ["/teacher/classes/7/sessions/21", { expires_at: "2026-09-30T16:00:00Z" }],
     ["/teacher/classes/7/sessions/21", { seat_limit: 75 }],

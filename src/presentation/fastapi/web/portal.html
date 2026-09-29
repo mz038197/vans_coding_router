@@ -355,6 +355,9 @@
           <select id="sessionDecisionShelf" class="modal-datetime-input" onchange="onSessionDecisionShelfChange()">
             <option value="text">文字</option>
             <option value="decisions">決策</option>
+            <option value="image">生圖</option>
+            <option value="speech">語音</option>
+            <option value="speech_transcription">語音轉寫</option>
           </select>
         </div>
         <div id="sessionChatModelsList" class="session-chat-models-list"></div>
@@ -906,23 +909,17 @@
     }
 
     function sessionCapabilitiesCell(classId, session, allowOwnerActions) {
-      const imageOn = sessionImageEnabled(session);
-      const ttsOn = sessionTtsEnabled(session);
-      const speechOn = sessionSpeechTranscriptionEnabled(session);
+      const imageOn = sessionHasShelf(session, 'imageShelf', true);
+      const ttsOn = sessionHasShelf(session, 'speechShelf', false);
+      const speechOn = sessionHasShelf(session, 'speechTranscriptionShelf', false);
       const promptOn = sessionPromptLoggingEnabled(session);
-      const decisionOn = sessionHasDecisionModel(session);
-      if (!allowOwnerActions) {
-        const bit = (name, on) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}">${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
-        return `<div class="session-capabilities session-capabilities-readonly">
-          ${bit('生圖', imageOn)}${bit('語音', ttsOn)}${bit('語音轉寫', speechOn)}${bit('決策', decisionOn)}${bit('Prompt', promptOn)}
-        </div>`;
-      }
-      return `<div class="session-capabilities">
-        ${capabilityToggleHtml('session-image-toggle', '', imageOn, `toggleSessionImageGen(${classId}, ${session.id}, this.checked, this)`, `生圖 ${imageOn ? '開' : '關'}`)}
-        ${capabilityToggleHtml('session-tts-toggle', '', ttsOn, `toggleSessionTts(${classId}, ${session.id}, this.checked, this)`, `語音 ${ttsOn ? '開' : '關'}`)}
-        ${capabilityToggleHtml('session-speech-transcription-toggle', '上傳音檔／即時語音轉寫', speechOn, `toggleSessionSpeechTranscription(${classId}, ${session.id}, this.checked, this)`, `語音轉寫 ${speechOn ? '開' : '關'}`)}
-        <span class="capability-chip ${decisionOn ? 'is-on' : 'is-off'}" title="決策模型">決策 ${decisionOn ? '開' : '關'}</span>
-        ${capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)}
+      const decisionOn = sessionHasShelf(session, 'decisionShelf', true);
+      const chip = (name, on, title) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
+      const prompt = allowOwnerActions
+        ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
+        : chip('Prompt', promptOn, '');
+      return `<div class="session-capabilities${allowOwnerActions ? '' : ' session-capabilities-readonly'}">
+        ${chip('生圖', imageOn, '')}${chip('語音', ttsOn, '')}${chip('語音轉寫', speechOn, '上傳音檔／即時語音轉寫')}${chip('決策', decisionOn, '決策模型')}${prompt}
       </div>`;
     }
 
@@ -2503,78 +2500,15 @@ snippets:
       }
     }
 
-    function sessionImageEnabled(session) {
-      const value = session.image_generation_enabled;
-      if (value === undefined || value === null) return true;
-      return value === true || value === 1 || value === '1';
-    }
-
-    async function toggleSessionImageGen(classId, sessionId, enabled, inputEl) {
-      const label = inputEl?.closest('.session-image-toggle')?.querySelector('span');
-      const previous = !enabled;
-      try {
-        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ image_generation_enabled: enabled }),
-        });
-        if (label) label.textContent = enabled ? '生圖 開' : '生圖 關';
-      } catch (err) {
-        if (inputEl) inputEl.checked = previous;
-        throw err;
-      }
-    }
-
-    function sessionHasDecisionModel(session) {
+    function sessionHasShelf(session, flag, requireOpenRouter) {
       for (const provider of session.session_chat_language_models || []) {
         for (const model of (provider && provider.models) || []) {
-          if (model && model.decisionShelf === true && typeof model.id === 'string' && model.id.startsWith('openrouter@')) {
-            return true;
-          }
+          if (!model || model[flag] !== true || typeof model.id !== 'string' || !model.id) continue;
+          if (requireOpenRouter && !model.id.startsWith('openrouter@')) continue;
+          return true;
         }
       }
       return false;
-    }
-
-    function sessionTtsEnabled(session) {
-      const value = session.tts_enabled;
-      if (value === undefined || value === null) return true;
-      return value === true || value === 1 || value === '1';
-    }
-
-    async function toggleSessionTts(classId, sessionId, enabled, inputEl) {
-      const label = inputEl?.closest('.session-tts-toggle')?.querySelector('span');
-      const previous = !enabled;
-      try {
-        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ tts_enabled: enabled }),
-        });
-        if (label) label.textContent = enabled ? '語音 開' : '語音 關';
-      } catch (err) {
-        if (inputEl) inputEl.checked = previous;
-        throw err;
-      }
-    }
-
-    function sessionSpeechTranscriptionEnabled(session) {
-      const value = session.speech_transcription_enabled;
-      if (value === undefined || value === null) return false;
-      return value === true || value === 1 || value === '1';
-    }
-
-    async function toggleSessionSpeechTranscription(classId, sessionId, enabled, inputEl) {
-      const label = inputEl?.closest('.session-speech-transcription-toggle')?.querySelector('span');
-      const previous = !enabled;
-      try {
-        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ speech_transcription_enabled: enabled }),
-        });
-        if (label) label.textContent = enabled ? '語音轉寫 開' : '語音轉寫 關';
-      } catch (err) {
-        if (inputEl) inputEl.checked = previous;
-        throw err;
-      }
     }
 
     function sessionPromptLoggingEnabled(session) {
@@ -2800,7 +2734,8 @@ snippets:
 
     let sessionChatModelsContext = null;
     let sessionChatModelsDraft = { models: [], removed: {} };
-    let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false };
+    let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false, shelf: 'text' };
+    let sessionChatProviderGroups = { chat: [], speech: [], transcription: [] };
     let sessionChatModelsDropzoneBound = false;
     let sessionChatModelsLocked = false;
     let routerModelTemplate = null;
@@ -2875,7 +2810,7 @@ snippets:
       }
       return modelsFromDocument(parsed).map((model) => {
         const next = stencilDraftModel(model);
-        delete next.decisionShelf;
+        clearShelfFlags(next);
         return next;
       });
     }
@@ -2984,16 +2919,23 @@ snippets:
       downloadTextFile(name, `${JSON.stringify(documentFromDraft(sessionChatModelsDraft), null, 2)}\n`);
     }
 
+    function allTeacherProviders() {
+      return [...new Set([
+        ...(sessionChatProviderGroups.chat || []),
+        ...(sessionChatProviderGroups.speech || []),
+        ...(sessionChatProviderGroups.transcription || []),
+      ])];
+    }
+
     function populateSessionChatModelsProviders() {
       const select = document.getElementById('sessionChatModelsProvider');
       if (!select) return;
-      const providers = sessionChatModelsCatalog.providers || [];
+      const providers = allTeacherProviders();
       const previous = select.value;
-      const options = providers.length ? providers : [];
-      select.innerHTML = options.map((name) => (
+      select.innerHTML = providers.map((name) => (
         `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
       )).join('');
-      if (previous && options.includes(previous)) select.value = previous;
+      if (previous && providers.includes(previous)) select.value = previous;
     }
 
     function catalogModelById(modelId) {
@@ -3010,7 +2952,9 @@ snippets:
       const catalogById = new Map((sessionChatModelsCatalog.models || []).map((item) => [item.id, item]));
       const rows = [];
       const seen = new Set();
+      const currentShelf = currentDecisionShelf();
       for (const model of sessionChatModelsDraft.models) {
+        if (modelShelf(model) !== currentShelf) continue;
         const catalog = catalogById.get(model.id);
         rows.push({
           id: model.id,
@@ -3022,7 +2966,7 @@ snippets:
         seen.add(model.id);
       }
       for (const model of Object.values(sessionChatModelsDraft.removed || {})) {
-        if (!model || !model.id || seen.has(model.id)) continue;
+        if (!model || !model.id || seen.has(model.id) || modelShelf(model) !== currentShelf) continue;
         const catalog = catalogById.get(model.id);
         rows.push({
           id: model.id,
@@ -3047,7 +2991,6 @@ snippets:
       }
       return rows.filter((row) => {
         if (provider && row.provider !== provider) return false;
-        if (provider === 'openrouter' && !rowMatchesOpenRouterShelf(row)) return false;
         if (!q) return true;
         return `${row.id} ${row.name}`.toLowerCase().includes(q);
       });
@@ -3057,25 +3000,64 @@ snippets:
       return document.getElementById('sessionDecisionShelf')?.value || 'text';
     }
 
-    function rowMatchesOpenRouterShelf(row) {
-      const remembered = draftModelById(row.id) || sessionChatModelsDraft.removed[row.id];
-      const isDecision = Boolean(remembered && remembered.decisionShelf === true);
-      const onDecisions = currentDecisionShelf() === 'decisions';
-      if (row.checked) return onDecisions ? isDecision : !isDecision;
-      if (onDecisions) return isDecision || !row.missing;
-      return !isDecision || !row.missing;
+    function clearShelfFlags(model) {
+      delete model.decisionShelf;
+      delete model.imageShelf;
+      delete model.speechShelf;
+      delete model.speechTranscriptionShelf;
+    }
+
+    function applyShelf(model, shelf) {
+      clearShelfFlags(model);
+      if (shelf === 'decisions') model.decisionShelf = true;
+      else if (shelf === 'image') model.imageShelf = true;
+      else if (shelf === 'speech') model.speechShelf = true;
+      else if (shelf === 'speech_transcription') model.speechTranscriptionShelf = true;
+    }
+
+    function modelShelf(model) {
+      if (!model) return 'text';
+      if (model.decisionShelf === true) return 'decisions';
+      if (model.imageShelf === true) return 'image';
+      if (model.speechShelf === true) return 'speech';
+      if (model.speechTranscriptionShelf === true) return 'speech_transcription';
+      return 'text';
+    }
+
+    function shelfChoicesForProvider(provider) {
+      const speech = sessionChatProviderGroups.speech || [];
+      const transcription = sessionChatProviderGroups.transcription || [];
+      if (provider === 'openrouter') return ['text', 'decisions', 'image'];
+      const choices = [];
+      if (speech.includes(provider)) choices.push('speech');
+      if (transcription.includes(provider)) choices.push('speech_transcription');
+      return choices.length ? choices : ['text'];
     }
 
     function renderSessionDecisionShelf() {
       const row = document.getElementById('sessionDecisionShelfRow');
-      if (!row) return;
+      const select = document.getElementById('sessionDecisionShelf');
+      if (!row || !select) return;
       const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
-      row.classList.toggle('hidden', provider !== 'openrouter');
+      const choices = shelfChoicesForProvider(provider);
+      const labels = {
+        text: '文字',
+        decisions: '決策',
+        image: '生圖',
+        speech: '語音',
+        speech_transcription: '語音轉寫',
+      };
+      const previous = select.value;
+      select.innerHTML = choices.map((value) => (
+        `<option value="${value}">${labels[value]}</option>`
+      )).join('');
+      select.value = choices.includes(previous) ? previous : choices[0];
+      row.classList.toggle('hidden', choices.length === 1 && choices[0] === 'text');
     }
 
     async function onSessionChatModelsProviderChange() {
       renderSessionDecisionShelf();
-      if ((document.getElementById('sessionChatModelsProvider')?.value || '') === 'openrouter') {
+      if (sessionChatModelsCatalog.shelf !== currentDecisionShelf()) {
         await loadSessionChatModelsCatalog(currentDecisionShelf());
       }
       renderSessionChatModelsList();
@@ -3129,18 +3111,16 @@ snippets:
     function onSessionChatModelCheck(input) {
       const modelId = input.value;
       if (input.checked) {
+        const existing = draftModelById(modelId);
         const restored = sessionChatModelsDraft.removed[modelId];
         const catalog = catalogModelById(modelId);
-        const next = restored
-          ? { ...restored }
-          : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
-        if ((document.getElementById('sessionChatModelsProvider')?.value || '') === 'openrouter'
-            && currentDecisionShelf() === 'decisions') {
-          next.decisionShelf = true;
-        } else {
-          delete next.decisionShelf;
-        }
-        sessionChatModelsDraft.models.push(next);
+        const next = existing
+          ? existing
+          : restored
+            ? { ...restored }
+            : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
+        applyShelf(next, currentDecisionShelf());
+        if (!existing) sessionChatModelsDraft.models.push(next);
         delete sessionChatModelsDraft.removed[modelId];
       } else {
         const current = draftModelById(modelId);
@@ -3187,7 +3167,7 @@ snippets:
       const current = sessionChatModelsDraft.models || [];
       if (saved.length !== current.length) return true;
       const mark = (models) => models
-        .map((model) => `${model.id}:${model.decisionShelf === true ? '1' : '0'}`)
+        .map((model) => `${model.id}:${modelShelf(model)}`)
         .sort();
       return JSON.stringify(mark(saved)) !== JSON.stringify(mark(current));
     }
@@ -3201,13 +3181,22 @@ snippets:
     }
 
     async function loadSessionChatModelsCatalog(outputModalities) {
-      const shelf = outputModalities === 'decisions' ? 'decisions' : 'text';
+      const known = ['text', 'decisions', 'image', 'speech', 'speech_transcription'];
+      const shelf = known.includes(outputModalities) ? outputModalities : 'text';
       try {
         const catalog = await api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`);
+        if (Array.isArray(catalog.speech_providers)) sessionChatProviderGroups.speech = catalog.speech_providers;
+        if (Array.isArray(catalog.transcription_providers)) {
+          sessionChatProviderGroups.transcription = catalog.transcription_providers;
+        }
+        if (shelf === 'text' || shelf === 'decisions' || shelf === 'image') {
+          sessionChatProviderGroups.chat = Array.isArray(catalog.providers) ? catalog.providers : [];
+        }
         sessionChatModelsCatalog = {
           providers: Array.isArray(catalog.providers) ? catalog.providers : [],
           models: Array.isArray(catalog.models) ? catalog.models : [],
           unavailable: Boolean(catalog.unavailable),
+          shelf,
         };
         setSessionChatModelsMsg(
           'sessionChatModelsCatalogMsg',
@@ -3217,7 +3206,7 @@ snippets:
           sessionChatModelsCatalog.unavailable,
         );
       } catch (err) {
-        sessionChatModelsCatalog = { providers: [], models: [], unavailable: true };
+        sessionChatModelsCatalog = { providers: [], models: [], unavailable: true, shelf };
         setSessionChatModelsMsg(
           'sessionChatModelsCatalogMsg',
           '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。',

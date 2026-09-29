@@ -10,7 +10,13 @@ def test_portal_moves_decision_model_into_classroom_models():
     assert 'id="sessionDecisionModel"' not in html
     assert 'id="sessionDecisionShelf"' in html
     assert "output_modalities=" in html
-    assert "delete next.decisionShelf" in html
+    assert "option value=\"image\">生圖" in html
+    assert "imageShelf" in html
+    assert "speechShelf" in html
+    assert "speechTranscriptionShelf" in html
+    assert "session-image-toggle" not in html
+    assert "session-tts-toggle" not in html
+    assert "clearShelfFlags" in html
     modal_at = html.index('id="editSessionChatModelsModal"')
     shelf_at = html.index('id="sessionDecisionShelf"')
     assert shelf_at > modal_at

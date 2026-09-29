@@ -325,6 +325,8 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
             "models": [
                 {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
                 {"id": "openrouter@~typesafe/jev-latest", "name": "Jev Latest", "decisionShelf": True},
+                {"id": "openrouter@black-forest-labs/flux.2-pro", "name": "Flux", "imageShelf": True},
+                {"id": "openai@gpt-4o-mini-tts", "name": "TTS", "speechShelf": True},
                 {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
             ],
         }
@@ -357,6 +359,8 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     listed = [item["id"] for item in models.json()["data"]]
     assert "openrouter@typesafe/jev-1.13" not in listed
     assert "openrouter@~typesafe/jev-latest" not in listed
+    assert "openrouter@black-forest-labs/flux.2-pro" not in listed
+    assert "openai@gpt-4o-mini-tts" not in listed
 
     blocked = client.post(
         "/v1/chat/completions",
@@ -437,6 +441,69 @@ def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_pa
     text_ids = [item["id"] for item in text.json()["models"] if item["provider"] == "openrouter"]
     assert text_ids == ["openrouter@minimax/minimax-m3"]
     assert openrouter.last_output_modalities == "text"
+
+
+def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp_path):
+    gateway = _catalog_gateway()
+    gateway.gateways["openrouter"].images_models_response = {
+        "object": "list",
+        "data": [{"id": "black-forest-labs/flux.2-pro", "name": "Flux"}],
+    }
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
+    teacher, _, _ = _owner_session(repo)
+    cookies = _portal_cookie(repo, teacher["id"])
+
+    image = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=image",
+        cookies=cookies,
+    )
+    assert image.status_code == 200
+    assert image.json()["providers"] == ["openrouter"]
+    assert [item["id"] for item in image.json()["models"]] == [
+        "openrouter@black-forest-labs/flux.2-pro"
+    ]
+    assert image.json()["speech_providers"] == ["openai"]
+
+    speech = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=speech",
+        cookies=cookies,
+    )
+    assert speech.json()["providers"] == ["openai"]
+    assert [item["id"] for item in speech.json()["models"]] == ["openai@gpt-4o-mini-tts"]
+
+    transcription = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=speech_transcription",
+        cookies=cookies,
+    )
+    assert transcription.json()["providers"] == ["openai"]
+    assert [item["id"] for item in transcription.json()["models"]] == ["openai@gpt-4o-mini-tts"]
+
+
+def test_one_model_id_cannot_sit_on_two_shelves(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher, klass, session = _owner_session(repo)
+    rejected = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+        cookies=_portal_cookie(repo, teacher["id"]),
+        json={
+            "session_chat_language_models": [
+                {
+                    "name": "VCRouter",
+                    "vendor": "customendpoint",
+                    "models": [
+                        {
+                            "id": "openrouter@black-forest-labs/flux.2-pro",
+                            "name": "Flux",
+                            "decisionShelf": True,
+                            "imageShelf": True,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "一個 Model ID 只能屬於一個架"
 
 
 def test_upstream_model_catalog_includes_openrouter_jev_ids(tmp_path):

@@ -256,31 +256,18 @@
     }, {
       name: "update_session_capabilities",
       title: "Update Session Capabilities",
-      description: "Update one or more capabilities for an explicit Class Session or the current Portal Class Session.",
+      description: "Update Prompt logging for an explicit Class Session or the current Portal Class Session. Speech, Image Generation, and Speech Transcription follow the checked model shelves, not this tool.",
       inputSchema: {
         type: "object",
         properties: {
           ...sessionTargetProperties,
-          image_generation_enabled: { type: "boolean" },
-          tts_enabled: { type: "boolean" },
-          speech_transcription_enabled: { type: "boolean" },
           prompt_logging_enabled: { type: "boolean" },
         },
-        anyOf: [
-          { required: ["image_generation_enabled"] },
-          { required: ["tts_enabled"] },
-          { required: ["speech_transcription_enabled"] },
-          { required: ["prompt_logging_enabled"] },
-        ],
+        required: ["prompt_logging_enabled"],
         additionalProperties: false,
       },
       async execute(input = {}) {
-        const changes = selectFields(input, [
-          "image_generation_enabled",
-          "tts_enabled",
-          "speech_transcription_enabled",
-          "prompt_logging_enabled",
-        ]);
+        const changes = selectFields(input, ["prompt_logging_enabled"]);
         if (Object.keys(changes).length === 0) {
           return structuredError("validation", null, "at least one capability is required");
         }

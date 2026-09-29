@@ -4,7 +4,7 @@ import copy
 import json
 from typing import Any
 
-from src.domain.decision_model import is_decision_shelf_model
+from src.domain.model_shelf import enforce_single_shelf, is_non_text_shelf_model
 
 MODEL_ALLOWLIST_UNCHANGED = object()
 SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
@@ -114,7 +114,7 @@ def filter_chat_language_models(
             model
             for model in models
             if isinstance(model, dict)
-            and (model.get("id") in allowed or is_decision_shelf_model(model))
+            and (model.get("id") in allowed or is_non_text_shelf_model(model))
         ]
     return result
 
@@ -168,6 +168,7 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
             restenciled["id"] = model_id
             restenciled["url"] = VCROUTER_STENCIL["url"]
             restenciled["requestHeaders"] = copy.deepcopy(VCROUTER_STENCIL["requestHeaders"])
+            enforce_single_shelf(restenciled)
             collected.append(restenciled)
     return [
         {

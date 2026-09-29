@@ -170,18 +170,11 @@ test("session-settings reload keeps 我的課程 when it is current", async () =
   assert.equal(byId.courseSelect.value, "7");
 });
 
-test("capability toggles do not start personal API Key", () => {
-  for (const name of [
-    "toggleSessionImageGen",
-    "toggleSessionTts",
-    "toggleSessionSpeechTranscription",
-    "toggleSessionPromptLogging",
-  ]) {
-    const source = extractNamedFunction(portalHtml, name);
-    assert.doesNotMatch(source, /showTab\s*\(/);
-    assert.doesNotMatch(source, /\brefresh\s*\(/);
-    assert.doesNotMatch(source, /\breloadSessionViews\s*\(/);
-  }
+test("prompt logging toggle does not start personal API Key", () => {
+  const source = extractNamedFunction(portalHtml, "toggleSessionPromptLogging");
+  assert.doesNotMatch(source, /showTab\s*\(/);
+  assert.doesNotMatch(source, /\brefresh\s*\(/);
+  assert.doesNotMatch(source, /\breloadSessionViews\s*\(/);
 });
 
 test("我的課程 mutations do not hard-switch to personal API Key", () => {

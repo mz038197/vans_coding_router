@@ -167,7 +167,23 @@ def test_session_speech_transcription_toggle_blocks_realtime(tmp_path):
             pass
     assert blocked.value.code == 1008
 
-    repo.update_class_session(klass["id"], session["id"], speech_transcription_enabled=True)
+    repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_chat_language_models=[
+            {
+                "name": "VCRouter",
+                "vendor": "customendpoint",
+                "models": [
+                    {
+                        "id": "openai@gpt-live-transcribe",
+                        "name": "Live",
+                        "speechTranscriptionShelf": True,
+                    }
+                ],
+            }
+        ],
+    )
     with client.websocket_connect(
         "/v1/realtime?model=openai@gpt-live-transcribe",
         headers={"Authorization": f"Bearer {student_key}"},
