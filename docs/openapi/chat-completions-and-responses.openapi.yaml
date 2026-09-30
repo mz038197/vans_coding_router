@@ -1,0 +1,877 @@
+openapi: 3.1.0
+info:
+  title: Vans Coding Router — Chat Completions and Responses
+  version: "1.0.0"
+  description: |
+    OpenAI-compatible subset for third-party clients.
+
+    Authenticate with `Authorization: Bearer <api_key>` or `X-API-Key`.
+    `model` is a Model ID of the form `provider@upstream_model`
+    (for example `ollama_cloud@kimi-k3:cloud`).
+
+    Successful JSON bodies follow the OpenAI Chat Completions and Responses shapes.
+    The router normalizes two things before returning them:
+
+    - Chat `message.content` is a string when the assistant message has no `tool_calls`.
+      A null content with `tool_calls` is returned as an empty string.
+    - Responses reasoning is projected onto OpenAI reasoning summaries.
+      If an upstream reasoning item has raw `reasoning_text` and an empty `summary`,
+      the client receives `summary` entries of `{ "type": "summary_text", "text": "..." }`.
+      Matching stream events are rewritten from `response.reasoning_text.*` to
+      `response.reasoning_summary_text.*`.
+
+    Non-streaming failures use the OpenAI error object and an HTTP error status.
+    Streaming failures stay HTTP 200 and put the readable message in the stream
+    (chat: assistant `delta.content`; responses: `output_text` on a completed response).
+    They are not a bare `{"error": ...}` SSE event.
+
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: router.example.com
+
+security:
+  - BearerAuth: []
+  - ApiKeyHeader: []
+
+tags:
+  - name: Chat
+    description: OpenAI Chat Completions.
+  - name: Responses
+    description: OpenAI Responses. Stateful `previous_response_id` is not supported.
+
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [Chat]
+      operationId: createChatCompletion
+      summary: Create a chat completion
+      description: |
+        `stream: false` (default) returns `application/json` with `object: chat.completion`.
+        `stream: true` returns `text/event-stream` of `chat.completion.chunk` events,
+        ending with `data: [DONE]`.
+
+        If both token limits are set, `max_completion_tokens` is the one forwarded
+        (as upstream `max_tokens`). Unknown JSON fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+            examples:
+              text:
+                summary: Non-streaming text
+                value:
+                  model: ollama_cloud@kimi-k3:cloud
+                  messages:
+                    - role: user
+                      content: hello
+                  stream: false
+              multimodal:
+                summary: Text plus image
+                value:
+                  model: openrouter@openai/gpt-4o
+                  messages:
+                    - role: user
+                      content:
+                        - type: text
+                          text: What is in this image?
+                        - type: image_url
+                          image_url:
+                            url: data:image/jpeg;base64,/9j/4AAQSkZJRg==
+              tools:
+                summary: Tool call round trip
+                value:
+                  model: ollama_cloud@kimi-k3:cloud
+                  messages:
+                    - role: user
+                      content: What is the weather?
+                    - role: assistant
+                      content: null
+                      tool_calls:
+                        - id: call_1
+                          type: function
+                          function:
+                            name: get_weather
+                            arguments: '{"city":"Taipei"}'
+                    - role: tool
+                      tool_call_id: call_1
+                      content: '{"temp_c":28}'
+                  tools:
+                    - type: function
+                      function:
+                        name: get_weather
+                        parameters:
+                          type: object
+                          properties:
+                            city:
+                              type: string
+      responses:
+        "200":
+          description: |
+            Completion, or a streaming response that may contain a readable upstream
+            refusal inside assistant text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletion"
+              examples:
+                text:
+                  summary: Assistant text
+                  value:
+                    id: chatcmpl-fake
+                    object: chat.completion
+                    created: 1710000000
+                    model: ollama_cloud@kimi-k3:cloud
+                    choices:
+                      - index: 0
+                        message:
+                          role: assistant
+                          content: hello
+                        finish_reason: stop
+                    usage:
+                      prompt_tokens: 8
+                      completion_tokens: 2
+                      total_tokens: 10
+                toolCalls:
+                  summary: Assistant tool calls
+                  value:
+                    id: chatcmpl-fake
+                    object: chat.completion
+                    created: 1710000000
+                    model: ollama_cloud@kimi-k3:cloud
+                    choices:
+                      - index: 0
+                        message:
+                          role: assistant
+                          content: ""
+                          tool_calls:
+                            - id: call_1
+                              type: function
+                              function:
+                                name: get_weather
+                                arguments: '{"city":"Taipei"}'
+                        finish_reason: tool_calls
+                    usage:
+                      prompt_tokens: 20
+                      completion_tokens: 12
+                      total_tokens: 32
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-sent events. Each event is `data: {json}\n\n`.
+                  The last event is `data: [DONE]\n\n`.
+              examples:
+                stream:
+                  summary: Token stream
+                  value: |
+                    data: {"id":"chatcmpl-fake","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+                    data: {"id":"chatcmpl-fake","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}
+
+                    data: {"id":"chatcmpl-fake","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}
+
+                    data: [DONE]
+                streamRefusal:
+                  summary: Upstream refusal still returned as HTTP 200 chunks
+                  value: |
+                    data: {"id":"chatcmpl-router-error","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+                    data: {"id":"chatcmpl-router-error","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{"content":"extra usage balance is empty"},"finish_reason":null}]}
+
+                    data: {"id":"chatcmpl-router-error","object":"chat.completion.chunk","created":1710000000,"model":"ollama_cloud@kimi-k3:cloud","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+        "400":
+          description: Invalid Model ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: Invalid model id
+                  type: invalid_request_error
+                  param: model
+                  code: invalid_model_id
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: Upstream entitlement refusal (for example Extra Usage exhausted). Message is the provider text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: this model uses extra usage only and your extra usage balance is empty
+                  type: server_error
+                  param: null
+                  code: null
+        "403":
+          description: Model ID is not allowed for this classroom key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: 此課堂未開放此模型
+                  type: invalid_request_error
+                  param: model
+                  code: model_not_allowed
+        "422":
+          description: Request body failed schema validation. This status uses FastAPI `detail`, not the OpenAI error object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+              example:
+                detail:
+                  - type: value_error
+                    loc: [body, messages, 0, content]
+                    msg: Value error, 訊息內容不能為空
+                    input: ""
+        "502":
+          description: Upstream provider error. Upstream HTTP 401/403 are also returned as 502.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: upstream failed
+                  type: server_error
+                  param: null
+                  code: null
+        "503":
+          description: Upstream busy or service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              examples:
+                busy:
+                  value:
+                    error:
+                      message: The model provider is busy. Please wait a moment and try again.
+                      type: server_error
+                      param: null
+                      code: upstream_busy
+                unavailable:
+                  value:
+                    error:
+                      message: service unavailable
+                      type: server_error
+                      param: null
+                      code: SERVICE_UNAVAILABLE
+
+  /v1/responses:
+    post:
+      tags: [Responses]
+      operationId: createResponse
+      summary: Create a response
+      description: |
+        Body is an OpenAI Responses request. The router does not keep response state:
+        `previous_response_id` is rejected with HTTP 400.
+
+        `stream: false` (or omitted) returns `application/json` with `object: response`.
+        `stream: true` returns `text/event-stream`. Events include an `event:` line
+        and a `data:` JSON object whose `type` matches the event name.
+
+        Reasoning the client should read is `output[].summary` (non-stream) and
+        `response.reasoning_summary_text.*` / `response.reasoning_summary_part.*` (stream).
+        Assistant text is `output[].content[].text` where `type` is `output_text`,
+        and `response.output_text.delta` while streaming.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponsesRequest"
+            examples:
+              text:
+                summary: Non-streaming text
+                value:
+                  model: ollama_cloud@kimi-k3:cloud
+                  input: hello
+                  reasoning:
+                    effort: low
+              messages:
+                summary: Input as a message list
+                value:
+                  model: ollama_cloud@kimi-k3:cloud
+                  input:
+                    - role: user
+                      content: hello
+                  stream: false
+      responses:
+        "200":
+          description: |
+            Completed response, or a streaming response that may contain a readable
+            upstream refusal as assistant `output_text`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+              example:
+                id: resp_fake
+                object: response
+                created_at: 1710000000
+                model: ollama_cloud@kimi-k3:cloud
+                status: completed
+                error: null
+                output:
+                  - type: reasoning
+                    summary:
+                      - type: summary_text
+                        text: thinking
+                  - type: message
+                    role: assistant
+                    status: completed
+                    content:
+                      - type: output_text
+                        text: hello
+                usage:
+                  input_tokens: 8
+                  output_tokens: 2
+                  total_tokens: 10
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-sent events of the form `event: {type}\ndata: {json}\n\n`.
+                  A normal stream includes `response.created` and ends with `response.completed`.
+                  There is no `data: [DONE]` terminator on this path.
+              examples:
+                stream:
+                  summary: Text plus reasoning summary
+                  value: |
+                    event: response.created
+                    data: {"type":"response.created","response":{"id":"resp_fake","object":"response","status":"in_progress","output":[]}}
+
+                    event: response.reasoning_summary_text.delta
+                    data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}
+
+                    event: response.output_text.delta
+                    data: {"type":"response.output_text.delta","delta":"hello"}
+
+                    event: response.completed
+                    data: {"type":"response.completed","response":{"id":"resp_fake","object":"response","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}}
+                streamRefusal:
+                  summary: Upstream refusal still returned as HTTP 200 completed text
+                  value: |
+                    event: response.created
+                    data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_router_error","object":"response","status":"in_progress","output":[],"error":null}}
+
+                    event: response.output_text.delta
+                    data: {"type":"response.output_text.delta","sequence_number":3,"delta":"extra usage balance is empty, add extra usage"}
+
+                    event: response.completed
+                    data: {"type":"response.completed","sequence_number":7,"response":{"id":"resp_router_error","object":"response","status":"completed","output":[{"id":"msg_router_error","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"extra usage balance is empty, add extra usage"}]}]}}
+        "400":
+          description: Stateful continuation is not supported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: Stateful responses are not supported. Omit previous_response_id.
+                  type: invalid_request_error
+                  param: previous_response_id
+                  code: previous_response_not_found
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: Upstream entitlement refusal. Same error object as chat completions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+        "403":
+          description: Model ID is not allowed for this classroom key, including a Decision Model ID sent to Responses.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: 此課堂未開放此模型
+                  type: invalid_request_error
+                  param: model
+                  code: model_not_allowed
+        "502":
+          description: Upstream provider error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+        "503":
+          description: Upstream busy or service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Classroom or personal API key (`vcr_sk_...`).
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired, or wrong-type API key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OpenAIError"
+          examples:
+            invalid:
+              value:
+                error:
+                  message: 無效的 API 金鑰
+                  type: invalid_request_error
+                  param: null
+                  code: invalid_api_key
+            expired:
+              value:
+                error:
+                  message: API 金鑰已過期，請至 Portal 重新取得邀請碼
+                  type: invalid_request_error
+                  param: null
+                  code: api_key_expired
+            wrongType:
+              value:
+                error:
+                  message: 請使用 Vans Coding Router 的 vcr_sk_ API 金鑰。
+                  type: invalid_request_error
+                  param: null
+                  code: wrong_credential_type
+
+  schemas:
+    ChatCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          description: Model ID, `provider@upstream_model`.
+          examples: [ollama_cloud@kimi-k3:cloud]
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        stream:
+          type: boolean
+          default: false
+        temperature:
+          type: number
+          default: 0.7
+        max_tokens:
+          type: integer
+          description: Output token limit. Ignored when `max_completion_tokens` is also set.
+        max_completion_tokens:
+          type: integer
+          description: Preferred output token limit. Forwarded upstream as `max_tokens`.
+        user:
+          type: string
+        stop:
+          description: Stop sequence or list of stop sequences.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tool"
+        tool_choice:
+          description: "`none`, `auto`, `required`, or a named function choice."
+
+    ChatMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          description: |
+            Required and non-empty for `system` and `user`.
+            `assistant` may omit it when `tool_calls` is present.
+            `tool` may be an empty string. String or content-part array.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/ContentPart"
+            - type: "null"
+        images:
+          type: array
+          description: Alternate image payload accepted from older clients. Base64 or URL strings.
+          items:
+            type: string
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCall"
+        tool_call_id:
+          type: string
+          description: Required when `role` is `tool`.
+        name:
+          type: string
+        tool_name:
+          type: string
+          description: Older-client alias for the tool result function name. Forwarded as `name`.
+
+    ContentPart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: "`text` or `image_url`."
+        text:
+          type: string
+        image_url:
+          type: object
+          additionalProperties:
+            type: string
+          properties:
+            url:
+              type: string
+
+    Tool:
+      type: object
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+          enum: [function]
+        function:
+          type: object
+          additionalProperties: true
+          properties:
+            name:
+              type: string
+            description:
+              type: string
+            parameters:
+              type: object
+              additionalProperties: true
+
+    ToolCall:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        function:
+          type: object
+          additionalProperties: true
+          properties:
+            name:
+              type: string
+            arguments:
+              type: string
+
+    ChatCompletion:
+      type: object
+      required: [object, choices]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: chat.completion
+        created:
+          type: integer
+          description: Unix timestamp in seconds.
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatChoice"
+        usage:
+          $ref: "#/components/schemas/CompletionUsage"
+
+    ChatChoice:
+      type: object
+      required: [index, message]
+      properties:
+        index:
+          type: integer
+        message:
+          $ref: "#/components/schemas/AssistantMessage"
+        finish_reason:
+          type: [string, "null"]
+          description: Typical values are `stop` and `tool_calls`.
+
+    AssistantMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          const: assistant
+        content:
+          type: string
+          description: |
+            Always a string when `tool_calls` is absent, even if upstream sent content parts.
+            Empty string when upstream content was null and `tool_calls` is present.
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCall"
+
+    CompletionUsage:
+      type: object
+      additionalProperties: true
+      properties:
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+
+    ChatCompletionChunk:
+      type: object
+      description: One SSE `data:` JSON object before the `[DONE]` sentinel.
+      required: [object, choices]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: chat.completion.chunk
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              delta:
+                type: object
+                additionalProperties: true
+                properties:
+                  role:
+                    type: string
+                  content:
+                    type: string
+                  tool_calls:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ToolCall"
+              finish_reason:
+                type: [string, "null"]
+        usage:
+          $ref: "#/components/schemas/CompletionUsage"
+
+    ResponsesRequest:
+      type: object
+      additionalProperties: true
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: Model ID, `provider@upstream_model`.
+        input:
+          description: A string, or a list of input messages / content parts.
+        instructions:
+          type: string
+        stream:
+          type: boolean
+          default: false
+        temperature:
+          type: number
+        max_output_tokens:
+          type: integer
+        reasoning:
+          type: object
+          description: |
+            `effort` must be one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+            An unsupported effort, or a model that cannot think, is omitted before the upstream call.
+          properties:
+            effort:
+              type: string
+              enum: [none, minimal, low, medium, high, xhigh]
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tool_choice:
+          description: OpenAI Responses tool choice.
+        previous_response_id:
+          type: string
+          description: Not supported. Any non-empty value returns HTTP 400.
+
+    Response:
+      type: object
+      required: [object]
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: response
+        created_at:
+          type: integer
+        model:
+          type: string
+          description: Model string attached by the upstream response. It is not itself a Model ID permission.
+        status:
+          type: string
+          description: Typical completed value is `completed`.
+        error:
+          type: ["object", "null"]
+        output:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResponseOutputItem"
+        usage:
+          $ref: "#/components/schemas/ResponseUsage"
+
+    ResponseOutputItem:
+      type: object
+      additionalProperties: true
+      required: [type]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          description: "`reasoning` or `message`."
+        status:
+          type: string
+        role:
+          type: string
+          description: Present on `message` items. Value is `assistant`.
+        summary:
+          type: array
+          description: Present on `reasoning` items. This is the reasoning text the client should read.
+          items:
+            type: object
+            required: [type, text]
+            properties:
+              type:
+                type: string
+                const: summary_text
+              text:
+                type: string
+        content:
+          type: array
+          description: Present on `message` items.
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                const: output_text
+              text:
+                type: string
+
+    ResponseUsage:
+      type: object
+      additionalProperties: true
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+
+    ResponseStreamEvent:
+      type: object
+      description: |
+        One SSE `data:` object. The `event:` line repeats `type`.
+        Common types: `response.created`, `response.output_item.added`,
+        `response.reasoning_summary_text.delta`, `response.reasoning_summary_text.done`,
+        `response.reasoning_summary_part.added`, `response.reasoning_summary_part.done`,
+        `response.content_part.added`, `response.output_text.delta`,
+        `response.output_text.done`, `response.content_part.done`,
+        `response.output_item.done`, `response.completed`.
+      required: [type]
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+        sequence_number:
+          type: integer
+        delta:
+          type: string
+        text:
+          type: string
+        output_index:
+          type: integer
+        content_index:
+          type: integer
+        item_id:
+          type: string
+        response:
+          $ref: "#/components/schemas/Response"
+        item:
+          $ref: "#/components/schemas/ResponseOutputItem"
+
+    OpenAIError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type]
+          properties:
+            message:
+              type: string
+            type:
+              type: string
+              description: "`invalid_request_error` or `server_error`."
+            param:
+              type: [string, "null"]
+            code:
+              type: [string, "null"]
+
+    ValidationError:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              loc:
+                type: array
+                items:
+                  oneOf:
+                    - type: string
+                    - type: integer
+              msg:
+                type: string
+              input: {}
