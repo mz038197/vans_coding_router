@@ -26,6 +26,10 @@ def enforce_single_shelf(model: dict[str, Any]) -> None:
         not isinstance(model_id, str) or not model_id.startswith(OPENROUTER_MODEL_PREFIX)
     ):
         raise ValueError("生圖模型必須是 OpenRouter Model ID")
+    if "decisionShelf" in active and (
+        not isinstance(model_id, str) or not model_id.startswith(OPENROUTER_MODEL_PREFIX)
+    ):
+        raise ValueError("決策模型必須是 OpenRouter Model ID")
     for key in SHELF_KEYS:
         if model.get(key) is not True:
             model.pop(key, None)

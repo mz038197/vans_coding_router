@@ -71,9 +71,6 @@ providers:
     type: openai_compatible
     base_url: "https://api.openai.com/v1"
     api_key_env: "OPENAI_API_KEY"
-    capabilities:
-      - audio_speech
-      - audio_transcription
 ```
 
 Examples:
@@ -104,8 +101,8 @@ Supported endpoints:
 - `POST /v1/responses`
 - `POST /v1/images` (OpenRouter image generation; model ID e.g. `openrouter@black-forest-labs/flux.2-pro`)
 - `GET /v1/images/models`
-- `POST /v1/audio/speech` (TTS via providers with `audio_speech` capability; model ID e.g. `openai@gpt-4o-mini-tts`)
-- `POST /v1/audio/transcriptions` (file STT via providers with `audio_transcription` capability; model ID e.g. `openai@gpt-transcribe`; supports `stream=true`)
+- `POST /v1/audio/speech` (TTS; classroom keys must name a speech-shelf Model ID, e.g. `openai@gpt-4o-mini-tts`)
+- `POST /v1/audio/transcriptions` (file STT; classroom keys must name a speech-transcription-shelf Model ID, e.g. `openai@gpt-transcribe`; supports `stream=true`)
 - `WS /v1/realtime?model=openai@gpt-live-transcribe` (Realtime transcription proxy; same speech-transcription shelf as file transcription)
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.

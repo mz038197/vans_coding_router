@@ -13,8 +13,6 @@ from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
     ImageGenerationNotSupportedError,
     ServiceUnavailableError,
-    SpeechTranscriptionNotSupportedError,
-    TtsNotSupportedError,
     UpstreamServiceError,
     extract_upstream_error_text,
 )
@@ -24,10 +22,7 @@ from src.domain.extra_usage import (
     is_key_failover_exhaustion,
 )
 from src.infrastructure.config import (
-    CAPABILITY_AUDIO_SPEECH,
-    CAPABILITY_AUDIO_TRANSCRIPTION,
     ProviderSettings,
-    providers_with_capability,
     resolve_provider_api_keys,
 )
 from src.infrastructure.gateways.copilot_compat import (
@@ -233,7 +228,13 @@ class OpenAICompatibleGateway:
 
     async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
         path = "/models"
-        if self.provider.name == "openrouter" and output_modalities in {"text", "decisions"}:
+        if self.provider.name == "openrouter" and output_modalities in {
+            "text",
+            "decisions",
+            "image",
+            "speech",
+            "transcription",
+        }:
             path = f"/models?output_modalities={output_modalities}"
         response = await self._request("GET", path, use_pool=False)
         return self._json_or_error(response)
@@ -284,11 +285,9 @@ class OpenAICompatibleGateway:
 
     async def images_models(self) -> dict[str, Any]:
         self._assert_image_provider()
-        response = await self._request("GET", "/images/models", use_pool=False)
-        return self._json_or_error(response)
+        return await self.models(output_modalities="image")
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        self._assert_audio_speech_provider()
         async with aclosing(self._stream("POST", "/audio/speech", json=body)) as stream:
             async for chunk in stream:
                 yield chunk
@@ -298,7 +297,6 @@ class OpenAICompatibleGateway:
         fields: dict[str, Any],
         file: tuple[str, bytes, str | None],
     ) -> dict[str, Any]:
-        self._assert_audio_transcription_provider()
         response = await self._request(
             "POST",
             "/audio/transcriptions",
@@ -312,7 +310,6 @@ class OpenAICompatibleGateway:
         fields: dict[str, Any],
         file: tuple[str, bytes, str | None],
     ) -> AsyncGenerator[bytes, None]:
-        self._assert_audio_transcription_provider()
         payload = dict(fields)
         payload["stream"] = "true"
         async with aclosing(
@@ -330,25 +327,6 @@ class OpenAICompatibleGateway:
         if self.provider.name not in _IMAGE_API_PROVIDERS:
             raise ImageGenerationNotSupportedError(
                 f"provider「{self.provider.name}」不支援 /v1/images，請使用 openrouter@..."
-            )
-
-    def _assert_audio_speech_provider(self) -> None:
-        if CAPABILITY_AUDIO_SPEECH not in self.provider.capabilities:
-            capable = providers_with_capability({self.provider.name: self.provider}, CAPABILITY_AUDIO_SPEECH)
-            hint = f"{capable[0]}@..." if capable else "audio_speech provider"
-            raise TtsNotSupportedError(
-                f"provider「{self.provider.name}」不支援 /v1/audio/speech，請使用 {hint}"
-            )
-
-    def _assert_audio_transcription_provider(self) -> None:
-        if CAPABILITY_AUDIO_TRANSCRIPTION not in self.provider.capabilities:
-            capable = providers_with_capability(
-                {self.provider.name: self.provider},
-                CAPABILITY_AUDIO_TRANSCRIPTION,
-            )
-            hint = f"{capable[0]}@..." if capable else "audio_transcription provider"
-            raise SpeechTranscriptionNotSupportedError(
-                f"provider「{self.provider.name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
             )
 
     def _exhausted_keys_error(self, pool: UpstreamKeyPool | None) -> UpstreamServiceError:

@@ -8,12 +8,9 @@ from src.domain.errors import ApiKeyExpiredError, MissingTargetError, Quarantine
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.infrastructure.config import (
-    CAPABILITY_AUDIO_SPEECH,
-    CAPABILITY_AUDIO_TRANSCRIPTION,
     RouterSettings,
     apply_runtime_settings,
-    classroom_chat_provider_names,
-    providers_with_capability,
+    provider_has_kind_split,
     settings_summary,
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
@@ -42,6 +39,15 @@ _SESSION_CAPABILITY_FIELDS = frozenset(
         "prompt_logging_enabled",
     }
 )
+
+
+_KIND_SPLIT_MODALITIES = {
+    "text": "text",
+    "decisions": "decisions",
+    "image": "image",
+    "speech": "speech",
+    "speech_transcription": "transcription",
+}
 
 
 class PortalUseCase:
@@ -159,33 +165,33 @@ class PortalUseCase:
         output_modalities: str | None = None,
     ) -> dict[str, Any]:
         self._assert_teacher(user_id)
-        if output_modalities not in (None, "text", "decisions", "image", "speech", "speech_transcription"):
-            raise ValueError("output_modalities 必須是 text、decisions、image、speech 或 speech_transcription")
-        speech_providers = providers_with_capability(self.settings.providers, CAPABILITY_AUDIO_SPEECH)
-        transcription_providers = providers_with_capability(
-            self.settings.providers,
-            CAPABILITY_AUDIO_TRANSCRIPTION,
-        )
-        chat_providers = classroom_chat_provider_names(self.settings.providers)
-        if output_modalities == "image":
-            providers = [name for name in chat_providers if name == "openrouter"]
-        elif output_modalities == "speech":
-            providers = speech_providers
-        elif output_modalities == "speech_transcription":
-            providers = transcription_providers
+        if output_modalities not in (None, "all", *_KIND_SPLIT_MODALITIES):
+            raise ValueError(
+                "output_modalities 必須是 all、text、decisions、image、speech 或 speech_transcription"
+            )
+        requested = output_modalities or "text"
+        enabled = [
+            name for name, provider in self.settings.providers.items() if provider.enabled
+        ]
+        kind_split = [name for name in enabled if provider_has_kind_split(name)]
+        all_models_providers = [name for name in enabled if not provider_has_kind_split(name)]
+        if requested == "all":
+            providers = all_models_providers
+            upstream_modality = None
         else:
-            providers = chat_providers
+            providers = kind_split
+            upstream_modality = _KIND_SPLIT_MODALITIES[requested]
         gateway = self._llm_gateway
-        extras = {
-            "speech_providers": speech_providers,
-            "transcription_providers": transcription_providers,
+        groups = {
+            "all_models_providers": all_models_providers,
+            "kind_split_providers": kind_split,
         }
         if gateway is None:
-            return {"providers": providers, "models": [], "unavailable": True, **extras}
+            return {"providers": providers, "models": [], "unavailable": True, **groups}
         try:
-            raw = await self._catalog_models(gateway, output_modalities)
+            raw = await self._catalog_models(gateway, upstream_modality)
         except Exception:
-            return {"providers": providers, "models": [], "unavailable": True, **extras}
+            return {"providers": providers, "models": [], "unavailable": True, **groups}
         allowed = set(providers)
         models: list[dict[str, Any]] = []
         for item in (raw or {}).get("data") or []:
@@ -206,28 +212,22 @@ class PortalUseCase:
                 }
             )
         errors = (raw or {}).get("provider_errors") or {}
-        chat_errors = {name: errors[name] for name in providers if name in errors}
-        unavailable = bool(providers) and not models and set(providers) <= set(chat_errors)
+        failed = {name: errors[name] for name in providers if name in errors}
+        unavailable = bool(providers) and not models and set(providers) <= set(failed)
         return {
             "providers": providers,
             "models": models,
             "unavailable": unavailable,
-            "speech_providers": speech_providers,
-            "transcription_providers": transcription_providers,
+            **groups,
         }
 
     @staticmethod
-    async def _catalog_models(gateway: Any, output_modalities: str | None) -> dict[str, Any]:
-        if output_modalities == "image":
-            images_fn = getattr(gateway, "images_models", None)
-            if not callable(images_fn):
-                raise RuntimeError("images catalog unavailable")
-            return await images_fn()
+    async def _catalog_models(gateway: Any, upstream_modality: str | None) -> dict[str, Any]:
         models_fn = getattr(gateway, "models", None)
         if not callable(models_fn):
             raise RuntimeError("models catalog unavailable")
-        if output_modalities in {"text", "decisions"}:
-            return await models_fn(output_modalities=output_modalities)
+        if upstream_modality:
+            return await models_fn(output_modalities=upstream_modality)
         return await models_fn()
 
     async def release_key_quarantine(

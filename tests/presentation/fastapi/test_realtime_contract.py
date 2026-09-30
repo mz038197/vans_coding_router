@@ -11,7 +11,6 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.infrastructure.config import (
     AuthSettings,
-    CAPABILITY_AUDIO_TRANSCRIPTION,
     DatabaseSettings,
     ProviderSettings,
     RouterSettings,
@@ -102,25 +101,23 @@ def test_realtime_proxies_text_and_rewrites_model(fake_repo, fake_gateway, fake_
         assert upstream.headers["Authorization"] == "Bearer sk-test"
 
 
-def test_realtime_rejects_unsupported_provider(fake_repo, fake_logger):
-    ollama = FakeGateway("ollama_cloud")
+def test_realtime_proxies_a_provider_without_a_capability_flag(fake_repo, fake_logger):
     openrouter = FakeGateway("openrouter")
-    openai = FakeGateway("openai", (CAPABILITY_AUDIO_TRANSCRIPTION,))
-    openai.provider = ProviderSettings(
-        name="openai",
-        base_url="https://api.openai.com/v1",
-        api_key="sk-live",
-        capabilities=(CAPABILITY_AUDIO_TRANSCRIPTION,),
+    openrouter.provider = ProviderSettings(
+        name="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="sk-or",
     )
-    routing = RoutingGateway({"ollama_cloud": ollama, "openrouter": openrouter, "openai": openai})
-    client, _upstream = _client_with_upstream(fake_repo, routing, FakeRequestLogger())
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect(
-            "/v1/realtime?model=openrouter@gpt-live-transcribe",
-            headers={"Authorization": "Bearer valid-key"},
-        ):
-            pass
-    assert exc.value.code == 1008
+    routing = RoutingGateway({"ollama_cloud": FakeGateway("ollama_cloud"), "openrouter": openrouter})
+    client, upstream = _client_with_upstream(fake_repo, routing, FakeRequestLogger())
+    with client.websocket_connect(
+        "/v1/realtime?model=openrouter@gpt-live-transcribe",
+        headers={"Authorization": "Bearer valid-key"},
+    ) as ws:
+        ws.send_text('{"type":"input_audio_buffer.append"}')
+        _wait_for(lambda: bool(upstream.url))
+        assert upstream.url.endswith("/v1/realtime?model=gpt-live-transcribe")
+        assert upstream.headers["Authorization"] == "Bearer sk-or"
 
 
 def test_session_speech_transcription_toggle_blocks_realtime(tmp_path):

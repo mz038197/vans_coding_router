@@ -1,13 +1,10 @@
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api_test_utils import build_test_client
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
-from src.domain.errors import TtsNotSupportedError
-from src.infrastructure.config import AuthSettings, CAPABILITY_AUDIO_SPEECH, DatabaseSettings, ProviderSettings, RouterSettings
-from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
+from src.infrastructure.config import AuthSettings, CAPABILITY_AUDIO_SPEECH, DatabaseSettings, RouterSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.presentation.fastapi.error_handlers import register_error_handlers
@@ -92,7 +89,7 @@ def test_audio_speech_rejects_bare_model(fake_repo, fake_logger):
     assert response.json()["error"]["param"] == "model"
 
 
-def test_audio_speech_rejects_unsupported_provider(fake_repo, fake_logger):
+def test_audio_speech_forwards_a_provider_without_a_capability_flag(fake_repo, fake_logger):
     client, _openai = _routing_client(fake_repo, fake_logger)
     response = client.post(
         "/v1/audio/speech",
@@ -103,8 +100,8 @@ def test_audio_speech_rejects_unsupported_provider(fake_repo, fake_logger):
             "voice": "nova",
         },
     )
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "tts_not_supported"
+    assert response.status_code == 200
+    assert response.content == b"\x00\x01"
 
 
 def test_session_tts_follows_the_speech_shelf(tmp_path):
@@ -158,17 +155,3 @@ def test_session_tts_follows_the_speech_shelf(tmp_path):
     assert wrong.status_code == 403
     assert wrong.json()["error"]["code"] == "model_not_allowed"
 
-
-@pytest.mark.asyncio
-async def test_openai_compatible_rejects_audio_speech_without_capability():
-    gateway = OpenAICompatibleGateway(
-        ProviderSettings(
-            name="ollama_cloud",
-            type="openai_compatible",
-            base_url="https://ollama.com/v1",
-        ),
-    )
-    with pytest.raises(TtsNotSupportedError):
-        await gateway.audio_speech_create_stream(
-            {"model": "x", "input": "test", "voice": "nova"}
-        ).__anext__()

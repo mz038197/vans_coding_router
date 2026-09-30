@@ -14,6 +14,9 @@ def test_portal_moves_decision_model_into_classroom_models():
     assert "imageShelf" in html
     assert "speechShelf" in html
     assert "speechTranscriptionShelf" in html
+    assert "全部" in html
+    assert 'id="sessionAllModelsShelf"' in html
+    assert "指定架" in html
     assert "session-image-toggle" not in html
     assert "session-tts-toggle" not in html
     assert "clearShelfFlags" in html

@@ -386,7 +386,7 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     assert allowed.status_code == 200
 
 
-def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tmp_path):
+def test_upstream_model_catalog_text_shelf_is_the_openrouter_filter(tmp_path):
     client, repo, _ = _client(
         tmp_path,
         llm_gateway=_catalog_gateway(),
@@ -400,13 +400,27 @@ def test_upstream_model_catalog_lists_chat_providers_and_excludes_speech_only(tm
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable"] is False
-    assert set(body["providers"]) == {"ollama_cloud", "openrouter"}
+    assert body["providers"] == ["openrouter"]
+    assert body["kind_split_providers"] == ["openrouter"]
+    assert body["all_models_providers"] == ["ollama_cloud", "openai"]
+    assert [item["id"] for item in body["models"]] == ["openrouter@minimax/minimax-m3"]
+
+
+def test_upstream_model_catalog_all_models_lists_providers_without_a_kind_split(tmp_path):
+    client, repo, _ = _client(
+        tmp_path,
+        llm_gateway=_catalog_gateway(),
+        providers=_classroom_providers(),
+    )
+    teacher, _, _ = _owner_session(repo)
+    response = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=all",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    body = response.json()
+    assert body["providers"] == ["ollama_cloud", "openai"]
     ids = [item["id"] for item in body["models"]]
-    assert "ollama_cloud@minimax-m3:cloud" in ids
-    assert "openrouter@minimax/minimax-m3" in ids
-    assert all(not item["id"].startswith("openai@") for item in body["models"])
-    assert ids.count("ollama_cloud@minimax-m3:cloud") == 1
-    assert ids.count("openrouter@minimax/minimax-m3") == 1
+    assert ids == ["ollama_cloud@minimax-m3:cloud", "openai@gpt-4o-mini-tts"]
 
 
 def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_path):
@@ -445,13 +459,24 @@ def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_pa
 
 def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp_path):
     gateway = _catalog_gateway()
-    gateway.gateways["openrouter"].images_models_response = {
-        "object": "list",
-        "data": [{"id": "black-forest-labs/flux.2-pro", "name": "Flux"}],
+    gateway.gateways["openrouter"].models_by_modality = {
+        "image": {
+            "object": "list",
+            "data": [{"id": "black-forest-labs/flux.2-pro", "name": "Flux"}],
+        },
+        "speech": {
+            "object": "list",
+            "data": [{"id": "openai/gpt-4o-mini-tts", "name": "TTS"}],
+        },
+        "transcription": {
+            "object": "list",
+            "data": [{"id": "openai/whisper-large-v3", "name": "Whisper"}],
+        },
     }
     client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     teacher, _, _ = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
+    openrouter = gateway.gateways["openrouter"]
 
     image = client.get(
         "/teacher/upstream-model-catalog?output_modalities=image",
@@ -462,21 +487,54 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert [item["id"] for item in image.json()["models"]] == [
         "openrouter@black-forest-labs/flux.2-pro"
     ]
-    assert image.json()["speech_providers"] == ["openai"]
+    assert openrouter.last_output_modalities == "image"
 
     speech = client.get(
         "/teacher/upstream-model-catalog?output_modalities=speech",
         cookies=cookies,
     )
-    assert speech.json()["providers"] == ["openai"]
-    assert [item["id"] for item in speech.json()["models"]] == ["openai@gpt-4o-mini-tts"]
+    assert speech.json()["providers"] == ["openrouter"]
+    assert [item["id"] for item in speech.json()["models"]] == [
+        "openrouter@openai/gpt-4o-mini-tts"
+    ]
+    assert openrouter.last_output_modalities == "speech"
 
     transcription = client.get(
         "/teacher/upstream-model-catalog?output_modalities=speech_transcription",
         cookies=cookies,
     )
-    assert transcription.json()["providers"] == ["openai"]
-    assert [item["id"] for item in transcription.json()["models"]] == ["openai@gpt-4o-mini-tts"]
+    assert transcription.json()["providers"] == ["openrouter"]
+    assert [item["id"] for item in transcription.json()["models"]] == [
+        "openrouter@openai/whisper-large-v3"
+    ]
+    assert openrouter.last_output_modalities == "transcription"
+
+
+def test_all_models_provider_cannot_be_saved_on_the_image_or_decision_shelf(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher, klass, session = _owner_session(repo)
+    cookies = _portal_cookie(repo, teacher["id"])
+    for flag in ("imageShelf", "decisionShelf"):
+        rejected = client.patch(
+            f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
+            cookies=cookies,
+            json={
+                "session_chat_language_models": [
+                    {
+                        "name": "VCRouter",
+                        "vendor": "customendpoint",
+                        "models": [
+                            {
+                                "id": "openai@gpt-4o",
+                                "name": "GPT-4o",
+                                flag: True,
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert rejected.status_code == 400
 
 
 def test_one_model_id_cannot_sit_on_two_shelves(tmp_path):
@@ -573,7 +631,7 @@ def test_catalog_is_unavailable_when_every_chat_provider_fails(tmp_path):
     assert catalog.status_code == 200
     assert catalog.json()["unavailable"] is True
     assert catalog.json()["models"] == []
-    assert set(catalog.json()["providers"]) == {"ollama_cloud", "openrouter"}
+    assert catalog.json()["providers"] == ["openrouter"]
 
 
 def test_catalog_fetch_failure_does_not_clear_stored_rows(tmp_path):

@@ -360,6 +360,14 @@
             <option value="speech_transcription">語音轉寫</option>
           </select>
         </div>
+        <div id="sessionAllModelsShelfRow" class="session-decision-model-row hidden">
+          <label class="modal-field-label" for="sessionAllModelsShelf">指定架</label>
+          <select id="sessionAllModelsShelf" class="modal-datetime-input" onchange="renderSessionChatModelsList()">
+            <option value="text">文字</option>
+            <option value="speech">語音</option>
+            <option value="speech_transcription">語音轉寫</option>
+          </select>
+        </div>
         <div id="sessionChatModelsList" class="session-chat-models-list"></div>
         <p id="sessionChatModelsSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
       </div>
@@ -2735,7 +2743,7 @@ snippets:
     let sessionChatModelsContext = null;
     let sessionChatModelsDraft = { models: [], removed: {} };
     let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false, shelf: 'text' };
-    let sessionChatProviderGroups = { chat: [], speech: [], transcription: [] };
+    let sessionChatProviderGroups = { kindSplit: [], allModels: [] };
     let sessionChatModelsDropzoneBound = false;
     let sessionChatModelsLocked = false;
     let routerModelTemplate = null;
@@ -2921,9 +2929,8 @@ snippets:
 
     function allTeacherProviders() {
       return [...new Set([
-        ...(sessionChatProviderGroups.chat || []),
-        ...(sessionChatProviderGroups.speech || []),
-        ...(sessionChatProviderGroups.transcription || []),
+        ...(sessionChatProviderGroups.kindSplit || []),
+        ...(sessionChatProviderGroups.allModels || []),
       ])];
     }
 
@@ -2952,7 +2959,7 @@ snippets:
       const catalogById = new Map((sessionChatModelsCatalog.models || []).map((item) => [item.id, item]));
       const rows = [];
       const seen = new Set();
-      const currentShelf = currentDecisionShelf();
+      const currentShelf = assignmentShelf();
       for (const model of sessionChatModelsDraft.models) {
         if (modelShelf(model) !== currentShelf) continue;
         const catalog = catalogById.get(model.id);
@@ -3024,14 +3031,17 @@ snippets:
       return 'text';
     }
 
+    function assignmentShelf() {
+      if (currentDecisionShelf() === 'all') {
+        return document.getElementById('sessionAllModelsShelf')?.value || 'text';
+      }
+      return currentDecisionShelf();
+    }
+
     function shelfChoicesForProvider(provider) {
-      const speech = sessionChatProviderGroups.speech || [];
-      const transcription = sessionChatProviderGroups.transcription || [];
-      if (provider === 'openrouter') return ['text', 'decisions', 'image'];
-      const choices = [];
-      if (speech.includes(provider)) choices.push('speech');
-      if (transcription.includes(provider)) choices.push('speech_transcription');
-      return choices.length ? choices : ['text'];
+      const kindSplit = sessionChatProviderGroups.kindSplit || [];
+      if (kindSplit.includes(provider)) return ['text', 'decisions', 'image', 'speech', 'speech_transcription'];
+      return ['all'];
     }
 
     function renderSessionDecisionShelf() {
@@ -3046,6 +3056,7 @@ snippets:
         image: '生圖',
         speech: '語音',
         speech_transcription: '語音轉寫',
+        all: '全部',
       };
       const previous = select.value;
       select.innerHTML = choices.map((value) => (
@@ -3053,6 +3064,8 @@ snippets:
       )).join('');
       select.value = choices.includes(previous) ? previous : choices[0];
       row.classList.toggle('hidden', choices.length === 1 && choices[0] === 'text');
+      const assignment = document.getElementById('sessionAllModelsShelfRow');
+      if (assignment) assignment.classList.toggle('hidden', select.value !== 'all');
     }
 
     async function onSessionChatModelsProviderChange() {
@@ -3119,7 +3132,7 @@ snippets:
           : restored
             ? { ...restored }
             : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
-        applyShelf(next, currentDecisionShelf());
+        applyShelf(next, assignmentShelf());
         if (!existing) sessionChatModelsDraft.models.push(next);
         delete sessionChatModelsDraft.removed[modelId];
       } else {
@@ -3181,16 +3194,15 @@ snippets:
     }
 
     async function loadSessionChatModelsCatalog(outputModalities) {
-      const known = ['text', 'decisions', 'image', 'speech', 'speech_transcription'];
+      const known = ['text', 'decisions', 'image', 'speech', 'speech_transcription', 'all'];
       const shelf = known.includes(outputModalities) ? outputModalities : 'text';
       try {
         const catalog = await api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`);
-        if (Array.isArray(catalog.speech_providers)) sessionChatProviderGroups.speech = catalog.speech_providers;
-        if (Array.isArray(catalog.transcription_providers)) {
-          sessionChatProviderGroups.transcription = catalog.transcription_providers;
+        if (Array.isArray(catalog.kind_split_providers)) {
+          sessionChatProviderGroups.kindSplit = catalog.kind_split_providers;
         }
-        if (shelf === 'text' || shelf === 'decisions' || shelf === 'image') {
-          sessionChatProviderGroups.chat = Array.isArray(catalog.providers) ? catalog.providers : [];
+        if (Array.isArray(catalog.all_models_providers)) {
+          sessionChatProviderGroups.allModels = catalog.all_models_providers;
         }
         sessionChatModelsCatalog = {
           providers: Array.isArray(catalog.providers) ? catalog.providers : [],

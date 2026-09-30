@@ -86,6 +86,11 @@ def is_speech_only_provider(provider: ProviderSettings) -> bool:
     return bool(caps) and caps <= _SPEECH_ONLY_CAPABILITIES
 
 
+def provider_has_kind_split(name: str) -> bool:
+    """OpenRouter's model list can be filtered by output kind. Other lists cannot."""
+    return name == "openrouter"
+
+
 def classroom_chat_provider_names(providers: dict[str, ProviderSettings]) -> list[str]:
     return [
         name

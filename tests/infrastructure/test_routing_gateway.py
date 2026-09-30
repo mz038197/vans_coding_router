@@ -3,7 +3,7 @@ from typing import Any, AsyncGenerator
 import pytest
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.errors import InvalidModelIdError, SpeechTranscriptionNotSupportedError, TtsNotSupportedError
+from src.domain.errors import InvalidModelIdError
 from src.infrastructure.config import CAPABILITY_AUDIO_SPEECH, CAPABILITY_AUDIO_TRANSCRIPTION, ProviderSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
@@ -32,7 +32,10 @@ class FakeGateway:
     async def health(self) -> dict[str, Any]:
         return {"ok": True}
 
-    async def models(self) -> dict[str, Any]:
+    async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
+        self.last_output_modalities = output_modalities
+        if self.name == "openrouter" and output_modalities == "image":
+            return {"object": "list", "data": [{"id": "flux.2-pro", "object": "model"}]}
         if self.name == "openrouter":
             return {"object": "list", "data": [{"id": "anthropic/claude-sonnet", "object": "model"}]}
         return {"object": "list", "data": [{"id": "qwen3-coder-next", "object": "model"}]}
@@ -238,12 +241,15 @@ async def test_routing_gateway_audio_speech_strips_provider_prefix(audio_gateway
 
 
 @pytest.mark.asyncio
-async def test_routing_gateway_audio_speech_rejects_unsupported_provider(audio_gateway: RoutingGateway):
-    with pytest.raises(TtsNotSupportedError):
-        async for _chunk in audio_gateway.audio_speech_create_stream(
-            {"model": "openrouter@gpt-4o-mini-tts", "input": "hello", "voice": "nova"}
-        ):
-            pass
+async def test_routing_gateway_audio_speech_forwards_any_provider(audio_gateway: RoutingGateway):
+    openrouter = audio_gateway.gateways["openrouter"]
+    chunks = []
+    async for chunk in audio_gateway.audio_speech_create_stream(
+        {"model": "openrouter@gpt-4o-mini-tts", "input": "hello", "voice": "nova"}
+    ):
+        chunks.append(chunk)
+    assert chunks == [b"\x00\x01"]
+    assert openrouter.requests == ["gpt-4o-mini-tts"]
 
 
 @pytest.mark.asyncio
@@ -259,14 +265,16 @@ async def test_routing_gateway_audio_transcriptions_strips_provider_prefix(audio
 
 
 @pytest.mark.asyncio
-async def test_routing_gateway_audio_transcriptions_rejects_unsupported_provider(
+async def test_routing_gateway_audio_transcriptions_forwards_any_provider(
     audio_gateway: RoutingGateway,
 ):
-    with pytest.raises(SpeechTranscriptionNotSupportedError):
-        await audio_gateway.audio_transcriptions_create(
-            {"model": "openrouter@gpt-transcribe"},
-            ("speech.wav", b"RIFF", "audio/wav"),
-        )
+    openrouter = audio_gateway.gateways["openrouter"]
+    response = await audio_gateway.audio_transcriptions_create(
+        {"model": "openrouter@gpt-transcribe"},
+        ("speech.wav", b"RIFF", "audio/wav"),
+    )
+    assert response["provider"] == "openrouter"
+    assert openrouter.requests == ["gpt-transcribe"]
 
 
 def test_routing_gateway_resolve_realtime(monkeypatch, audio_gateway: RoutingGateway):

@@ -1,4 +1,3 @@
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -7,15 +6,12 @@ from fakes import FakeLLMGateway, FakeRequestLogger
 from infrastructure.test_routing_gateway import FakeGateway
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
-from src.domain.errors import SpeechTranscriptionNotSupportedError
 from src.infrastructure.config import (
     AuthSettings,
     CAPABILITY_AUDIO_TRANSCRIPTION,
     DatabaseSettings,
-    ProviderSettings,
     RouterSettings,
 )
-from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.presentation.fastapi.error_handlers import register_error_handlers
@@ -101,7 +97,7 @@ def test_audio_transcriptions_rejects_bare_model(fake_repo, fake_logger):
     assert response.json()["error"]["param"] == "model"
 
 
-def test_audio_transcriptions_rejects_unsupported_provider(fake_repo, fake_logger):
+def test_audio_transcriptions_forwards_a_provider_without_a_capability_flag(fake_repo, fake_logger):
     client, _openai = _routing_client(fake_repo, fake_logger)
     response = client.post(
         "/v1/audio/transcriptions",
@@ -109,8 +105,8 @@ def test_audio_transcriptions_rejects_unsupported_provider(fake_repo, fake_logge
         data={"model": "openrouter@gpt-transcribe"},
         files={"file": ("speech.wav", b"RIFF....", "audio/wav")},
     )
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "speech_transcription_not_supported"
+    assert response.status_code == 200
+    assert response.json()["text"] == "ok"
 
 
 def test_session_speech_transcription_follows_the_shelf(tmp_path):
@@ -181,18 +177,3 @@ def test_teacher_long_lived_key_bypasses_speech_transcription_toggle(tmp_path):
     )
     assert response.status_code == 200
 
-
-@pytest.mark.asyncio
-async def test_openai_compatible_rejects_audio_transcriptions_without_capability():
-    gateway = OpenAICompatibleGateway(
-        ProviderSettings(
-            name="ollama_cloud",
-            type="openai_compatible",
-            base_url="https://ollama.com/v1",
-        ),
-    )
-    with pytest.raises(SpeechTranscriptionNotSupportedError):
-        await gateway.audio_transcriptions_create(
-            {"model": "x"},
-            ("speech.wav", b"RIFF....", "audio/wav"),
-        )

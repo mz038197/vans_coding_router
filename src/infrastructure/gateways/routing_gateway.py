@@ -8,15 +8,9 @@ from src.domain.entities.chat import ChatCompletionRequest
 from src.domain.errors import (
     InvalidModelIdError,
     ServiceUnavailableError,
-    SpeechTranscriptionNotSupportedError,
-    TtsNotSupportedError,
 )
 from src.domain.ports.llm_gateway import LLMGatewayPort
-from src.infrastructure.config import (
-    CAPABILITY_AUDIO_SPEECH,
-    CAPABILITY_AUDIO_TRANSCRIPTION,
-    resolve_provider_api_keys,
-)
+from src.infrastructure.config import resolve_provider_api_keys
 from src.infrastructure.gateways.copilot_compat import to_ollama_cloud_inference_id
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget, http_base_to_realtime_ws_url
 from src.infrastructure.routing.model_id import format_model_id, parse_model_id
@@ -154,28 +148,16 @@ class RoutingGateway:
         return await gateway.decisions_create(payload)
 
     async def images_models(self) -> dict[str, Any]:
-        data: list[dict[str, Any]] = []
-        errors: dict[str, Any] = {}
-        for name, gateway in self.gateways.items():
-            if name not in {"openrouter"}:
-                continue
-            try:
-                models = await gateway.images_models()
-                for item in models.get("data", []):
-                    if not isinstance(item, dict):
-                        continue
-                    upstream_id = str(item.get("id", ""))
-                    if not upstream_id:
-                        continue
-                    entry = dict(item)
-                    entry["id"] = format_model_id(name, upstream_id)
-                    entry["provider"] = name
-                    data.append(entry)
-            except Exception as exc:
-                errors[name] = str(exc)
+        listed = await self.models(output_modalities="image")
+        data = [
+            item
+            for item in listed.get("data") or []
+            if isinstance(item, dict) and item.get("provider") == "openrouter"
+        ]
         result: dict[str, Any] = {"object": "list", "data": data}
-        if errors:
-            result["provider_errors"] = errors
+        errors = listed.get("provider_errors") or {}
+        if "openrouter" in errors:
+            result["provider_errors"] = {"openrouter": errors["openrouter"]}
         return result
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
@@ -210,12 +192,6 @@ class RoutingGateway:
 
     def resolve_realtime(self, model_id: str) -> RealtimeUpstreamTarget:
         provider_name, upstream_model = parse_model_id(model_id, self._known_providers())
-        if not self._provider_supports_audio_transcription(provider_name):
-            capable = self._audio_transcription_provider_names()
-            hint = "、".join(f"{name}@..." for name in capable) if capable else "audio_transcription provider"
-            raise SpeechTranscriptionNotSupportedError(
-                f"provider「{provider_name}」不支援 realtime transcription，請使用 {hint}"
-            )
         upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
         gateway = self.gateways[provider_name]
         provider = getattr(gateway, "provider", None)
@@ -263,12 +239,6 @@ class RoutingGateway:
 
     def _resolve_audio_speech_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        if not self._provider_supports_audio_speech(provider_name):
-            capable = self._audio_speech_provider_names()
-            hint = "、".join(f"{name}@..." for name in capable) if capable else "audio_speech provider"
-            raise TtsNotSupportedError(
-                f"provider「{provider_name}」不支援 /v1/audio/speech，請使用 {hint}"
-            )
         payload = dict(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
@@ -278,36 +248,9 @@ class RoutingGateway:
         fields: dict[str, Any],
     ) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(fields.get("model", "")), self._known_providers())
-        if not self._provider_supports_audio_transcription(provider_name):
-            capable = self._audio_transcription_provider_names()
-            hint = "、".join(f"{name}@..." for name in capable) if capable else "audio_transcription provider"
-            raise SpeechTranscriptionNotSupportedError(
-                f"provider「{provider_name}」不支援 /v1/audio/transcriptions，請使用 {hint}"
-            )
         payload = dict(fields)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
-
-    def _provider_supports_audio_speech(self, provider_name: str) -> bool:
-        return self._provider_has_capability(provider_name, CAPABILITY_AUDIO_SPEECH)
-
-    def _provider_supports_audio_transcription(self, provider_name: str) -> bool:
-        return self._provider_has_capability(provider_name, CAPABILITY_AUDIO_TRANSCRIPTION)
-
-    def _provider_has_capability(self, provider_name: str, capability: str) -> bool:
-        gateway = self.gateways.get(provider_name)
-        if gateway is None:
-            return False
-        provider = getattr(gateway, "provider", None)
-        if provider is None:
-            return False
-        return capability in getattr(provider, "capabilities", ())
-
-    def _audio_speech_provider_names(self) -> list[str]:
-        return [name for name in self.gateways if self._provider_supports_audio_speech(name)]
-
-    def _audio_transcription_provider_names(self) -> list[str]:
-        return [name for name in self.gateways if self._provider_supports_audio_transcription(name)]
 
     def _normalize_upstream_model(self, provider_name: str, upstream_model: str) -> str:
         if provider_name == _OLLAMA_CLOUD_PROVIDER:
