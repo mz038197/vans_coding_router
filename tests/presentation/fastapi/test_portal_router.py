@@ -1981,6 +1981,73 @@ def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeyp
     assert "secret-b" not in text
 
 
+def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monkeypatch):
+    from src.infrastructure.config import ProviderSettings
+    from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
+    from src.infrastructure.gateways.routing_gateway import RoutingGateway
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+        if url == "https://openrouter.ai/api/v1/credits":
+            if key == "or-secret-a":
+                return httpx.Response(401, json={"error": "unauthorized"})
+            return httpx.Response(200, json={"data": {"total_credits": 10, "total_usage": 10.5, "limit_remaining": 1}})
+        if url == "https://ollama.com/api/usage":
+            return httpx.Response(200, json={"limits": {"monthly": {"usage": 0.25, "models": []}}})
+        return httpx.Response(404, json={"error": "unexpected"})
+
+    for name, value in {
+        "OPENROUTER_API_KEY": "or-secret-a",
+        "OPENROUTER_API_KEY_2": "or-secret-b",
+        "OLLAMA_CLOUD_API_KEY": "ollama-secret",
+    }.items():
+        monkeypatch.setenv(name, value)
+    usage_client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=2.0)
+    openrouter = OpenAICompatibleGateway(
+        ProviderSettings(
+            name="openrouter",
+            type="openai_compatible",
+            base_url="https://openrouter.ai/api/v1",
+            api_key_envs=("OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"),
+            max_concurrent_per_key=6,
+        ),
+        timeout=30.0,
+        usage_client=usage_client,
+    )
+    ollama = OpenAICompatibleGateway(
+        ProviderSettings(
+            name="ollama_cloud",
+            type="openai_compatible",
+            base_url="https://ollama.com/v1",
+            api_key_envs=("OLLAMA_CLOUD_API_KEY",),
+            max_concurrent_per_key=3,
+        ),
+        timeout=30.0,
+        usage_client=usage_client,
+    )
+    http, repo, _settings = _client(
+        tmp_path,
+        llm_gateway=RoutingGateway({"openrouter": openrouter, "ollama_cloud": ollama}),
+    )
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    response = http.get("/teacher/upstream-pools", cookies=_portal_cookie(repo, teacher))
+    assert response.status_code == 200
+    body = response.json()
+    openrouter_keys = body["providers"]["openrouter"]["pool"]["keys"]
+    ollama_keys = body["providers"]["ollama_cloud"]["pool"]["keys"]
+    assert [item["account_credit_remaining"] for item in openrouter_keys] == [None, -0.5]
+    assert "included_monthly_usage" not in openrouter_keys[1]
+    assert [item["in_flight"] for item in openrouter_keys] == [0, 0]
+    assert [item["quarantined"] for item in openrouter_keys] == [False, False]
+    assert ollama_keys[0]["included_monthly_usage"] == 0.25
+    assert "account_credit_remaining" not in ollama_keys[0]
+    text = response.text
+    assert "or-secret-a" not in text
+    assert "or-secret-b" not in text
+    assert "ollama-secret" not in text
+
+
 def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()

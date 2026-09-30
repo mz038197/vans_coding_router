@@ -150,14 +150,16 @@ class PortalUseCase:
         status_fn = getattr(gateway, "pool_status", None)
         if not callable(status_fn):
             return {"providers": {}}
-        snapshot = status_fn(limited_only=True)
-        overlay = getattr(gateway, "overlay_included_monthly_usage", None)
-        if not callable(overlay):
-            return snapshot
-        try:
-            return await overlay(snapshot)
-        except Exception:
-            return snapshot
+        result = status_fn(limited_only=True)
+        for method_name in ("overlay_included_monthly_usage", "overlay_account_credit_remaining"):
+            overlay = getattr(gateway, method_name, None)
+            if not callable(overlay):
+                continue
+            try:
+                result = await overlay(result)
+            except Exception:
+                continue
+        return result
 
     async def upstream_model_catalog(
         self,

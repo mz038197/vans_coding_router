@@ -1229,11 +1229,15 @@
           const monthlyUsage = name === 'ollama_cloud'
             ? `<span class="upstream-monthly-usage">${escapeHtml(formatIncludedMonthlyUsage(key.included_monthly_usage))}</span>`
             : '';
+          const accountCredit = name === 'openrouter'
+            ? `<span class="upstream-account-credit">${escapeHtml(formatAccountCreditRemaining(key.account_credit_remaining))}</span>`
+            : '';
           return `<div class="upstream-key-row${quarantined ? ' quarantined' : ''}">
             <span class="upstream-key-label">${escapeHtml(key.label)}</span>
             <div class="upstream-bar-track"><div class="upstream-bar-fill${hot ? ' hot' : ''}${quarantined ? ' quarantined' : ''}" style="width:${barWidth}%"></div></div>
             <span class="upstream-key-count">${escapeHtml(countLabel)}</span>
             ${monthlyUsage}
+            ${accountCredit}
             ${quarantineLabel ? `<span class="upstream-quarantine-badge">${escapeHtml(quarantineLabel)}</span>` : ''}
             ${releaseBtn}
           </div>`;
@@ -1261,6 +1265,16 @@
         return `月用量 ${pct}%`;
       }
       return '月用量無法取得';
+    }
+
+    function formatAccountCreditRemaining(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const cents = Math.round(value * 100);
+        const sign = cents < 0 ? '-' : '';
+        const abs = Math.abs(cents) / 100;
+        return `餘額 ${sign}$${abs.toFixed(2)}`;
+      }
+      return '餘額無法取得';
     }
 
     async function loadUpstreamPools() {

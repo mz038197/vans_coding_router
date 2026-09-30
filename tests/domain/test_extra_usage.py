@@ -1,4 +1,5 @@
 from src.domain.extra_usage import (
+    account_credit_remaining_from_credits_payload,
     extra_usage_remaining_from_usage_payload,
     included_monthly_usage_from_usage_payload,
     is_credit_exhaustion,
@@ -152,6 +153,30 @@ def test_prefers_monthly_usage_over_weekly():
             }
         }
     ) == 0.153
+
+
+def test_does_not_treat_key_cap_or_key_usage_as_account_credit_remaining():
+    assert account_credit_remaining_from_credits_payload(
+        {"data": {"limit": 100, "limit_remaining": 74.5, "usage": 25.5}}
+    ) is None
+    assert account_credit_remaining_from_credits_payload(
+        {"data": {"total_credits": 10}}
+    ) is None
+    assert account_credit_remaining_from_credits_payload(
+        {"total_credits": 10, "total_usage": 1}
+    ) is None
+
+
+def test_maps_account_credit_remaining_including_zero_and_negative():
+    assert account_credit_remaining_from_credits_payload(
+        {"data": {"total_credits": 10, "total_usage": 1.5}}
+    ) == 8.5
+    assert account_credit_remaining_from_credits_payload(
+        {"data": {"total_credits": 10, "total_usage": 10}}
+    ) == 0.0
+    assert account_credit_remaining_from_credits_payload(
+        {"data": {"total_credits": 10, "total_usage": 10.5}}
+    ) == -0.5
 
 
 def test_rejects_session_only_or_out_of_range_included_usage():

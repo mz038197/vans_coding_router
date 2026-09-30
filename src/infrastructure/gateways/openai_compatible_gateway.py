@@ -18,6 +18,7 @@ from src.domain.errors import (
 )
 from src.domain.extra_usage import (
     DEFAULT_EXTRA_USAGE_MESSAGE,
+    account_credit_remaining_from_credits_payload,
     included_monthly_usage_from_usage_payload,
     is_key_failover_exhaustion,
 )
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 _ollama_thinking_cache = OllamaThinkingCache()
 _IMAGE_API_PROVIDERS = frozenset({"openrouter"})
 _OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
+_OPENROUTER_CREDITS_PATH = "/credits"
 _USAGE_TIMEOUT = httpx.Timeout(2.0)
 _USAGE_CACHE_TTL_SEC = 45.0
 
@@ -61,6 +63,7 @@ class OpenAICompatibleGateway:
         self._usage_client = usage_client
         self._created_usage_client = False
         self._monthly_usage_cache: dict[int, tuple[float, float]] = {}
+        self._account_credit_cache: dict[int, tuple[float, float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
 
@@ -152,6 +155,62 @@ class OpenAICompatibleGateway:
             row["included_monthly_usage"] = usage
             attached.append(row)
         return {**pool, "keys": attached}
+
+    async def attach_account_credit_remaining(self, pool: dict[str, Any]) -> dict[str, Any]:
+        """Overlay Account Credit Remaining onto openrouter pool keys without touching in-flight."""
+        if self.provider.name != "openrouter":
+            return pool
+        keys = list(pool.get("keys") or [])
+        remainings = await asyncio.gather(
+            *(self._account_credit_remaining_for_index(int(item["index"])) for item in keys)
+        )
+        attached = []
+        for item, remaining in zip(keys, remainings, strict=True):
+            row = dict(item)
+            row["account_credit_remaining"] = remaining
+            attached.append(row)
+        return {**pool, "keys": attached}
+
+    async def _account_credit_remaining_for_index(self, index: int) -> float | None:
+        now = time.monotonic()
+        cached = self._account_credit_cache.get(index)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        remaining = await self._fetch_account_credit_remaining(index)
+        if remaining is not None:
+            self._account_credit_cache[index] = (remaining, now + _USAGE_CACHE_TTL_SEC)
+        return remaining
+
+    async def _fetch_account_credit_remaining(self, index: int) -> float | None:
+        pool = self._ensure_pool()
+        if pool is None or not (0 <= index < pool.key_count):
+            return None
+        api_key = pool.key_at(index)
+        if not api_key:
+            return None
+        try:
+            client = await self._ensure_usage_client()
+            response = await client.get(
+                self.provider.base_url.rstrip("/") + _OPENROUTER_CREDITS_PATH,
+                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                timeout=_USAGE_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.info(
+                "account_credit_remaining_unavailable provider=%s index=%s",
+                self.provider.name,
+                index,
+            )
+            return None
+        if response.status_code >= 400:
+            return None
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return None
+        return account_credit_remaining_from_credits_payload(payload)
 
     async def _ensure_usage_client(self) -> httpx.AsyncClient:
         if self._usage_client is None:

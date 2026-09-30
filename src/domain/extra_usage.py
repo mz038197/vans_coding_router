@@ -62,6 +62,24 @@ def extra_usage_remaining_from_usage_payload(payload: Any) -> float | None:
     return None
 
 
+def account_credit_remaining_from_credits_payload(payload: Any) -> float | None:
+    """Return Account Credit Remaining (dollars) from an OpenRouter credits document.
+
+    Zero and a negative amount are valid. A per-key spending cap and that key's own
+    usage are not this balance.
+    """
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    credits = _as_finite_number(data.get("total_credits"))
+    usage = _as_finite_number(data.get("total_usage"))
+    if credits is None or usage is None:
+        return None
+    return credits - usage
+
+
 def included_monthly_usage_from_usage_payload(payload: Any) -> float | None:
     """Return Included Monthly Usage (already-used 0–1) from an Ollama usage document.
 
