@@ -917,11 +917,11 @@
     }
 
     function sessionCapabilitiesCell(classId, session, allowOwnerActions) {
-      const imageOn = sessionHasShelf(session, 'imageShelf', true);
-      const ttsOn = sessionHasShelf(session, 'speechShelf', false);
-      const speechOn = sessionHasShelf(session, 'speechTranscriptionShelf', false);
+      const imageOn = sessionHasShelf(session, 'imageShelf');
+      const ttsOn = sessionHasShelf(session, 'speechShelf');
+      const speechOn = sessionHasShelf(session, 'speechTranscriptionShelf');
       const promptOn = sessionPromptLoggingEnabled(session);
-      const decisionOn = sessionHasShelf(session, 'decisionShelf', true);
+      const decisionOn = sessionHasShelf(session, 'decisionShelf');
       const chip = (name, on, title) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
       const prompt = allowOwnerActions
         ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
@@ -2522,11 +2522,10 @@ snippets:
       }
     }
 
-    function sessionHasShelf(session, flag, requireOpenRouter) {
+    function sessionHasShelf(session, flag) {
       for (const provider of session.session_chat_language_models || []) {
         for (const model of (provider && provider.models) || []) {
           if (!model || model[flag] !== true || typeof model.id !== 'string' || !model.id) continue;
-          if (requireOpenRouter && !model.id.startsWith('openrouter@')) continue;
           return true;
         }
       }

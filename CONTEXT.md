@@ -69,12 +69,12 @@ A Model ID the teacher checked from the speech-transcription shelf into that sit
 _Avoid_: a file-only shelf, a realtime-only shelf, a capability checkbox
 
 **Image Generation** (Portal: 生圖):
-A Class Session lets a Classroom API Key call image generation when its Session Chat Language Models include at least one image-shelf Model ID. None checked means Image Generation is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, Speech Transcription, or Decision. New sessions start with the image shelf empty. An existing sitting is not filled from the old image-generation switch.
-_Avoid_: image_generation_enabled, a capability checkbox, 生圖開關
+A Class Session lets a Classroom API Key call image generation when its Session Chat Language Models include at least one image-shelf Model ID. None checked means Image Generation is off for that key. A Personal API Key is outside every Class Session, so this gate does not apply to it. It is not a capability checkbox, not a separate chosen id, and does not grant chat, Speech, Speech Transcription, or Decision. A checked Image Generation Model is forwarded; the provider's refusal is the refusal. New sessions start with the image shelf empty. An existing sitting is not filled from the old image-generation switch.
+_Avoid_: image_generation_enabled, a capability checkbox, 生圖開關, a provider capability flag that refuses a checked Image Generation Model
 
 **Image Generation Model**:
-An OpenRouter Model ID the teacher checked from the image shelf into that sitting’s Session Chat Language Models. An image generation call may use any of them. Comparison uses the Model ID on that request, exactly. For a Classroom API Key, the image model list is those checked ids; none checked means that list is refused. A Personal API Key sees the live image shelf. A text-shelf model, a Speech Model, a Speech Transcription Model, or a Decision Model is not an Image Generation Model.
-_Avoid_: a capability checkbox, a single chosen image field, the live image catalog as the classroom permission, a student list of unchecked image models
+A Model ID the teacher checked from the image shelf into that sitting’s Session Chat Language Models. An image generation call may use any of them. Comparison uses the Model ID on that request, exactly. For a Classroom API Key, the image model list is those checked ids; none checked means that list is refused. A Personal API Key sees the live image shelf. A text-shelf model, a Speech Model, a Speech Transcription Model, or a Decision Model is not an Image Generation Model.
+_Avoid_: OpenRouter prefix as the qualification, a capability checkbox, a single chosen image field, the live image catalog as the classroom permission, a student list of unchecked image models
 
 **File Transcription**:
 Speech-to-text over a completed audio upload, including optional streamed transcript output while that file is processed.
@@ -97,8 +97,8 @@ The provider refusal of a Decision Request that was sent upstream, returned to t
 _Avoid_: Readable Upstream Error, chat choice, assistant message, hiding the provider refusal behind a generic router error
 
 **Decision Model**:
-An OpenRouter Model ID the teacher checked from the decision shelf into that sitting’s Session Chat Language Models. A Decision Request may use any of them. Chat and Responses with that id are refused, and student-facing chat model lists omit every one. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request. A text-shelf model, an Image Generation Model, a Speech Model, a Speech Transcription Model, a file upload, or a previously stored single choice is not a Decision Model.
-_Avoid_: Decision Model Shelf, Decision Model Allowlist, Session Model Allowlist, capability checkbox, fixed Jev shelf, a text-shelf OpenRouter model, a single chosen field, a dropdown that picks one, a student keyed chat-picker entry, treating the reply model as permission, promoting an uploaded id or an old single choice
+A Model ID the teacher checked from the decision shelf into that sitting’s Session Chat Language Models. A Decision Request may use any of them. Chat and Responses with that id are refused, and student-facing chat model lists omit every one. Comparison uses the Model ID on that request, exactly; the reply’s model string does not authorize a later request. A text-shelf model, an Image Generation Model, a Speech Model, a Speech Transcription Model, a file upload, or a previously stored single choice is not a Decision Model.
+_Avoid_: OpenRouter prefix as the qualification, Decision Model Shelf, Decision Model Allowlist, Session Model Allowlist, capability checkbox, fixed Jev shelf, a text-shelf OpenRouter model, a single chosen field, a dropdown that picks one, a student keyed chat-picker entry, treating the reply model as permission, promoting an uploaded id or an old single choice
 
 **Theme**:
 A named Portal visual identity that changes colors and material treatment only. It does not change branding assets or page structure. The two Themes are Dark Theme and Light Theme. One Theme applies across Portal login, the signed-in Portal, and lobby host. The user's Theme choice is remembered on that browser. When no choice is stored, Light Theme is the default.

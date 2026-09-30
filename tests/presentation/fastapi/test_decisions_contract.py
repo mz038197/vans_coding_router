@@ -105,7 +105,8 @@ def _sqlite_routing_client(tmp_path):
     )
     repo = SqliteRouterRepository(settings.database.path, settings)
     openrouter = FakeGateway("openrouter")
-    routing = RoutingGateway({"openrouter": openrouter, "ollama_cloud": FakeGateway("ollama_cloud")})
+    ollama = FakeGateway("ollama_cloud")
+    routing = RoutingGateway({"openrouter": openrouter, "ollama_cloud": ollama})
     logger = FakeRequestLogger()
     auth_use_case = AuthUseCase(api_key_repo=repo)
     api_use_case = ApiUseCase(gateway=routing, api_key_repo=repo, logger=logger)
@@ -113,11 +114,31 @@ def _sqlite_routing_client(tmp_path):
     register_error_handlers(app)
     app.add_middleware(ApiKeyMiddleware, auth_use_case=auth_use_case)
     app.include_router(create_api_router(api_use_case))
-    return TestClient(app), repo, openrouter
+    return TestClient(app), repo, openrouter, ollama
+
+
+def test_checked_ollama_decision_model_is_forwarded(tmp_path):
+    client, repo, openrouter, ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "ollama_cloud@kimi-k3:cloud")
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={**_DECISION_BODY, "model": "ollama_cloud@kimi-k3:cloud"},
+    )
+
+    assert response.status_code == 200
+    assert ollama.last_decision_body == {
+        "model": "kimi-k3:cloud",
+        "state": "付款失敗三天了",
+        "questions": _DECISION_BODY["questions"],
+    }
+    assert openrouter.last_decision_body is None
 
 
 def test_allowed_decision_forwards_state_and_questions_only(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
     openrouter.decision_response = {
@@ -150,7 +171,7 @@ def test_allowed_decision_forwards_state_and_questions_only(tmp_path):
 
 
 def test_decision_model_mismatch_refuses_before_upstream(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     _set_decision_model(
         repo,
@@ -172,7 +193,7 @@ def test_decision_model_mismatch_refuses_before_upstream(tmp_path):
 
 
 def test_reply_model_does_not_authorize_the_next_decision(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     _set_decision_model(repo, klass, session, "openrouter@~typesafe/jev-latest")
     headers = {"Authorization": f"Bearer {student_key}"}
@@ -203,7 +224,7 @@ def test_reply_model_does_not_authorize_the_next_decision(tmp_path):
 def test_decision_refusal_returns_provider_message(tmp_path):
     from src.domain.errors import UpstreamServiceError
 
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
     openrouter.decision_error = UpstreamServiceError(
@@ -226,7 +247,7 @@ def test_decision_refusal_returns_provider_message(tmp_path):
 
 
 def test_stale_decision_model_treated_as_off(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
     repo.update_class_session(
@@ -266,7 +287,7 @@ def test_previously_stored_single_choice_does_not_enable_decision(tmp_path):
 
 
 def test_every_decision_shelf_model_can_receive_a_decision_request(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     klass, session, student_key = _student_key(repo)
     repo.update_class_session(
         klass["id"],
@@ -297,7 +318,7 @@ def test_every_decision_shelf_model_can_receive_a_decision_request(tmp_path):
 
 
 def test_personal_api_key_decision_forwards_any_model_id(tmp_path):
-    client, repo, openrouter = _sqlite_routing_client(tmp_path)
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
     personal = repo.issue_long_lived_key(teacher["id"])

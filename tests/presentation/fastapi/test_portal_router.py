@@ -1405,7 +1405,7 @@ def test_new_session_decision_model_is_empty(tmp_path):
     assert "decision_model_allowlist" not in body
 
 
-def test_teacher_checks_openrouter_models_onto_the_decision_shelf(tmp_path):
+def test_teacher_checks_models_onto_the_decision_shelf(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
@@ -1415,6 +1415,24 @@ def test_teacher_checks_openrouter_models_onto_the_decision_shelf(tmp_path):
         cookies=cookies,
         json={"name": "第一堂", "ttl_hours": 2},
     ).json()["id"]
+    checked_ollama = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{session_id}",
+        cookies=cookies,
+        json={
+            "session_chat_language_models": [
+                {
+                    "name": "VCRouter",
+                    "vendor": "customendpoint",
+                    "models": [
+                        {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi", "decisionShelf": True},
+                    ],
+                }
+            ]
+        },
+    )
+    assert checked_ollama.status_code == 200
+    assert checked_ollama.json()["session_chat_language_models"][0]["models"][0]["decisionShelf"] is True
+
     document = [
         {
             "name": "VCRouter",
@@ -1423,7 +1441,7 @@ def test_teacher_checks_openrouter_models_onto_the_decision_shelf(tmp_path):
                 {"id": "openrouter@minimax/minimax-m3", "name": "Minimax"},
                 {"id": "openrouter@anthropic/claude-sonnet", "name": "Claude", "decisionShelf": True},
                 {"id": "openrouter@typesafe/jev-1.13", "name": "Jev", "decisionShelf": True},
-                {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi", "decisionShelf": True},
+                {"id": "ollama_cloud@kimi-k3:cloud", "name": "Kimi"},
             ],
         }
     ]
@@ -1440,6 +1458,7 @@ def test_teacher_checks_openrouter_models_onto_the_decision_shelf(tmp_path):
     assert saved_models["openrouter@anthropic/claude-sonnet"]["decisionShelf"] is True
     assert saved_models["openrouter@typesafe/jev-1.13"]["decisionShelf"] is True
     assert "decisionShelf" not in saved_models["openrouter@minimax/minimax-m3"]
+    assert "decisionShelf" not in saved_models["ollama_cloud@kimi-k3:cloud"]
     assert seeded.json()["decision_model"] == ""
 
     ignored = client.patch(

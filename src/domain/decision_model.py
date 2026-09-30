@@ -4,7 +4,6 @@ import copy
 from typing import Any
 
 DECISION_MODEL_UNCHANGED = object()
-OPENROUTER_MODEL_PREFIX = "openrouter@"
 DECISION_SHELF_KEY = "decisionShelf"
 
 
@@ -21,7 +20,7 @@ def is_decision_shelf_model(model: Any) -> bool:
         isinstance(model, dict)
         and model.get(DECISION_SHELF_KEY) is True
         and isinstance(model.get("id"), str)
-        and model["id"].startswith(OPENROUTER_MODEL_PREFIX)
+        and bool(model["id"])
     )
 
 

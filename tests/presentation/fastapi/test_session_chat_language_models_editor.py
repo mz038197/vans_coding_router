@@ -510,12 +510,12 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert openrouter.last_output_modalities == "transcription"
 
 
-def test_all_models_provider_cannot_be_saved_on_the_image_or_decision_shelf(tmp_path):
+def test_non_openrouter_shelf_check_is_saved(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher, klass, session = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
     for flag in ("imageShelf", "decisionShelf"):
-        rejected = client.patch(
+        saved = client.patch(
             f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
             cookies=cookies,
             json={
@@ -534,7 +534,8 @@ def test_all_models_provider_cannot_be_saved_on_the_image_or_decision_shelf(tmp_
                 ]
             },
         )
-        assert rejected.status_code == 400
+        assert saved.status_code == 200
+        assert saved.json()["session_chat_language_models"][0]["models"][0][flag] is True
 
 
 def test_one_model_id_cannot_sit_on_two_shelves(tmp_path):

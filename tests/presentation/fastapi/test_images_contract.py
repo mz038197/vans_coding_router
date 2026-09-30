@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -5,7 +6,6 @@ from fastapi.testclient import TestClient
 from api_test_utils import build_test_client
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
-from src.domain.errors import ImageGenerationNotSupportedError
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
@@ -179,12 +179,26 @@ def test_teacher_long_lived_key_bypasses_session_image_toggle(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ollama_provider_rejects_images():
+async def test_ollama_provider_forwards_images(monkeypatch):
     from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
     from src.infrastructure.config import ProviderSettings
 
     gateway = OpenAICompatibleGateway(
         ProviderSettings(name="ollama_cloud", type="openai_compatible", base_url="https://ollama.com/v1"),
     )
-    with pytest.raises(ImageGenerationNotSupportedError):
-        await gateway.images_create({"model": "x/z-image-turbo", "prompt": "test"})
+    seen: dict = {}
+
+    async def fake_request(method, path, **kwargs):
+        seen["method"] = method
+        seen["path"] = path
+        seen["json"] = kwargs.get("json")
+        return httpx.Response(200, json={"created": 1, "data": []})
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    result = await gateway.images_create({"model": "x/z-image-turbo", "prompt": "test"})
+    assert seen == {
+        "method": "POST",
+        "path": "/images",
+        "json": {"model": "x/z-image-turbo", "prompt": "test"},
+    }
+    assert result["data"] == []

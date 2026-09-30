@@ -17,6 +17,13 @@ def test_portal_moves_decision_model_into_classroom_models():
     assert "全部" in html
     assert 'id="sessionAllModelsShelf"' in html
     assert "指定架" in html
+    assert "sessionHasShelf(session, 'imageShelf')" in html
+    assert "sessionHasShelf(session, 'decisionShelf')" in html
+    assert "sessionHasShelf(session, 'imageShelf', true)" not in html
+    assert "sessionHasShelf(session, 'decisionShelf', true)" not in html
+    all_models = html.split('id="sessionAllModelsShelf"', 1)[1].split("</select>", 1)[0]
+    assert 'value="decisions"' not in all_models
+    assert 'value="image"' not in all_models
     assert "session-image-toggle" not in html
     assert "session-tts-toggle" not in html
     assert "clearShelfFlags" in html

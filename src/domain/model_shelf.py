@@ -14,29 +14,19 @@ SHELF_KEYS = (
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
 )
-OPENROUTER_MODEL_PREFIX = "openrouter@"
 
 
 def enforce_single_shelf(model: dict[str, Any]) -> None:
     active = [key for key in SHELF_KEYS if model.get(key) is True]
     if len(active) > 1:
         raise ValueError("一個 Model ID 只能屬於一個架")
-    model_id = model.get("id")
-    if IMAGE_SHELF_KEY in active and (
-        not isinstance(model_id, str) or not model_id.startswith(OPENROUTER_MODEL_PREFIX)
-    ):
-        raise ValueError("生圖模型必須是 OpenRouter Model ID")
-    if "decisionShelf" in active and (
-        not isinstance(model_id, str) or not model_id.startswith(OPENROUTER_MODEL_PREFIX)
-    ):
-        raise ValueError("決策模型必須是 OpenRouter Model ID")
     for key in SHELF_KEYS:
         if model.get(key) is not True:
             model.pop(key, None)
 
 
 def is_image_shelf_model(model: Any) -> bool:
-    return _is_flagged_openrouter_model(model, IMAGE_SHELF_KEY)
+    return _is_flagged_model(model, IMAGE_SHELF_KEY)
 
 
 def is_speech_shelf_model(model: Any) -> bool:
@@ -108,6 +98,3 @@ def _is_flagged_model(model: Any, shelf_key: str) -> bool:
         and bool(model["id"])
     )
 
-
-def _is_flagged_openrouter_model(model: Any, shelf_key: str) -> bool:
-    return _is_flagged_model(model, shelf_key) and model["id"].startswith(OPENROUTER_MODEL_PREFIX)

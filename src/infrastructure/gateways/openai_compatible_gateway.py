@@ -11,7 +11,6 @@ import httpx
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
-    ImageGenerationNotSupportedError,
     ServiceUnavailableError,
     UpstreamServiceError,
     extract_upstream_error_text,
@@ -42,7 +41,6 @@ from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKe
 logger = logging.getLogger(__name__)
 
 _ollama_thinking_cache = OllamaThinkingCache()
-_IMAGE_API_PROVIDERS = frozenset({"openrouter"})
 _OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
 _OPENROUTER_CREDITS_PATH = "/credits"
 _USAGE_TIMEOUT = httpx.Timeout(2.0)
@@ -326,7 +324,6 @@ class OpenAICompatibleGateway:
                 yield chunk
 
     async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        self._assert_image_provider()
         response = await self._request("POST", "/images", json=body)
         return self._json_or_error(response)
 
@@ -335,7 +332,6 @@ class OpenAICompatibleGateway:
         return self._json_or_error(response)
 
     async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        self._assert_image_provider()
         payload = dict(body)
         payload["stream"] = True
         async with aclosing(self._stream("POST", "/images", json=payload)) as stream:
@@ -343,7 +339,6 @@ class OpenAICompatibleGateway:
                 yield chunk
 
     async def images_models(self) -> dict[str, Any]:
-        self._assert_image_provider()
         return await self.models(output_modalities="image")
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
@@ -381,12 +376,6 @@ class OpenAICompatibleGateway:
         ) as stream:
             async for chunk in stream:
                 yield chunk
-
-    def _assert_image_provider(self) -> None:
-        if self.provider.name not in _IMAGE_API_PROVIDERS:
-            raise ImageGenerationNotSupportedError(
-                f"provider「{self.provider.name}」不支援 /v1/images，請使用 openrouter@..."
-            )
 
     def _exhausted_keys_error(self, pool: UpstreamKeyPool | None) -> UpstreamServiceError:
         message = None
