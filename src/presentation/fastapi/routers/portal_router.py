@@ -101,6 +101,10 @@ class NicknameRedeemRequest(BaseModel):
     nickname: str
 
 
+class RouterModelTemplateRequest(BaseModel):
+    router_model_template: Any
+
+
 class ClassRequest(BaseModel):
     name: str
     ends_at: str | None = None
@@ -391,9 +395,19 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.get("/extension/chat-language-models")
     async def extension_chat_language_models(request: Request):
         api_key = _classroom_api_key(request)
+        portal_user_id = _optional_portal_user_id(request)
+        if not api_key and portal_user_id is None:
+            raise HTTPException(status_code=401, detail="尚未登入")
         return portal_call(
-            lambda: portal_use_case.chat_language_models_template(api_key or None)
+            lambda: portal_use_case.chat_language_models_template(api_key or None, portal_user_id)
         )
+
+    def _optional_portal_user_id(request: Request) -> int | None:
+        token = request.cookies.get(portal_session_cookie, "")
+        if not token:
+            return None
+        context = portal_use_case.authenticate_portal_session(token)
+        return context.user_id if context is not None else None
 
     @router.post("/extension/sessions/redeem")
     async def extension_redeem(data: ExtensionRedeemRequest):
@@ -468,6 +482,26 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     @router.post("/portal/teacher/api-key")
     async def teacher_key(session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         return portal_call(lambda: portal_use_case.teacher_key(current_user_id(session_user_id)))
+
+    @router.get("/teacher/router-model-template")
+    async def get_router_model_template(
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.router_model_template(current_user_id(session_user_id))
+        )
+
+    @router.put("/teacher/router-model-template")
+    async def put_router_model_template(
+        data: RouterModelTemplateRequest,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.save_router_model_template(
+                current_user_id(session_user_id),
+                data.router_model_template,
+            )
+        )
 
     @router.post("/teacher/classes")
     async def create_class(data: ClassRequest, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):

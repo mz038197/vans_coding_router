@@ -298,6 +298,16 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS router_model_templates (
+                    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+                    document_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._backfill_router_model_templates(conn)
 
     def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:

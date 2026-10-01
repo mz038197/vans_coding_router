@@ -168,6 +168,11 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 ON agent_action_audits(actor_user_id);
                 CREATE INDEX IF NOT EXISTS agent_action_audits_target
                 ON agent_action_audits(class_id, session_id);
+                CREATE TABLE IF NOT EXISTS router_model_templates (
+                    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+                    document_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_agent_action_audit_target_nullable(conn)
@@ -242,6 +247,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._backfill_user_roles(conn)
             self._backfill_ended_session_expires(conn)
             self._backfill_session_chat_language_models(conn)
+            self._backfill_router_model_templates(conn)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}

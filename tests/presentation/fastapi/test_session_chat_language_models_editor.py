@@ -353,8 +353,9 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     keyed_ids = [model["id"] for model in keyed.json()[0]["models"]]
     assert keyed_ids == ["vcr-auto"]
 
+    client.cookies.clear()
     public = client.get("/extension/chat-language-models")
-    assert public.json() == load_vans_template()
+    assert public.status_code == 401
 
     models = client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
     listed = [item["id"] for item in models.json()["data"]]

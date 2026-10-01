@@ -618,14 +618,32 @@ class PortalUseCase:
             raise ValueError("classroom nickname is too long")
         return self.repo.redeem_invite_with_nickname(invite_code, cleaned)
 
-    def chat_language_models_template(self, api_key: str | None = None) -> list[dict[str, Any]]:
-        template = load_vans_template()
-        if not api_key:
-            return template
-        document = self._presented_session_document(api_key)
+    def router_model_template(self, user_id: int) -> list[dict[str, Any]]:
+        self._assert_teacher(user_id)
+        document = self.repo.get_router_model_template(user_id)
         if document is None:
-            return template
-        return classroom_vscode_model_list(template)
+            raise PermissionError("teacher only")
+        return document
+
+    def save_router_model_template(self, user_id: int, document: Any) -> list[dict[str, Any]]:
+        self._assert_teacher(user_id)
+        normalized = normalize_session_chat_language_models(document)
+        return self.repo.save_router_model_template(user_id, normalized)
+
+    def chat_language_models_template(
+        self,
+        api_key: str | None = None,
+        portal_user_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if api_key:
+            self._require_usable_api_key(api_key)
+            context = self.repo.verify_api_key_context(api_key)
+            if context is not None and context.session_id is not None:
+                self._presented_session_document(api_key)
+                return classroom_vscode_model_list(load_vans_template())
+        if portal_user_id is not None:
+            return self.router_model_template(portal_user_id)
+        raise PermissionError("需要 Portal 登入或 Classroom API Key")
 
     def vscode_install_models(self, api_key: str | None = None) -> list[dict[str, Any]]:
         if api_key:

@@ -81,11 +81,18 @@ def _portal_cookie(repo, user_id: int) -> dict[str, str]:
     return {"vcr_portal_session": token}
 
 
-def test_chat_language_models_template_is_public(tmp_path):
-    client, _, _ = _client(tmp_path)
-    response = client.get("/extension/chat-language-models")
-    assert response.status_code == 200
-    assert response.json() == load_vans_template()
+def test_chat_language_models_template_requires_a_teacher_session(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    anonymous = client.get("/extension/chat-language-models")
+    assert anonymous.status_code == 401
+
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    loaded = client.get(
+        "/extension/chat-language-models",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    assert loaded.status_code == 200
+    assert loaded.json() == load_vans_template()
 
 
 def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
@@ -172,10 +179,16 @@ def test_keyed_chat_language_models_returns_session_document_not_live_template(t
     assert [model["id"] for model in keyed.json()[0]["models"]] == ["vcr-auto"]
     assert "sitting-only" not in keyed.text
 
+    client.cookies.clear()
     public = client.get("/extension/chat-language-models")
-    assert public.status_code == 200
-    assert public.json() == load_vans_template()
-    assert public.json() != document
+    assert public.status_code == 401
+    teacher_template = client.get(
+        "/teacher/router-model-template",
+        cookies=_portal_cookie(repo, teacher["id"]),
+    )
+    assert teacher_template.status_code == 200
+    assert teacher_template.json() == load_vans_template()
+    assert teacher_template.json() != document
 
 
 def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
@@ -252,7 +265,7 @@ def test_chat_language_models_invalid_bearer_is_forbidden(tmp_path):
     assert response.status_code == 403
 
 
-def test_chat_language_models_personal_key_returns_full_template(tmp_path):
+def test_chat_language_models_personal_key_is_not_a_model_list_read(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
@@ -261,8 +274,7 @@ def test_chat_language_models_personal_key_returns_full_template(tmp_path):
         "/extension/chat-language-models",
         headers={"Authorization": f"Bearer {personal}"},
     )
-    assert response.status_code == 200
-    assert response.json() == load_vans_template()
+    assert response.status_code == 403
 
 
 def test_session_model_allowlist_rejects_ids_outside_template(tmp_path):
@@ -402,9 +414,9 @@ def test_keyed_chat_language_models_fails_after_session_end(tmp_path):
     assert after_end.status_code == 401
     assert after_end.json()["detail"] == "API 金鑰已過期，請至 Portal 重新取得邀請碼"
 
+    client.cookies.clear()
     public = client.get("/extension/chat-language-models")
-    assert public.status_code == 200
-    assert public.json() == load_vans_template()
+    assert public.status_code == 401
 
 
 def test_v1_chat_still_fails_after_session_end(tmp_path):

@@ -144,7 +144,8 @@
         <div id="keyTab">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
           <button onclick="resetTeacherKey()">重設個人 API Key</button>
-          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製儲存。</p>
+          <button type="button" class="btn-secondary" onclick="beginEditRouterModelTemplate()">編輯模型範本</button>
+          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製儲存。模型範本是這把個人 API Key 的 vcr-auto 候選清單，新課堂會在建立時複製一次。</p>
           <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
@@ -2850,7 +2851,7 @@ snippets:
 
     async function loadRouterModelTemplate() {
       if (routerModelTemplate) return routerModelTemplate;
-      const data = await api('/extension/chat-language-models');
+      const data = await api('/teacher/router-model-template');
       routerModelTemplate = Array.isArray(data) ? data : [];
       return routerModelTemplate;
     }
@@ -3186,15 +3187,21 @@ snippets:
     }
 
     function isSessionChatModelsDraftDirty() {
-      const session = sessionChatModelsContext
-        && window.__sessionById
-        && window.__sessionById[sessionChatModelsContext.sessionId];
-      const saved = modelsFromDocument(session && session.session_chat_language_models);
+      const editingTemplate = sessionChatModelsContext && sessionChatModelsContext.mode === 'template';
+      const saved = editingTemplate
+        ? modelsFromDocument(routerModelTemplate)
+        : modelsFromDocument(
+          sessionChatModelsContext
+            && window.__sessionById
+            && window.__sessionById[sessionChatModelsContext.sessionId]
+            && window.__sessionById[sessionChatModelsContext.sessionId].session_chat_language_models,
+        );
       const current = sessionChatModelsDraft.models || [];
       if (saved.length !== current.length) return true;
-      const mark = (models) => models
-        .map((model) => `${model.id}:${modelShelf(model)}`)
-        .sort();
+      const mark = (models) => {
+        const labels = models.map((model) => `${model.id}:${modelShelf(model)}`);
+        return editingTemplate ? labels : labels.sort();
+      };
       return JSON.stringify(mark(saved)) !== JSON.stringify(mark(current));
     }
 
@@ -3240,6 +3247,32 @@ snippets:
       }
     }
 
+    async function beginEditRouterModelTemplate() {
+      const modal = document.getElementById('editSessionChatModelsModal');
+      const title = document.getElementById('editSessionChatModelsTitle');
+      if (!modal) return;
+      ensureSessionChatModelsDropzoneBound();
+      const data = await api('/teacher/router-model-template');
+      routerModelTemplate = Array.isArray(data) ? data : [];
+      sessionChatModelsContext = { mode: 'template' };
+      sessionChatModelsLocked = false;
+      sessionChatModelsDraft = {
+        models: modelsFromDocument(routerModelTemplate),
+        removed: {},
+      };
+      const shelf = document.getElementById('sessionDecisionShelf');
+      if (shelf) shelf.value = 'text';
+      if (title) title.textContent = '編輯模型範本';
+      setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
+      setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
+      const search = document.getElementById('sessionChatModelsSearch');
+      if (search) search.value = '';
+      await loadSessionChatModelsCatalog('text');
+      populateSessionChatModelsProviders();
+      renderSessionChatModelsList();
+      modal.classList.add('show');
+    }
+
     async function beginEditSessionChatLanguageModels(classId, sessionId) {
       const modal = document.getElementById('editSessionChatModelsModal');
       const title = document.getElementById('editSessionChatModelsTitle');
@@ -3271,6 +3304,27 @@ snippets:
     async function saveSessionChatLanguageModels() {
       if (!sessionChatModelsContext || sessionChatModelsLocked) return;
       const saveBtn = document.getElementById('sessionChatModelsSaveBtn');
+      if (sessionChatModelsContext.mode === 'template') {
+        sessionChatModelsLocked = true;
+        if (saveBtn) saveBtn.disabled = true;
+        setSessionChatModelsMsg('sessionChatModelsSaveMsg', '儲存中…', false);
+        try {
+          const saved = await api('/teacher/router-model-template', {
+            method: 'PUT',
+            body: JSON.stringify({
+              router_model_template: documentFromDraft(sessionChatModelsDraft),
+            }),
+          });
+          routerModelTemplate = Array.isArray(saved) ? saved : [];
+          closeSessionChatModelsModal();
+        } catch (err) {
+          sessionChatModelsLocked = false;
+          setSessionChatModelsMsg('sessionChatModelsSaveMsg', err?.message || '儲存失敗', true);
+        } finally {
+          if (saveBtn) saveBtn.disabled = false;
+        }
+        return;
+      }
       const { classId, sessionId } = sessionChatModelsContext;
       sessionChatModelsLocked = true;
       if (saveBtn) saveBtn.disabled = true;

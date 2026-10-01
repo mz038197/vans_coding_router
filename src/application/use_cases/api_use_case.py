@@ -18,15 +18,18 @@ from src.infrastructure.logging.message_preview import (
 )
 
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
+from src.domain.decision_model import DECISION_SHELF_KEY
 from src.domain.model_shelf import (
     IMAGE_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
+    omit_non_text_shelf_models,
+    shelf_model_ids,
 )
 from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
-from src.domain.session_model_allowlist import is_model_allowed
+from src.domain.session_model_allowlist import allowlist_from_document, is_model_allowed
 from src.domain.errors import (
     DecisionDisabledError,
     ImageGenerationDisabledError,
@@ -63,19 +66,7 @@ class ApiUseCase:
                 "object": "list",
                 "data": [{"id": VCR_AUTO_MODEL_ID, "object": "model"}],
             }
-        payload = await self.gateway.models()
-        hidden_ids = set(self._decision_model_ids(auth_context))
-        hidden_ids.update(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
-        hidden_ids.update(self._shelf_model_ids(auth_context, SPEECH_SHELF_KEY))
-        hidden_ids.update(self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY))
-        if not hidden_ids:
-            return payload
-        data = [
-            item
-            for item in payload.get("data") or []
-            if not (isinstance(item, dict) and item.get("id") in hidden_ids)
-        ]
-        return {**payload, "data": data}
+        return await self.gateway.models()
 
     async def chat_nonstream(
         self,
@@ -295,11 +286,7 @@ class ApiUseCase:
         )
 
     def _use_vcr_auto_walk(self, model_id: Any, auth_context: AuthContext | None) -> bool:
-        return (
-            model_id == VCR_AUTO_MODEL_ID
-            and auth_context is not None
-            and auth_context.session_id is not None
-        )
+        return model_id == VCR_AUTO_MODEL_ID and auth_context is not None
 
     def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
         if self._use_vcr_auto_walk(model_id, auth_context):
@@ -421,6 +408,10 @@ class ApiUseCase:
         disabled_error: type[Exception],
     ) -> None:
         if self._is_personal_api_key(auth_context):
+            if self._use_vcr_auto_walk(model_id, auth_context) and not self._shelf_model_ids(
+                auth_context, shelf_key
+            ):
+                raise disabled_error()
             return
         ids = self._shelf_model_ids(auth_context, shelf_key)
         if not ids:
@@ -430,7 +421,18 @@ class ApiUseCase:
         if not isinstance(model_id, str) or model_id not in ids:
             raise ModelNotAllowedError()
 
+    def _holder_template(self, auth_context: AuthContext | None) -> list[Any] | None:
+        if auth_context is None or auth_context.user_id is None:
+            return None
+        getter = getattr(self.api_key_repo, "get_router_model_template", None)
+        if not callable(getter):
+            return None
+        return getter(auth_context.user_id)
+
     def _shelf_model_ids(self, auth_context: AuthContext | None, shelf_key: str) -> list[str]:
+        if self._is_personal_api_key(auth_context):
+            ids = shelf_model_ids(self._holder_template(auth_context), shelf_key)
+            return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
         if auth_context is None or auth_context.session_id is None:
             return []
         getter = getattr(self.api_key_repo, "get_shelf_model_ids", None)
@@ -440,6 +442,9 @@ class ApiUseCase:
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
     def _text_model_ids(self, auth_context: AuthContext | None) -> list[str]:
+        if self._is_personal_api_key(auth_context):
+            ids = allowlist_from_document(omit_non_text_shelf_models(self._holder_template(auth_context))) or []
+            return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
         if auth_context is None or auth_context.session_id is None:
             return []
         getter = getattr(self.api_key_repo, "get_session_model_allowlist", None)
@@ -721,7 +726,12 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         del api_key, client_ip
         model_id = body.get("model")
-        if not self._is_personal_api_key(auth_context):
+        if self._is_personal_api_key(auth_context):
+            if self._use_vcr_auto_walk(str(model_id or ""), auth_context) and not self._decision_model_ids(
+                auth_context
+            ):
+                raise DecisionDisabledError()
+        else:
             self._assert_classroom_decision_allowed(auth_context, model_id)
         if self._use_vcr_auto_walk(str(model_id or ""), auth_context):
             return await self._decisions_vcr_auto(body, auth_context)
@@ -745,6 +755,8 @@ class ApiUseCase:
             raise ModelNotAllowedError()
 
     def _decision_model_ids(self, auth_context: AuthContext | None) -> list[str]:
+        if self._is_personal_api_key(auth_context):
+            return self._shelf_model_ids(auth_context, DECISION_SHELF_KEY)
         if auth_context is None or auth_context.session_id is None:
             return []
         getter = getattr(self.api_key_repo, "get_decision_model_ids", None)

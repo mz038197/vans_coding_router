@@ -535,6 +535,76 @@ class RouterRepositoryBase(ABC):
             (document_json,),
         )
 
+    def _starter_template_json(self) -> str:
+        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+        return dump_session_chat_language_models_json(load_vans_template()) or "[]"
+
+    def _ensure_router_model_template(self, conn: Any, user_id: int, roles: tuple[str, ...] | list[str]) -> None:
+        if "teacher" not in roles and "admin" not in roles:
+            return
+        existing = conn.execute(
+            self._sql("SELECT user_id FROM router_model_templates WHERE user_id = ?"),
+            (user_id,),
+        ).fetchone()
+        if existing:
+            return
+        conn.execute(
+            self._sql(
+                "INSERT INTO router_model_templates(user_id, document_json, updated_at) VALUES (?, ?, ?)"
+            ),
+            (user_id, self._starter_template_json(), dt(utc_now())),
+        )
+
+    def _backfill_router_model_templates(self, conn: Any) -> None:
+        rows = conn.execute(
+            self._sql(
+                """
+                SELECT DISTINCT user_id FROM user_roles
+                WHERE role IN ('teacher', 'admin')
+                """
+            )
+        ).fetchall()
+        for row in rows:
+            self._ensure_router_model_template(conn, int(row["user_id"]), ("teacher",))
+
+    def get_router_model_template(self, user_id: int) -> list[Any] | None:
+        with self._connect() as conn:
+            row = self._router_model_template_row(conn, user_id)
+            if row is None:
+                roles = self._roles_for_user(conn, user_id)
+                self._ensure_router_model_template(conn, user_id, roles)
+                row = self._router_model_template_row(conn, user_id)
+        if row is None:
+            return None
+        return parse_session_chat_language_models_json(row["document_json"])
+
+    def _router_model_template_row(self, conn: Any, user_id: int) -> Any:
+        return conn.execute(
+            self._sql("SELECT document_json FROM router_model_templates WHERE user_id = ?"),
+            (user_id,),
+        ).fetchone()
+
+    def save_router_model_template(self, user_id: int, document: list[Any]) -> list[Any]:
+        payload = dump_session_chat_language_models_json(document)
+        now = dt(utc_now())
+        with self._connect() as conn:
+            updated = conn.execute(
+                self._sql(
+                    "UPDATE router_model_templates SET document_json = ?, updated_at = ? WHERE user_id = ?"
+                ),
+                (payload, now, user_id),
+            )
+            if updated.rowcount == 0:
+                conn.execute(
+                    self._sql(
+                        "INSERT INTO router_model_templates(user_id, document_json, updated_at) "
+                        "VALUES (?, ?, ?)"
+                    ),
+                    (user_id, payload, now),
+                )
+        return document
+
     def is_enabled(self) -> bool:
         return True
 
@@ -594,6 +664,7 @@ class RouterRepositoryBase(ABC):
             self._sql("UPDATE users SET role = ?, updated_at = ? WHERE id = ?"),
             (self._primary_role(valid_roles), now, user_id),
         )
+        self._ensure_router_model_template(conn, user_id, valid_roles)
 
     def upsert_google_user(self, email: str, name: str, google_sub: str | None = None) -> dict[str, Any]:
         roles = self._roles_for_email(email)
@@ -925,9 +996,11 @@ class RouterRepositoryBase(ABC):
         invite_code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
         now = dt(utc_now())
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
-        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
-        document_json = dump_session_chat_language_models_json(load_vans_template())
+        owner_template = self.get_router_model_template(int(klass["teacher_id"]))
+        document_json = dump_session_chat_language_models_json(
+            owner_template if owner_template is not None else json.loads(self._starter_template_json())
+        )
 
         with self._connect() as conn:
             session_id = self._insert_returning_id(

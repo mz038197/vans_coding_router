@@ -287,6 +287,84 @@ def test_chat_vcr_auto_does_not_walk_on_other_upstream_errors(harness: _Harness)
     assert harness.logs() == []
 
 
+def test_personal_api_key_vcr_auto_walks_the_holder_template(harness: _Harness):
+    harness.set_models([_model("ollama_cloud@sitting-only:cloud")])
+    harness.repo.save_router_model_template(harness.teacher["id"], _document(_text_shelf()))
+    harness.ollama._client.request = AsyncMock(return_value=_json_response(402, EXTRA_USAGE))
+    personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["model"] == VCR_AUTO_MODEL_ID
+    assert harness.ollama._client.request.await_count == 1
+    assert harness.openrouter._client.request.await_count == 1
+    assert harness.openrouter._client.request.await_args.kwargs["json"]["model"] == SECOND_UPSTREAM
+
+
+def test_personal_api_key_vcr_auto_on_an_empty_template_shelf_is_refused(harness: _Harness):
+    harness.repo.save_router_model_template(harness.teacher["id"], _document([]))
+    personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "model_not_allowed"
+    assert harness.ollama._client.request.await_count == 0
+    assert harness.openrouter._client.request.await_count == 0
+
+
+def test_personal_api_key_named_model_keeps_forwarding(harness: _Harness):
+    harness.repo.save_router_model_template(harness.teacher["id"], _document([_model(SECOND)]))
+    personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={"model": FIRST, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["model"] == FIRST_UPSTREAM
+    assert harness.ollama._client.request.await_args.kwargs["json"]["model"] == FIRST_UPSTREAM
+    assert harness.openrouter._client.request.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_personal_api_key_vcr_auto_leaves_a_full_pool(tmp_path):
+    harness = _Harness(tmp_path, cap=1, timeout=30)
+    harness.set_models([_model("ollama_cloud@sitting-only:cloud")])
+    harness.repo.save_router_model_template(harness.teacher["id"], _document(_text_shelf()))
+    personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
+    held = await harness.ollama._pool.acquire()
+    try:
+        transport = httpx.ASGITransport(app=harness.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            response = await http.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {personal}"},
+                json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}]},
+                timeout=1,
+            )
+    finally:
+        await harness.ollama._pool.release(held)
+    assert response.status_code == 200
+    assert response.json()["model"] == VCR_AUTO_MODEL_ID
+    assert harness.ollama._client.request.await_count == 0
+    assert harness.openrouter._client.request.await_args.kwargs["json"]["model"] == SECOND_UPSTREAM
+
+
 def test_empty_text_shelf_refuses_vcr_auto_before_upstream(harness: _Harness):
     harness.set_models([])
     from fastapi.testclient import TestClient
