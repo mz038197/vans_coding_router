@@ -1466,6 +1466,88 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
+      background: var(--surface-1);
+    }
+
+    #appShell.has-teacher-menu .page-main {
+      max-width: none;
+      margin: 0;
+      padding-left: 256px;
+      padding-right: 20px;
+    }
+
+    #appShell.has-teacher-menu #teacher,
+    #appShell.has-teacher-menu .teacher-layout {
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    #appShell.has-teacher-menu #teacher {
+      padding: 0;
+      margin: 0;
+    }
+
+    #appShell.has-teacher-menu .teacher-layout {
+      display: block;
+      min-height: 0;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      overflow: visible;
+      background: transparent;
+    }
+
+    #appShell.has-teacher-menu .app-sidebar {
+      position: fixed;
+      top: 68px;
+      left: 0;
+      bottom: 0;
+      z-index: 40;
+      width: 232px;
+      overflow: auto;
+    }
+
+    button.teacher-menu-button {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      margin: 0;
+      padding: 0;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text-primary);
+      box-shadow: none;
+    }
+
+    button.teacher-menu-button:hover { background: var(--surface-3); color: var(--text-primary); }
+
+    .teacher-menu-backdrop { display: none; }
+
+    @media (max-width: 900px) {
+      #appShell.has-teacher-menu .page-main { padding-left: 16px; }
+      #appShell.has-teacher-menu .app-sidebar {
+        z-index: 120;
+        transform: translateX(-105%);
+        transition: transform 0.2s ease;
+      }
+      #appShell.has-teacher-menu.is-teacher-menu-open .app-sidebar {
+        transform: translateX(0);
+        box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
+      }
+      #appShell.has-teacher-menu .teacher-menu-button { display: inline-flex; }
+      #appShell.has-teacher-menu.is-teacher-menu-open .teacher-menu-backdrop {
+        display: block;
+        position: fixed;
+        z-index: 110;
+        inset: 68px 0 0 0;
+        background: rgba(0, 0, 0, 0.45);
+      }
     }
 
     .sidebar-section-label {
@@ -1803,8 +1885,6 @@
     .broadcast-row input { flex: 1; margin: 0; }
 
     @media (max-width: 900px) {
-      .teacher-layout { flex-direction: column; }
-      .app-sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--border-strong); flex-direction: row; flex-wrap: wrap; }
       .lobby-shell { flex-direction: column; }
       .lobby-sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--border-strong); max-height: 240px; }
       .lobby-main:has(.lobby-room-layout) { overflow-y: auto; }
@@ -1831,6 +1911,20 @@
         overflow-y: visible;
       }
     }
+
+    .course-toolbar .add-course-form { display: inline-flex; align-items: center; }
+    .course-toolbar .add-course-form input { width: 12rem; }
+    .session-form-compact {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0 12px;
+      padding: 8px 10px;
+    }
+    .session-form-compact input { margin: 0; }
+    .session-form-compact .session-name-input { width: 16rem; max-width: 100%; }
+    .course-detail-header .end-course-btn { margin-left: auto; }
 
     .session-layout-split {
       display: grid;

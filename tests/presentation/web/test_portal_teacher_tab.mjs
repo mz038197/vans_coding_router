@@ -64,6 +64,7 @@ function loadTeacherTabFns() {
     "escapeHtml",
     "currentTeacherTabId",
     "showTab",
+    "setTeacherMenuOpen",
     "syncCourseSelect",
     "refresh",
     "reloadSessionViews",
@@ -89,6 +90,14 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
   byId.student = { classList: makeClassList(["hidden"]) };
   byId.teacher = { classList: makeClassList(["hidden"]) };
   byId.adminBtn = { classList: makeClassList(["hidden"]) };
+  byId.appShell = { classList: makeClassList([]) };
+  byId.teacherMenuButton = {
+    setAttribute() {},
+    querySelector() {
+      return { className: "" };
+    },
+  };
+  byId.teacherMenu = { inert: false };
   byId["sessions-panel"] = { classList: makeClassList([]) };
   byId.courseSelect = { value: selectedCourseId, innerHTML: "" };
   byId.courseStatusFilter = { value: "active" };
@@ -127,6 +136,11 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
       return {};
     },
     showAppShell() {},
+    window: {
+      matchMedia() {
+        return { matches: false };
+      },
+    },
     renderProfileLine() {
       return "";
     },

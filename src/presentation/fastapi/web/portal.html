@@ -59,9 +59,12 @@
     </main>
   </div>
 
-  <div id="appShell" class="hidden">
+    <div id="appShell" class="hidden">
     <header class="site-nav">
       <div class="nav-brand">
+        <button type="button" id="teacherMenuButton" class="teacher-menu-button" aria-label="開啟選單" aria-controls="teacherMenu" aria-expanded="false">
+          <i class="fas fa-bars" aria-hidden="true"></i>
+        </button>
         <div class="nav-logo"><img src="/portal/static/brand-logo.png" alt="" width="32" height="32" /></div>
         <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
       </div>
@@ -119,7 +122,7 @@
 
       <section id="teacher" class="glass-card hidden">
         <div class="teacher-layout glass-panel">
-          <nav class="app-sidebar" aria-label="老師功能">
+          <nav class="app-sidebar" id="teacherMenu" aria-label="老師功能">
             <div class="sidebar-section-label">老師</div>
             <button type="button" class="sidebar-nav-btn tab-active" data-tab="keyTab" onclick="showTab('keyTab')">
               <i class="fas fa-key"></i> 個人 API Key
@@ -133,13 +136,14 @@
             <button type="button" class="sidebar-nav-btn" data-tab="probeTab" onclick="showTab('probeTab')">
               <i class="fas fa-flask"></i> API 測試
             </button>
-            <a class="sidebar-nav-btn" href="/lobby" target="_blank" rel="noopener">
+            <a class="sidebar-nav-btn" href="/lobby" target="_blank" rel="noopener" onclick="setTeacherMenuOpen(false)">
               <i class="fas fa-comments"></i> Agent Lobby
             </a>
             <button type="button" id="adminBtn" class="sidebar-nav-btn hidden" data-tab="adminTab" onclick="showTab('adminTab')">
               <i class="fas fa-shield-halved"></i> 系統管理
             </button>
           </nav>
+          <div class="teacher-menu-backdrop" id="teacherMenuBackdrop"></div>
           <div class="teacher-content">
         <div id="keyTab">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
@@ -150,19 +154,21 @@
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
         <div id="classTab" class="hidden">
-          <h3>建立課程</h3>
-          <input id="className" placeholder="課程名稱" />
-          <button onclick="createClass()">建立</button>
           <div class="course-toolbar">
-            <input id="courseSearch" placeholder="搜尋課程名稱" oninput="onCourseFilterChange()" />
-            <select id="courseStatusFilter" onchange="onCourseFilterChange()">
+            <input id="courseSearch" placeholder="搜尋課程" oninput="onCourseFilterChange()" />
+            <select id="courseStatusFilter" aria-label="課程狀態" onchange="onCourseFilterChange()">
               <option value="active">進行中</option>
               <option value="all">全部</option>
               <option value="ended">已結束</option>
             </select>
-            <select id="courseSelect" onchange="onCourseSelectChange()">
+            <select id="courseSelect" aria-label="課程" onchange="onCourseSelectChange()">
               <option value="">請選擇課程</option>
             </select>
+            <button type="button" class="btn-secondary" id="addCourseBtn">＋ 課程</button>
+            <span id="addCourseForm" class="add-course-form hidden">
+              <input id="className" placeholder="新課程名稱" aria-label="新課程名稱" />
+              <button type="button" id="createClassBtn" onclick="createClass()">建立</button>
+            </span>
           </div>
           <div id="courseDetail"><p class="hint">請選擇課程</p></div>
         </div>
@@ -1211,12 +1217,29 @@
       return TEACHER_TAB_IDS.includes(id) ? id : 'keyTab';
     }
 
+    function setTeacherMenuOpen(open) {
+      const shell = document.getElementById('appShell');
+      const button = document.getElementById('teacherMenuButton');
+      const menu = document.getElementById('teacherMenu');
+      const narrow = window.matchMedia('(max-width: 900px)').matches;
+      const show = Boolean(open) && narrow && shell.classList.contains('has-teacher-menu');
+      shell.classList.toggle('is-teacher-menu-open', show);
+      if (button) {
+        button.setAttribute('aria-expanded', show ? 'true' : 'false');
+        button.setAttribute('aria-label', show ? '關閉選單' : '開啟選單');
+        const icon = button.querySelector('i');
+        if (icon) icon.className = show ? 'fas fa-xmark' : 'fas fa-bars';
+      }
+      if (menu) menu.inert = narrow && shell.classList.contains('has-teacher-menu') && !show;
+    }
+
     function showTab(id) {
       TEACHER_TAB_IDS.forEach(x =>
         document.getElementById(x).classList.toggle('hidden', x !== id));
       document.querySelectorAll('.sidebar-nav-btn[data-tab]').forEach(btn => {
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
       });
+      setTeacherMenuOpen(false);
       if (id === 'monitorTab') {
         syncMonitorCourseSelect();
         startUpstreamPoolsPoll();
@@ -1494,9 +1517,12 @@
       showAppShell();
       document.getElementById('navWho').innerHTML = renderProfileLine(me);
       renderActiveKeysSection(me.keys || []);
+      const teacherOn = currentRoles.includes('teacher') || currentRoles.includes('admin');
       document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
-      document.getElementById('teacher').classList.toggle('hidden', !(currentRoles.includes('teacher') || currentRoles.includes('admin')));
-      if (currentRoles.includes('teacher') || currentRoles.includes('admin')) {
+      document.getElementById('teacher').classList.toggle('hidden', !teacherOn);
+      document.getElementById('appShell').classList.toggle('has-teacher-menu', teacherOn);
+      setTeacherMenuOpen(false);
+      if (teacherOn) {
         document.getElementById('adminBtn').classList.toggle('hidden', !currentRoles.includes('admin'));
         teacherClasses = me.classes || [];
         renderTeacherKeyMeta(me.keys || []);
@@ -1561,17 +1587,17 @@
           <span>${escapeHtml(course.name)}</span>
           ${renderStatusTag('course', course.status)}
           <span class="hint hint-inline">${course.member_count ?? 0} 位成員</span>
+          ${currentRoles.includes('admin') && !ended ? `<button type="button" class="btn-danger end-course-btn" onclick="disableClass(${course.id})">結束課程</button>` : ''}
         </div>
         ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
-          <div class="session-form">
-            <label>課堂名稱 <input type="text" id="sessionName" placeholder="例如：第一堂：環境建置" /></label>
-            <label>課堂時間 <input type="datetime-local" id="sessionAt" value="${defaultDatetimeLocalValue()}" /></label>
-            <label>TTL 小時 <input type="number" id="sessionTtl" value="2" min="1" class="input-narrow" /></label>
+          <div class="session-form session-form-compact">
+            <input type="text" id="sessionName" class="session-name-input" placeholder="新課堂名稱" aria-label="課堂名稱" />
+            <input type="datetime-local" id="sessionAt" aria-label="課堂時間" value="${defaultDatetimeLocalValue()}" />
+            <input type="number" id="sessionTtl" value="2" min="1" class="input-narrow" aria-label="TTL 小時" title="課堂時數，key 在這個時間後到期" />
+            <span class="hint hint-inline">小時</span>
             <button onclick="createSession(${course.id})">新增課堂</button>
-            <span class="hint">key 將在課堂時間 + TTL 小時後到期</span>
           </div>`}
         <div id="sessions-panel"><p class="hint">載入中…</p></div>
-        ${currentRoles.includes('admin') && !ended ? `<button class="btn-danger" onclick="disableClass(${course.id})">結束課程</button>` : ''}
       `;
       loadClassSessions(course.id).catch(err => showSessionError(course.id, err.message));
     }
@@ -1849,11 +1875,28 @@
     }
 
     async function createClass() {
-      const name = document.getElementById('className').value.trim();
-      if (!name) throw new Error('請輸入課程名稱');
+      const input = document.getElementById('className');
+      const name = input.value.trim();
+      if (!name) {
+        input.focus();
+        return;
+      }
       await api('/teacher/classes', {method:'POST', body: JSON.stringify({name})});
-      document.getElementById('className').value = '';
+      closeAddCourse();
       await refresh();
+    }
+
+    function closeAddCourse() {
+      const input = document.getElementById('className');
+      if (input) input.value = '';
+      document.getElementById('addCourseForm').classList.add('hidden');
+      document.getElementById('addCourseBtn').classList.remove('hidden');
+    }
+
+    function openAddCourse() {
+      document.getElementById('addCourseBtn').classList.add('hidden');
+      document.getElementById('addCourseForm').classList.remove('hidden');
+      document.getElementById('className').focus();
     }
 
     function showSessionError(classId, message) {
@@ -3992,6 +4035,20 @@ snippets:
       altEl.classList.add('hidden');
     }
 
+    document.getElementById('addCourseBtn').addEventListener('click', openAddCourse);
+    document.getElementById('className').addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeAddCourse();
+      if (event.key === 'Enter') createClass();
+    });
+    document.getElementById('teacherMenuButton').addEventListener('click', () => {
+      const shell = document.getElementById('appShell');
+      setTeacherMenuOpen(!shell.classList.contains('is-teacher-menu-open'));
+    });
+    document.getElementById('teacherMenuBackdrop').addEventListener('click', () => setTeacherMenuOpen(false));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setTeacherMenuOpen(false);
+    });
+    window.matchMedia('(max-width: 900px)').addEventListener('change', () => setTeacherMenuOpen(false));
     bindPortalThemeToggles();
     loginNetwork.init();
     renderVscodeInstallDownloads();

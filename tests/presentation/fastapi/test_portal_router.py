@@ -189,6 +189,32 @@ def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
     assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
 
 
+def test_portal_teacher_menu_is_a_full_height_rail_and_a_hamburger(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    css = client.get("/portal/static/portal.css").text
+    assert 'id="teacherMenuButton"' in html
+    assert 'aria-controls="teacherMenu"' in html
+    assert 'id="teacherMenu"' in html
+    assert "has-teacher-menu" in html
+    assert "setTeacherMenuOpen" in html
+    assert "@media (max-width: 900px)" in css
+    assert ".teacher-menu-button { display: inline-flex; }" in css
+    assert "translateX(-105%)" in css
+    assert "setTeacherMenuOpen(false)" in html
+
+
+def test_portal_course_toolbar_matches_the_compact_prototype(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert 'id="addCourseBtn"' in html
+    assert "openAddCourse" in html
+    assert "closeAddCourse" in html
+    assert "session-form-compact" in html
+    assert "end-course-btn" in html
+    assert "新課堂名稱" in html
+
+
 def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
