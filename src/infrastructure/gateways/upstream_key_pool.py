@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Any
 
-from src.domain.errors import UpstreamBusyError
+from src.domain.errors import NoFreeConcurrencySlotError, UpstreamBusyError
 
 
 class NoSelectableUpstreamKeyError(Exception):
@@ -184,8 +184,11 @@ class UpstreamKeyPool:
                 self._in_flight[index] -= 1
             self._condition.notify(1)
 
-    async def acquire(self, exclude: frozenset[int] | None = None) -> int:
+    async def acquire(self, exclude: frozenset[int] | None = None, *, wait: bool = True) -> int:
         """Acquire a key slot.
+
+        When ``wait`` is false and every selectable key is at its cap, raise
+        ``NoFreeConcurrencySlotError`` instead of queueing.
 
         Exception-safe: if cancellation/errors occur after the in-flight counter
         is incremented (including during acquire_delay), the slot is released
@@ -202,6 +205,8 @@ class UpstreamKeyPool:
                     if not self._has_candidate_keys(excluded, now):
                         raise NoSelectableUpstreamKeyError()
                     index = self._pick_index(excluded, now)
+                    if index is None and not wait:
+                        raise NoFreeConcurrencySlotError()
                     if index is not None:
                         if waiting:
                             self._waiting -= 1

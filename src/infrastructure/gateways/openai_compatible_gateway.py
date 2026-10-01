@@ -36,6 +36,8 @@ from src.infrastructure.gateways.copilot_compat import (
     project_responses_reasoning_sse,
     sanitize_responses_request,
 )
+from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget, http_base_to_realtime_ws_url
+from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,31 @@ class OpenAICompatibleGateway:
 
     def _ensure_pool(self) -> UpstreamKeyPool | None:
         return self._pool
+
+    async def acquire_realtime_slot(self, *, wait: bool) -> int:
+        pool = self._ensure_pool()
+        if pool is None:
+            raise NoSelectableUpstreamKeyError()
+        try:
+            return await pool.acquire(wait=wait)
+        except NoSelectableUpstreamKeyError:
+            raise self._exhausted_keys_error(pool) from None
+
+    async def release_realtime_slot(self, index: int) -> None:
+        pool = self._ensure_pool()
+        if pool is not None:
+            await pool.release(index)
+
+    def realtime_target_for_slot(self, upstream_model: str, index: int) -> RealtimeUpstreamTarget:
+        pool = self._ensure_pool()
+        if pool is None or not self.provider.base_url:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
+        return RealtimeUpstreamTarget(
+            provider_name=self.provider.name,
+            upstream_model=upstream_model,
+            ws_url=http_base_to_realtime_ws_url(self.provider.base_url, upstream_model),
+            api_key=pool.key_at(index),
+        )
 
     @staticmethod
     async def _release_pool_slot(pool: UpstreamKeyPool | None, index: int | None) -> None:
@@ -421,7 +448,10 @@ class OpenAICompatibleGateway:
             index = None
             try:
                 try:
-                    index = await pool.acquire(exclude=frozenset(tried))
+                    index = await pool.acquire(
+                        exclude=frozenset(tried),
+                        wait=wait_for_pool_slot.get(),
+                    )
                 except NoSelectableUpstreamKeyError as exc:
                     raise (last_error or self._exhausted_keys_error(pool)) from exc
                 headers = self._headers(api_key=pool.key_at(index))
@@ -502,7 +532,10 @@ class OpenAICompatibleGateway:
             failover = False
             try:
                 try:
-                    index = await pool.acquire(exclude=frozenset(tried))
+                    index = await pool.acquire(
+                        exclude=frozenset(tried),
+                        wait=wait_for_pool_slot.get(),
+                    )
                 except NoSelectableUpstreamKeyError as exc:
                     raise (last_error or self._exhausted_keys_error(pool)) from exc
                 headers = self._headers(api_key=pool.key_at(index))

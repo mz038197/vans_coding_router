@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from src.domain.errors import UpstreamBusyError
+from src.domain.errors import NoFreeConcurrencySlotError, UpstreamBusyError
 from src.infrastructure.gateways.upstream_key_pool import UpstreamKeyPool
 
 
@@ -168,6 +168,23 @@ async def test_queue_timeout_raises_upstream_busy():
     assert pool.status()["busy_total"] == 1
     await pool.release(held)
     assert pool.in_flight_snapshot() == [0]
+
+
+@pytest.mark.asyncio
+async def test_acquire_without_wait_raises_when_every_key_is_at_cap():
+    pool = UpstreamKeyPool(
+        ["key-a"],
+        max_concurrent_per_key=1,
+        queue_timeout_sec=30,
+        acquire_delay_ms=0,
+    )
+    held = await pool.acquire()
+    with pytest.raises(NoFreeConcurrencySlotError):
+        await pool.acquire(wait=False)
+    assert pool.status()["waiting"] == 0
+    assert pool.status()["busy_total"] == 0
+    assert pool.in_flight_snapshot() == [1]
+    await pool.release(held)
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,9 @@ from src.domain.errors import (
     WrongCredentialTypeError,
 )
 from src.presentation.fastapi.openai_errors import (
+    is_chat_completions_path,
     is_openai_compatible_path,
+    is_responses_path,
     make_openai_error_body,
     openai_error_response,
 )
@@ -101,12 +103,16 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UpstreamBusyError)
     async def handle_upstream_busy(request: Request, exc: UpstreamBusyError):
         if is_openai_compatible_path(request.url.path):
-            return openai_error_response(
-                exc.status_code,
+            content = make_openai_error_body(
                 exc.message,
                 error_type="server_error",
                 code=exc.code,
             )
+            if exc.public_model and (
+                is_chat_completions_path(request.url.path) or is_responses_path(request.url.path)
+            ):
+                content["model"] = exc.public_model
+            return JSONResponse(status_code=exc.status_code, content=content)
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.message},

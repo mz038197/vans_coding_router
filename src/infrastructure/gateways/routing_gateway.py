@@ -8,6 +8,7 @@ from src.domain.entities.chat import ChatCompletionRequest
 from src.domain.errors import (
     InvalidModelIdError,
     ServiceUnavailableError,
+    SpeechTranscriptionNotSupportedError,
 )
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.infrastructure.config import resolve_provider_api_keys
@@ -195,6 +196,31 @@ class RoutingGateway:
 
     def prepare_audio_transcriptions_fields(self, fields: dict[str, Any]) -> None:
         self._resolve_audio_transcriptions_fields(fields)
+
+    async def lease_realtime(self, model_id: str, *, wait: bool):
+        """Acquire one pool slot and the realtime target for a shelf Model ID.
+
+        Returns ``(target, release)``. ``release`` returns that slot.
+        """
+        provider_name, upstream_model = parse_model_id(model_id, self._known_providers())
+        upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
+        gateway = self.gateways[provider_name]
+        acquire = getattr(gateway, "acquire_realtime_slot", None)
+        release_slot = getattr(gateway, "release_realtime_slot", None)
+        build = getattr(gateway, "realtime_target_for_slot", None)
+        if not callable(acquire) or not callable(release_slot) or not callable(build):
+            raise SpeechTranscriptionNotSupportedError("此 gateway 不支援 realtime transcription")
+        index = await acquire(wait=wait)
+        try:
+            target = build(upstream_model, index)
+        except BaseException:
+            await release_slot(index)
+            raise
+
+        async def release() -> None:
+            await release_slot(index)
+
+        return target, release
 
     def resolve_realtime(self, model_id: str) -> RealtimeUpstreamTarget:
         provider_name, upstream_model = parse_model_id(model_id, self._known_providers())

@@ -154,18 +154,28 @@ class MissingTargetError(AppError):
         )
 
 
+class NoFreeConcurrencySlotError(Exception):
+    """Selectable keys exist, but every one is at its concurrency cap.
+
+    Callers that still have a later Model ID must move on without queueing.
+    """
+
+
 class UpstreamBusyError(AppError):
     def __init__(
         self,
         message: str = (
             "The model provider is busy. Please wait a moment and try again."
         ),
+        *,
+        public_model: str | None = None,
     ):
         super().__init__(
             message=message,
             status_code=503,
             code="upstream_busy",
         )
+        self.public_model = public_model
 
 
 class QuarantineReleaseCooldownError(AppError):

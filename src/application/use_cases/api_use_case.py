@@ -1,6 +1,7 @@
 import json
 from contextlib import aclosing
-from typing import Any, AsyncGenerator
+from dataclasses import replace
+from typing import Any, AsyncGenerator, Awaitable, Callable
 
 from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
@@ -16,11 +17,13 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.model_shelf import (
     IMAGE_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
 )
+from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import is_model_allowed
@@ -34,6 +37,7 @@ from src.domain.errors import (
     TtsDisabledError,
 )
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
+from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
@@ -76,6 +80,8 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         self._assert_model_allowed(req.model, auth_context)
+        if self._use_vcr_auto_walk(req.model, auth_context):
+            return await self._chat_nonstream_vcr_auto(req, api_key, client_ip, auth_context)
         response = await self.gateway.chat_completions_nonstream(req)
         assistant_messages = extract_assistant_messages_for_log(response, CHAT_COMPLETIONS_PATH)
         self._log_request(
@@ -97,6 +103,10 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         self._assert_model_allowed(req.model, auth_context)
+        if self._use_vcr_auto_walk(req.model, auth_context):
+            async for chunk in self._chat_stream_vcr_auto(req, api_key, client_ip, auth_context):
+                yield chunk
+            return
         tracker = _SseStreamTracker(CHAT_COMPLETIONS_PATH)
         async with aclosing(self.gateway.chat_completions_stream(req)) as stream:
             async for chunk in stream:
@@ -124,6 +134,8 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         self._validate_responses_body(body)
         self._assert_model_allowed(str(body.get("model") or ""), auth_context)
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            return await self._responses_vcr_auto(body, api_key, client_ip, auth_context)
         response = await self.gateway.responses_create(body)
         assistant_messages = extract_assistant_messages_for_log(response, RESPONSES_PATH)
         self._log_responses_request(
@@ -146,6 +158,10 @@ class ApiUseCase:
     ) -> AsyncGenerator[bytes, None]:
         self._validate_responses_body(body)
         self._assert_model_allowed(str(body.get("model") or ""), auth_context)
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            async for chunk in self._responses_stream_vcr_auto(body, api_key, client_ip, auth_context):
+                yield chunk
+            return
         tracker = _SseStreamTracker(RESPONSES_PATH)
         async with aclosing(self.gateway.responses_create_stream(body)) as stream:
             async for chunk in stream:
@@ -169,6 +185,8 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         self._assert_image_generation_allowed(auth_context, body.get("model"))
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            return await self._images_vcr_auto(body, api_key, client_ip, auth_context)
         response = await self.gateway.images_create(body)
         self._log_images_request(
             body,
@@ -189,6 +207,10 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
         self._assert_image_generation_allowed(auth_context, body.get("model"))
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            async for chunk in self._images_stream_vcr_auto(body, api_key, client_ip, auth_context):
+                yield chunk
+            return
         tracker = _ImageSseStreamTracker()
         async with aclosing(self.gateway.images_create_stream(body)) as stream:
             async for chunk in stream:
@@ -227,6 +249,12 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            async for chunk in self._audio_speech_stream_vcr_auto(
+                body, api_key, client_ip, auth_context
+            ):
+                yield chunk
+            return
         byte_count = 0
         async with aclosing(self.gateway.audio_speech_create_stream(body)) as stream:
             async for chunk in stream:
@@ -261,7 +289,18 @@ class ApiUseCase:
             TtsDisabledError,
         )
 
+    def _use_vcr_auto_walk(self, model_id: Any, auth_context: AuthContext | None) -> bool:
+        return (
+            model_id == VCR_AUTO_MODEL_ID
+            and auth_context is not None
+            and auth_context.session_id is not None
+        )
+
     def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
+        if self._use_vcr_auto_walk(model_id, auth_context):
+            if not self._text_model_ids(auth_context):
+                raise ModelNotAllowedError()
+            return
         if auth_context is None or auth_context.session_id is None:
             return
         getter = getattr(self.api_key_repo, "get_session_model_allowlist", None)
@@ -285,7 +324,8 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> None:
         self._assert_tts_allowed(auth_context, body.get("model"))
-        self._prepare_audio_speech_body(body)
+        if not self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            self._prepare_audio_speech_body(body)
 
     def _prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
         prepare = getattr(self.gateway, "prepare_audio_speech_body", None)
@@ -300,6 +340,10 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
+        if self._use_vcr_auto_walk(str(fields.get("model") or ""), auth_context):
+            return await self._transcriptions_vcr_auto(
+                fields, file, api_key, client_ip, auth_context
+            )
         response = await self.gateway.audio_transcriptions_create(fields, file)
         self._log_transcription_request(
             fields,
@@ -320,6 +364,12 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        if self._use_vcr_auto_walk(str(fields.get("model") or ""), auth_context):
+            async for chunk in self._transcriptions_stream_vcr_auto(
+                fields, file, api_key, client_ip, auth_context
+            ):
+                yield chunk
+            return
         chunks: list[bytes] = []
         async with aclosing(
             self.gateway.audio_transcriptions_create_stream(fields, file)
@@ -343,7 +393,8 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> None:
         self._assert_speech_transcription_allowed(auth_context, fields.get("model"))
-        self._prepare_audio_transcriptions_fields(fields)
+        if not self._use_vcr_auto_walk(str(fields.get("model") or ""), auth_context):
+            self._prepare_audio_transcriptions_fields(fields)
 
     def _assert_speech_transcription_allowed(
         self,
@@ -369,6 +420,8 @@ class ApiUseCase:
         ids = self._shelf_model_ids(auth_context, shelf_key)
         if not ids:
             raise disabled_error()
+        if self._use_vcr_auto_walk(model_id, auth_context):
+            return
         if not isinstance(model_id, str) or model_id not in ids:
             raise ModelNotAllowedError()
 
@@ -381,6 +434,279 @@ class ApiUseCase:
         ids = getter(auth_context.session_id, shelf_key) or []
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
+    def _text_model_ids(self, auth_context: AuthContext | None) -> list[str]:
+        if auth_context is None or auth_context.session_id is None:
+            return []
+        getter = getattr(self.api_key_repo, "get_session_model_allowlist", None)
+        if not callable(getter):
+            return []
+        ids = getter(auth_context.session_id) or []
+        return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
+
+    async def _chat_nonstream_vcr_auto(
+        self,
+        req: ChatCompletionRequest,
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk(public_model=VCR_AUTO_MODEL_ID)
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.chat_completions_nonstream(replace(req, model=model_id))
+
+        hit = await walker.run(self._text_model_ids(auth_context), call)
+        self._log_request(
+            replace(req, model=hit.model_id),
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(hit.value),
+            assistant_messages=extract_assistant_messages_for_log(hit.value, CHAT_COMPLETIONS_PATH),
+            api_endpoint=CHAT_COMPLETIONS_PATH,
+        )
+        return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
+
+    async def _chat_stream_vcr_auto(
+        self,
+        req: ChatCompletionRequest,
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> AsyncGenerator[bytes, None]:
+        walker = VcrAutoWalk(public_model=VCR_AUTO_MODEL_ID, rewrite_sse=True)
+        tracker = _SseStreamTracker(CHAT_COMPLETIONS_PATH)
+
+        def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
+            return self.gateway.chat_completions_stream(replace(req, model=model_id))
+
+        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+            tracker.feed(chunk)
+            yield chunk
+        if walker.model_id is None:
+            return
+        self._log_request(
+            replace(req, model=walker.model_id),
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            assistant_messages=tracker.assistant_messages,
+            api_endpoint=CHAT_COMPLETIONS_PATH,
+        )
+
+    async def _responses_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk(public_model=VCR_AUTO_MODEL_ID)
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.responses_create({**body, "model": model_id})
+
+        hit = await walker.run(self._text_model_ids(auth_context), call)
+        logged = {**body, "model": hit.model_id}
+        self._log_responses_request(
+            logged,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(hit.value),
+            assistant_messages=extract_assistant_messages_for_log(hit.value, RESPONSES_PATH),
+            api_endpoint=RESPONSES_PATH,
+        )
+        return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
+
+    async def _responses_stream_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> AsyncGenerator[bytes, None]:
+        walker = VcrAutoWalk(public_model=VCR_AUTO_MODEL_ID, rewrite_sse=True)
+        tracker = _SseStreamTracker(RESPONSES_PATH)
+
+        def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
+            return self.gateway.responses_create_stream({**body, "model": model_id})
+
+        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+            tracker.feed(chunk)
+            yield chunk
+        if walker.model_id is None:
+            return
+        self._log_responses_request(
+            {**body, "model": walker.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            assistant_messages=tracker.assistant_messages,
+            api_endpoint=RESPONSES_PATH,
+        )
+
+    async def _images_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk()
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.images_create({**body, "model": model_id})
+
+        hit = await walker.run(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY), call)
+        self._log_images_request(
+            {**body, "model": hit.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(hit.value),
+            hit.value,
+            api_endpoint=IMAGES_PATH,
+        )
+        return hit.value
+
+    async def _images_stream_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> AsyncGenerator[bytes, None]:
+        walker = VcrAutoWalk()
+        tracker = _ImageSseStreamTracker()
+
+        def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
+            return self.gateway.images_create_stream({**body, "model": model_id})
+
+        async for chunk in walker.stream(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY), open_stream):
+            tracker.feed(chunk)
+            yield chunk
+        if walker.model_id is None:
+            return
+        self._log_images_request(
+            {**body, "model": walker.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            tracker.usage,
+            tracker.last_response,
+            api_endpoint=IMAGES_PATH,
+        )
+
+    async def _audio_speech_stream_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> AsyncGenerator[bytes, None]:
+        walker = VcrAutoWalk()
+        byte_count = 0
+
+        def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
+            return self.gateway.audio_speech_create_stream({**body, "model": model_id})
+
+        async for chunk in walker.stream(self._shelf_model_ids(auth_context, SPEECH_SHELF_KEY), open_stream):
+            byte_count += len(chunk)
+            yield chunk
+        if walker.model_id is None:
+            return
+        self._log_tts_request(
+            {**body, "model": walker.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            byte_count,
+            api_endpoint=AUDIO_SPEECH_PATH,
+        )
+
+    async def _transcriptions_vcr_auto(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk()
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.audio_transcriptions_create({**fields, "model": model_id}, file)
+
+        hit = await walker.run(
+            self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY),
+            call,
+        )
+        response = hit.value if isinstance(hit.value, dict) else {}
+        self._log_transcription_request(
+            {**fields, "model": hit.model_id},
+            file[0],
+            api_key,
+            client_ip,
+            auth_context,
+            transcript_text=str(response.get("text") or ""),
+            api_endpoint=AUDIO_TRANSCRIPTIONS_PATH,
+        )
+        return hit.value
+
+    async def _transcriptions_stream_vcr_auto(
+        self,
+        fields: dict[str, Any],
+        file: tuple[str, bytes, str | None],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> AsyncGenerator[bytes, None]:
+        walker = VcrAutoWalk()
+        chunks: list[bytes] = []
+
+        def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
+            return self.gateway.audio_transcriptions_create_stream({**fields, "model": model_id}, file)
+
+        async for chunk in walker.stream(
+            self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY),
+            open_stream,
+        ):
+            chunks.append(chunk)
+            yield chunk
+        if walker.model_id is None:
+            return
+        self._log_transcription_request(
+            {**fields, "model": walker.model_id},
+            file[0],
+            api_key,
+            client_ip,
+            auth_context,
+            transcript_text=_transcript_text_from_stream_chunks(chunks),
+            api_endpoint=AUDIO_TRANSCRIPTIONS_PATH,
+        )
+
+    async def _decisions_vcr_auto(
+        self,
+        body: dict[str, Any],
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk()
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.decisions_create(
+                {
+                    "model": model_id,
+                    "state": body.get("state"),
+                    "questions": body.get("questions"),
+                }
+            )
+
+        hit = await walker.run(self._decision_model_ids(auth_context), call)
+        return hit.value
+
     async def decisions_create(
         self,
         body: dict[str, Any],
@@ -392,6 +718,8 @@ class ApiUseCase:
         model_id = body.get("model")
         if not self._is_personal_api_key(auth_context):
             self._assert_classroom_decision_allowed(auth_context, model_id)
+        if self._use_vcr_auto_walk(str(model_id or ""), auth_context):
+            return await self._decisions_vcr_auto(body, auth_context)
         payload = {
             "model": model_id,
             "state": body.get("state"),
@@ -406,6 +734,8 @@ class ApiUseCase:
         decision_ids = self._decision_model_ids(auth_context)
         if not decision_ids:
             raise DecisionDisabledError()
+        if self._use_vcr_auto_walk(model_id, auth_context):
+            return
         if not isinstance(model_id, str) or model_id not in decision_ids:
             raise ModelNotAllowedError()
 
@@ -417,6 +747,28 @@ class ApiUseCase:
             return []
         ids = getter(auth_context.session_id) or []
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
+
+    async def open_realtime(
+        self,
+        model_id: str,
+        auth_context: AuthContext | None = None,
+    ) -> tuple[RealtimeUpstreamTarget, Callable[[], Awaitable[None]] | None, str]:
+        if not self._use_vcr_auto_walk(model_id, auth_context):
+            return self.validate_realtime_request(model_id, auth_context), None, model_id
+        model_ids = self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY)
+        if not model_ids:
+            raise SpeechTranscriptionDisabledError()
+        lease = getattr(self.gateway, "lease_realtime", None)
+        if not callable(lease):
+            raise SpeechTranscriptionNotSupportedError("此 gateway 不支援 realtime transcription")
+        walker = VcrAutoWalk()
+
+        async def call(candidate: str) -> tuple[RealtimeUpstreamTarget, Callable[[], Awaitable[None]]]:
+            return await lease(candidate, wait=wait_for_pool_slot.get())
+
+        hit = await walker.run(model_ids, call)
+        target, release = hit.value
+        return target, release, hit.model_id
 
     def validate_realtime_request(
         self,

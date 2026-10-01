@@ -365,8 +365,10 @@ def create_api_router(
         if auth_context is None:
             await ws.close(code=1008, reason="invalid_api_key")
             return
+        release = None
+        producing_model = model
         try:
-            target = api_use_case.validate_realtime_request(model, auth_context)
+            target, release, producing_model = await api_use_case.open_realtime(model, auth_context)
         except InvalidModelIdError:
             await ws.close(code=1008, reason="invalid_model_id")
             return
@@ -378,6 +380,12 @@ def create_api_router(
             return
         except SpeechTranscriptionNotSupportedError:
             await ws.close(code=1008, reason="speech_transcription_not_supported")
+            return
+        except UpstreamBusyError:
+            await ws.close(code=1013, reason="upstream_busy")
+            return
+        except UpstreamServiceError:
+            await ws.close(code=1011, reason="upstream_error")
             return
         except ServiceUnavailableError:
             await ws.close(code=1013, reason="upstream_unavailable")
@@ -396,8 +404,10 @@ def create_api_router(
             except Exception:
                 pass
         finally:
+            if release is not None:
+                await release()
             api_use_case.log_realtime_transcription(
-                model,
+                producing_model,
                 api_key,
                 client_ip,
                 auth_context,
