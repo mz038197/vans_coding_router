@@ -736,7 +736,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     ):
         current_user_id(session_user_id)
         template = portal_call(
-            lambda: portal_use_case.chat_language_models_template(
+            lambda: portal_use_case.vscode_install_models(
                 _classroom_api_key(request) or None
             )
         )
@@ -754,7 +754,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     ):
         current_user_id(session_user_id)
         template = portal_call(
-            lambda: portal_use_case.chat_language_models_template(
+            lambda: portal_use_case.vscode_install_models(
                 _classroom_api_key(request) or None
             )
         )
@@ -772,7 +772,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     ):
         current_user_id(session_user_id)
         template = portal_call(
-            lambda: portal_use_case.chat_language_models_template(
+            lambda: portal_use_case.vscode_install_models(
                 _classroom_api_key(request) or None
             )
         )
@@ -790,7 +790,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
     ):
         current_user_id(session_user_id)
         template = portal_call(
-            lambda: portal_use_case.chat_language_models_template(
+            lambda: portal_use_case.vscode_install_models(
                 _classroom_api_key(request) or None
             )
         )

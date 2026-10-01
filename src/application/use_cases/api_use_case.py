@@ -58,6 +58,11 @@ class ApiUseCase:
         return await self.gateway.health()
 
     async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
+        if auth_context is not None and auth_context.session_id is not None:
+            return {
+                "object": "list",
+                "data": [{"id": VCR_AUTO_MODEL_ID, "object": "model"}],
+            }
         payload = await self.gateway.models()
         hidden_ids = set(self._decision_model_ids(auth_context))
         hidden_ids.update(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
@@ -239,7 +244,7 @@ class ApiUseCase:
             raise ImageGenerationDisabledError()
         return {
             "object": "list",
-            "data": [{"id": model_id, "object": "model"} for model_id in ids],
+            "data": [{"id": VCR_AUTO_MODEL_ID, "object": "model"}],
         }
 
     async def audio_speech_stream(

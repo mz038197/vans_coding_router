@@ -14,6 +14,7 @@ from src.infrastructure.config import (
     settings_summary,
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
+from src.domain.vcr_auto import classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
 from src.domain.session_model_allowlist import (
@@ -621,12 +622,21 @@ class PortalUseCase:
         template = load_vans_template()
         if not api_key:
             return template
+        document = self._presented_session_document(api_key)
+        if document is None:
+            return template
+        return classroom_vscode_model_list(template)
+
+    def vscode_install_models(self, api_key: str | None = None) -> list[dict[str, Any]]:
+        if api_key:
+            self._presented_session_document(api_key)
+        return classroom_vscode_model_list(load_vans_template())
+
+    def _presented_session_document(self, api_key: str) -> list[Any] | None:
         self._require_usable_api_key(api_key)
         valid, document = self.repo.classroom_api_key_session_chat_language_models(api_key)
         if not valid:
             raise PermissionError("無效的 Classroom API Key")
-        if document is None:
-            return template
         return document
 
     def _require_usable_api_key(self, api_key: str) -> None:

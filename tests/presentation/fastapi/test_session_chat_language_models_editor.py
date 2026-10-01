@@ -262,8 +262,9 @@ def test_student_keyed_get_and_chat_follow_saved_document(tmp_path):
     )
     assert keyed.status_code == 200
     ids = [model["id"] for model in keyed.json()[0]["models"]]
-    assert ids == ["ollama_cloud@minimax-m3:cloud"]
+    assert ids == ["vcr-auto"]
     assert keyed.json()[0]["models"][0]["url"] == VCROUTER_STENCIL["url"]
+    assert "sitting-only" not in keyed.text
 
     allowed = client.post(
         "/v1/chat/completions",
@@ -295,7 +296,7 @@ def test_empty_document_means_zero_chat_models_on_keyed_get_and_v1(tmp_path):
         "/extension/chat-language-models",
         headers={"Authorization": f"Bearer {api_key}"},
     )
-    assert keyed.json()[0]["models"] == []
+    assert [model["id"] for model in keyed.json()[0]["models"]] == ["vcr-auto"]
 
     blocked = client.post(
         "/v1/chat/completions",
@@ -350,13 +351,14 @@ def test_student_chat_lists_omit_decision_model_and_chat_rejects_it(tmp_path):
     )
     assert keyed.status_code == 200
     keyed_ids = [model["id"] for model in keyed.json()[0]["models"]]
-    assert keyed_ids == ["openrouter@minimax/minimax-m3"]
+    assert keyed_ids == ["vcr-auto"]
 
     public = client.get("/extension/chat-language-models")
     assert public.json() == load_vans_template()
 
     models = client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
     listed = [item["id"] for item in models.json()["data"]]
+    assert listed == ["vcr-auto"]
     assert "openrouter@typesafe/jev-1.13" not in listed
     assert "openrouter@~typesafe/jev-latest" not in listed
     assert "openrouter@black-forest-labs/flux.2-pro" not in listed

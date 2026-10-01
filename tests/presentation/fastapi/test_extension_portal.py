@@ -106,7 +106,7 @@ def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert keyed.status_code == 200
-    assert keyed.json() == load_vans_template()
+    assert [model["id"] for model in keyed.json()[0]["models"]] == ["vcr-auto"]
 
 
 def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
@@ -128,7 +128,7 @@ def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert before_ship.status_code == 200
-    assert before_ship.json() == []
+    assert [model["id"] for model in before_ship.json()[0]["models"]] == ["vcr-auto"]
     with repo._connect() as conn:
         stored = conn.execute(
             repo._sql("SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"),
@@ -142,7 +142,7 @@ def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert after_ship.status_code == 200
-    assert after_ship.json() == load_vans_template()
+    assert [model["id"] for model in after_ship.json()[0]["models"]] == ["vcr-auto"]
 
 
 def test_keyed_chat_language_models_returns_session_document_not_live_template(tmp_path):
@@ -169,7 +169,8 @@ def test_keyed_chat_language_models_returns_session_document_not_live_template(t
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert keyed.status_code == 200
-    assert keyed.json() == document
+    assert [model["id"] for model in keyed.json()[0]["models"]] == ["vcr-auto"]
+    assert "sitting-only" not in keyed.text
 
     public = client.get("/extension/chat-language-models")
     assert public.status_code == 200
@@ -210,7 +211,8 @@ def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
     )
     assert filtered.status_code == 200
     ids = [model["id"] for model in filtered.json()[0]["models"]]
-    assert ids == [allowed]
+    assert ids == ["vcr-auto"]
+    assert allowed not in ids
     assert other not in ids
 
     empty = client.patch(
@@ -225,7 +227,7 @@ def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert emptied.json()[0]["name"] == "VCRouter"
-    assert emptied.json()[0]["models"] == []
+    assert [model["id"] for model in emptied.json()[0]["models"]] == ["vcr-auto"]
 
     restored_session = repo.update_class_session(
         klass["id"],
@@ -238,7 +240,7 @@ def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
         "/extension/chat-language-models",
         headers={"Authorization": f"Bearer {api_key}"},
     )
-    assert restored.json() == load_vans_template()
+    assert [model["id"] for model in restored.json()[0]["models"]] == ["vcr-auto"]
 
 
 def test_chat_language_models_invalid_bearer_is_forbidden(tmp_path):
@@ -390,7 +392,7 @@ def test_keyed_chat_language_models_fails_after_session_end(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert live.status_code == 200
-    assert live.json() == load_vans_template()
+    assert [model["id"] for model in live.json()[0]["models"]] == ["vcr-auto"]
 
     _end_session(client, repo, teacher["id"], klass["id"], session["id"])
     after_end = client.get(

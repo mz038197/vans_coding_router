@@ -1618,7 +1618,8 @@ def test_install_vscode_models_download_returns_script(tmp_path):
     assert "install-vscode-models.ps1" in response.headers["content-disposition"]
     assert "VCRouter" in response.text
     assert "Merge-ChatLanguageModels" in response.text
-    assert "ollama_cloud@minimax-m3:cloud" in response.text
+    assert '"id": "vcr-auto"' in response.text
+    assert "ollama_cloud@minimax-m3:cloud" not in response.text
 
 
 def test_install_vscode_models_download_embeds_session_allowlist(tmp_path):
@@ -1652,7 +1653,8 @@ def test_install_vscode_models_download_embeds_session_allowlist(tmp_path):
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert response.status_code == 200
-    assert allowed in response.text
+    assert '"id": "vcr-auto"' in response.text
+    assert allowed not in response.text
     assert other not in response.text
 
 

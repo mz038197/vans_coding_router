@@ -147,9 +147,7 @@ def test_classroom_image_generation_follows_the_image_shelf(tmp_path):
 
     listed = client.get("/v1/images/models", headers=headers)
     assert listed.status_code == 200
-    assert listed.json()["data"] == [
-        {"id": "openrouter@black-forest-labs/flux.2-pro", "object": "model"}
-    ]
+    assert listed.json()["data"] == [{"id": "vcr-auto", "object": "model"}]
 
     wrong = client.post(
         "/v1/images",
