@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROTOTYPE — 我的課程</title>
+  <!--
+    PROTOTYPE — throwaway.
+    Full-window teacher menu on the left; 我的課程 uses the remaining width.
+    Session list is variant B (list + inspector). Other menu items are shells. In-memory only.
+  -->
+  <script>
+    (function () {
+      var key = 'portal-theme';
+      var stored = null;
+      try { stored = localStorage.getItem(key); } catch (e) {}
+      var theme = (stored === 'dark' || stored === 'light') ? stored : 'dark';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=session-layout-prototype-3" />
+  <style>
+    .course-toolbar .add-course-form { display: inline-flex; align-items: center; }
+    .course-toolbar .add-course-form input { width: 12rem; }
+    .session-form-compact {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0 12px;
+      padding: 8px 10px;
+    }
+    .session-form-compact input { margin: 0; }
+    .course-detail-header .end-course-btn { margin-left: auto; }
+    html, body { height: 100%; overflow: hidden; }
+    .proto-shell {
+      display: flex;
+      align-items: stretch;
+      position: fixed;
+      z-index: 1;
+      top: 68px;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      min-height: 0;
+      padding-top: 0;
+      box-sizing: border-box;
+    }
+    .proto-menu {
+      width: 232px;
+      flex-shrink: 0;
+      height: 100%;
+      overflow: auto;
+      border-right: 1px solid var(--border-strong);
+      background: var(--surface-1);
+      padding: 12px 0;
+    }
+    .proto-main {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 20px 12px;
+      background: var(--bg-base);
+    }
+    section.proto-panel {
+      margin: 0;
+      padding: 0;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #courseDetail,
+    #sessions-panel {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    #sessions-panel { overflow: auto; }
+    #sessions-panel .slp-root {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      padding-bottom: 64px;
+    }
+    #sessions-panel .slp-root:has(.slp-stack),
+    #sessions-panel .slp-root:has(.slp-bands) {
+      flex: none;
+      height: auto;
+      overflow: visible;
+    }
+    #sessions-panel .slp-banner,
+    #courseDetail .course-detail-header,
+    #courseDetail .session-form,
+    #courseDetail .btn-danger,
+    #courseDetail > .hint { flex-shrink: 0; }
+    #sessions-panel .slp-split {
+      flex: 1;
+      min-height: 0;
+      align-items: stretch;
+    }
+    #sessions-panel .slp-list,
+    #sessions-panel .slp-inspector {
+      max-height: none;
+      min-height: 0;
+      overflow: auto;
+    }
+    .proto-panel h2 { margin: 0 0 8px; }
+    .proto-panel .proto-shell-note { max-width: 40rem; }
+    button.proto-hamburger {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      margin: 0;
+      padding: 0;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text-primary);
+      box-shadow: none;
+    }
+    button.proto-hamburger:hover { background: var(--surface-3); color: var(--text-primary); }
+    .proto-backdrop {
+      display: none;
+      position: fixed;
+      z-index: 110;
+      inset: 68px 0 0 0;
+      background: rgba(0, 0, 0, 0.45);
+    }
+    @media (max-width: 900px) {
+      button.proto-hamburger { display: inline-flex; }
+      .proto-menu {
+        position: fixed;
+        z-index: 120;
+        top: 68px;
+        left: 0;
+        height: calc(100vh - 68px);
+        transform: translateX(-105%);
+        transition: transform 0.2s ease;
+        box-shadow: none;
+      }
+      .proto-shell.is-menu-open .proto-menu {
+        transform: translateX(0);
+        box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
+      }
+      .proto-shell.is-menu-open .proto-backdrop { display: block; }
+      .proto-main { padding: 12px 12px 8px; }
+    }
+  </style>
+  <script src="/portal/static/session_layout_prototype.js"></script>
+</head>
+<body>
+  <header class="site-nav">
+    <div class="nav-brand">
+      <button type="button" class="proto-hamburger" aria-label="開啟選單" aria-controls="protoMenu" aria-expanded="false">
+        <i class="fas fa-bars" aria-hidden="true"></i>
+      </button>
+      <div class="nav-logo"><img src="/portal/static/brand-logo.png" alt="" width="32" height="32" /></div>
+      <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
+    </div>
+    <div class="nav-user">
+      <span>示範帳號</span>
+      <button type="button" class="nav-theme-toggle" data-theme-toggle aria-label="切換 Theme" title="切換 Theme">
+        <i class="fas fa-moon theme-icon-light" aria-hidden="true"></i>
+        <i class="fas fa-sun theme-icon-dark" aria-hidden="true"></i>
+      </button>
+    </div>
+  </header>
+  <div class="proto-shell">
+    <nav class="proto-menu" id="protoMenu" aria-label="老師功能">
+      <div class="sidebar-section-label">老師</div>
+      <button type="button" class="sidebar-nav-btn" data-panel="key"><i class="fas fa-key"></i> 個人 API Key</button>
+      <button type="button" class="sidebar-nav-btn tab-active" data-panel="class"><i class="fas fa-book"></i> 我的課程</button>
+      <button type="button" class="sidebar-nav-btn" data-panel="monitor"><i class="fas fa-chart-line"></i> Prompt 監控</button>
+      <button type="button" class="sidebar-nav-btn" data-panel="probe"><i class="fas fa-flask"></i> API 測試</button>
+      <button type="button" class="sidebar-nav-btn" data-panel="lobby"><i class="fas fa-comments"></i> Agent Lobby</button>
+      <button type="button" class="sidebar-nav-btn" data-panel="admin"><i class="fas fa-shield-halved"></i> 系統管理</button>
+    </nav>
+    <div class="proto-backdrop"></div>
+    <main class="proto-main">
+      <section class="proto-panel hidden" data-panel="key">
+        <h2>個人 API Key</h2>
+        <p class="hint proto-shell-note">這頁在原型裡是空殼。選單可以切過來，內容仍是正式入口的個人 API Key。</p>
+      </section>
+      <section class="proto-panel" id="classTab" data-panel="class">
+        <div class="course-toolbar">
+          <input id="courseSearch" placeholder="搜尋課程" />
+          <select id="courseStatusFilter" aria-label="課程狀態">
+            <option value="active">進行中</option>
+            <option value="all">全部</option>
+            <option value="ended">已結束</option>
+          </select>
+          <select id="courseSelect" aria-label="課程"></select>
+          <button type="button" class="btn-secondary" id="addCourseBtn">＋ 課程</button>
+          <span id="addCourseForm" class="add-course-form hidden">
+            <input id="className" placeholder="新課程名稱" aria-label="新課程名稱" />
+            <button type="button" id="createClassBtn">建立</button>
+          </span>
+        </div>
+        <div id="courseDetail"></div>
+      </section>
+      <section class="proto-panel hidden" data-panel="monitor">
+        <h2>Prompt 監控</h2>
+        <p class="hint proto-shell-note">這頁在原型裡是空殼。選單可以切過來，內容仍是正式入口的監控。</p>
+      </section>
+      <section class="proto-panel hidden" data-panel="probe">
+        <h2>API 測試</h2>
+        <p class="hint proto-shell-note">這頁在原型裡是空殼。選單可以切過來，內容仍是正式入口的 API 測試。</p>
+      </section>
+      <section class="proto-panel hidden" data-panel="lobby">
+        <h2>Agent Lobby</h2>
+        <p class="hint proto-shell-note">這頁在原型裡是空殼。正式入口會另開 Lobby。</p>
+      </section>
+      <section class="proto-panel hidden" data-panel="admin">
+        <h2>系統管理</h2>
+        <p class="hint proto-shell-note">這頁在原型裡是空殼。選單可以切過來，內容仍是正式入口的系統管理。</p>
+      </section>
+    </main>
+  </div>
+  <script>
+    const chatModels = [
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet' },
+      { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    ];
+    const manyChatModels = [
+      ...chatModels,
+      { id: 'openai/gpt-4o', name: 'GPT-4o' },
+      { id: 'anthropic/claude-haiku', name: 'Claude Haiku' },
+      { id: 'google/gemini-2.5-flash', name: 'Gemini Flash' },
+      { id: 'openai/o4-mini', name: 'o4-mini' },
+      { id: 'deepseek/deepseek-v3', name: 'DeepSeek V3' },
+      { id: 'meta/llama-4', name: 'Llama 4' },
+      { id: 'xai/grok-4', name: 'Grok 4' },
+      { id: 'qwen/qwen-3', name: 'Qwen 3' },
+      { id: 'mistral/mistral-large', name: 'Mistral Large' },
+    ];
+    const models = (extra) => [{
+      provider: 'VCRouter',
+      models: [...chatModels, ...(extra || [])],
+    }];
+
+    let nextId = 100;
+    const courses = [
+      {
+        id: 1,
+        name: 'Agent Studio 秋季班',
+        status: 'active',
+        member_count: 24,
+        sessions: [
+          {
+            id: 11,
+            name: '第一堂：環境建置',
+            session_at: '2026-08-06T09:00:00Z',
+            expires_at: '2026-08-06T09:44:00Z',
+            invite_code: 'ENV-8F3K',
+            seat_limit: 6,
+            redemption_count: 6,
+            classroom_model_choice: '',
+            course_catalog_yaml: 'actions:\n- id: demo\n',
+            prompt_logging_enabled: true,
+            session_chat_language_models: models([
+              ...manyChatModels.slice(3),
+              { id: 'google/gemini-2.5-flash-image', name: 'Gemini Image', imageShelf: true },
+            ]),
+          },
+          {
+            id: 12,
+            name: '第二堂：Agent 與工具',
+            session_at: '2026-12-31T01:00:00Z',
+            expires_at: '2026-12-31T01:00:00Z',
+            invite_code: 'AGT-2M9Q',
+            seat_limit: 6,
+            redemption_count: 6,
+            classroom_model_choice: '',
+            course_catalog_yaml: 'actions: []\n',
+            prompt_logging_enabled: false,
+            session_chat_language_models: models([
+              { id: 'openai/gpt-4o-mini-tts', name: 'GPT TTS', speechShelf: true },
+              { id: 'openai/o3', name: 'o3 Decision', decisionShelf: true },
+            ]),
+          },
+          {
+            id: 13,
+            name: '很長的課堂名稱，用來看看窄面板時標題、邀請碼和座位會不會互相擠掉',
+            session_at: '2026-10-08T02:30:00Z',
+            expires_at: '2026-10-08T06:30:00Z',
+            invite_code: 'LONG-NAME',
+            seat_limit: 60,
+            redemption_count: 18,
+            classroom_model_choice: 'automatic',
+            course_catalog_yaml: 'actions: []\n',
+            prompt_logging_enabled: true,
+            session_chat_language_models: models(),
+          },
+        ],
+      },
+      {
+        id: 2,
+        name: 'Python 入門',
+        status: 'active',
+        member_count: 12,
+        sessions: [
+          {
+            id: 21,
+            name: '變數與函式',
+            session_at: '2026-09-18T01:00:00Z',
+            expires_at: '2026-11-18T03:00:00Z',
+            invite_code: 'PY-1A2B',
+            seat_limit: 30,
+            redemption_count: 9,
+            classroom_model_choice: 'picked',
+            course_catalog_yaml: 'actions: []\n',
+            prompt_logging_enabled: true,
+            session_chat_language_models: models(),
+          },
+        ],
+      },
+      {
+        id: 3,
+        name: '寒假班',
+        status: 'ended',
+        member_count: 8,
+        sessions: [
+          {
+            id: 31,
+            name: '結業坐',
+            session_at: '2026-02-01T01:00:00Z',
+            expires_at: '2026-02-01T03:00:00Z',
+            invite_code: 'WIN-9Z',
+            seat_limit: 20,
+            redemption_count: 8,
+            classroom_model_choice: 'automatic',
+            course_catalog_yaml: 'actions: []\n',
+            prompt_logging_enabled: false,
+            session_chat_language_models: models(),
+          },
+        ],
+      },
+    ];
+
+    let selectedCourseId = 1;
+
+    function esc(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function defaultDatetimeLocalValue() {
+      const date = new Date();
+      date.setMinutes(0, 0, 0);
+      date.setHours(date.getHours() + 1);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:00`;
+    }
+
+    function visibleCourses() {
+      const status = document.getElementById('courseStatusFilter').value;
+      const query = document.getElementById('courseSearch').value.trim().toLowerCase();
+      return courses.filter((course) => {
+        if (status === 'active' && course.status !== 'active') return false;
+        if (status === 'ended' && course.status !== 'ended') return false;
+        if (query && !course.name.toLowerCase().includes(query)) return false;
+        return true;
+      });
+    }
+
+    function selectedCourse() {
+      return courses.find((course) => course.id === selectedCourseId) || null;
+    }
+
+    function sortedSessions(course) {
+      return [...(course?.sessions || [])].sort((a, b) => (
+        new Date(b.session_at || 0) - new Date(a.session_at || 0)
+      ));
+    }
+
+    function statusTag(status) {
+      const active = status === 'active';
+      return `<span class="tag ${active ? 'tag-active' : 'tag-ended'}">${active ? '進行中' : '已結束'}</span>`;
+    }
+
+    function paintCourseSelect() {
+      const select = document.getElementById('courseSelect');
+      const visible = visibleCourses();
+      if (!visible.some((course) => course.id === selectedCourseId)) {
+        selectedCourseId = visible[0]?.id ?? null;
+      }
+      select.innerHTML = visible.length
+        ? visible.map((course) => (
+          `<option value="${course.id}"${course.id === selectedCourseId ? ' selected' : ''}>${esc(course.name)} · ${course.member_count} 位</option>`
+        )).join('')
+        : '<option value="">沒有符合的課程</option>';
+    }
+
+    function paintDetail() {
+      const box = document.getElementById('courseDetail');
+      const course = selectedCourse();
+      if (!course) {
+        box.innerHTML = '<p class="hint">請選擇課程</p>';
+        return;
+      }
+      const ended = course.status === 'ended';
+      box.innerHTML = `
+        <div class="course-detail-header">
+          <span>${esc(course.name)}</span>
+          ${statusTag(course.status)}
+          <span class="hint hint-inline">${course.member_count} 位成員</span>
+          ${ended ? '' : '<button type="button" class="btn-danger end-course-btn" id="endCourseBtn">結束課程</button>'}
+        </div>
+        ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
+          <div class="session-form session-form-compact">
+            <input type="text" id="sessionName" class="session-name-input" placeholder="新課堂名稱" aria-label="課堂名稱" />
+            <input type="datetime-local" id="sessionAt" aria-label="課堂時間" value="${defaultDatetimeLocalValue()}" />
+            <input type="number" id="sessionTtl" value="2" min="1" class="input-narrow" aria-label="TTL 小時" title="課堂時數，key 在這個時間後到期" />
+            <span class="hint hint-inline">小時</span>
+            <button type="button" id="createSessionBtn">新增課堂</button>
+          </div>`}
+        <div id="sessions-panel"></div>
+      `;
+      const sessions = sortedSessions(course);
+      SessionLayoutPrototype.render(document.getElementById('sessions-panel'), course.id, sessions, {
+        courseStatus: course.status,
+      });
+    }
+
+    function paint() {
+      paintCourseSelect();
+      paintDetail();
+    }
+
+    document.getElementById('courseSearch').addEventListener('input', paint);
+    document.getElementById('courseStatusFilter').addEventListener('change', paint);
+    document.getElementById('courseSelect').addEventListener('change', (event) => {
+      selectedCourseId = Number(event.target.value) || null;
+      paintDetail();
+    });
+    function closeAddCourse() {
+      document.getElementById('className').value = '';
+      document.getElementById('addCourseForm').classList.add('hidden');
+      document.getElementById('addCourseBtn').classList.remove('hidden');
+    }
+
+    function openAddCourse() {
+      document.getElementById('addCourseBtn').classList.add('hidden');
+      document.getElementById('addCourseForm').classList.remove('hidden');
+      document.getElementById('className').focus();
+    }
+
+    document.getElementById('addCourseBtn').addEventListener('click', openAddCourse);
+    document.getElementById('className').addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeAddCourse();
+      if (event.key === 'Enter') document.getElementById('createClassBtn').click();
+    });
+    document.getElementById('createClassBtn').addEventListener('click', () => {
+      const input = document.getElementById('className');
+      const name = input.value.trim();
+      if (!name) {
+        input.focus();
+        return;
+      }
+      const course = { id: nextId++, name, status: 'active', member_count: 0, sessions: [] };
+      courses.unshift(course);
+      selectedCourseId = course.id;
+      document.getElementById('courseStatusFilter').value = 'active';
+      document.getElementById('courseSearch').value = '';
+      closeAddCourse();
+      paint();
+    });
+    document.getElementById('classTab').addEventListener('click', (event) => {
+      if (event.target.id === 'createSessionBtn') {
+        const course = selectedCourse();
+        if (!course || course.status === 'ended') return;
+        const name = document.getElementById('sessionName').value.trim();
+        if (!name) return;
+        const when = document.getElementById('sessionAt').value;
+        const ttl = Math.max(1, Number(document.getElementById('sessionTtl').value) || 2);
+        const start = when ? new Date(when) : new Date();
+        const expires = new Date(start.getTime() + ttl * 60 * 60 * 1000);
+        course.sessions.push({
+          id: nextId++,
+          name,
+          session_at: start.toISOString(),
+          expires_at: expires.toISOString(),
+          invite_code: `NEW-${course.sessions.length + 1}`,
+          seat_limit: 60,
+          redemption_count: 0,
+          classroom_model_choice: 'automatic',
+          course_catalog_yaml: 'actions: []\n',
+          prompt_logging_enabled: true,
+          session_chat_language_models: models(),
+        });
+        paintDetail();
+      }
+      if (event.target.id === 'endCourseBtn') {
+        const course = selectedCourse();
+        if (!course) return;
+        course.status = 'ended';
+        paint();
+      }
+    });
+    const shell = document.querySelector('.proto-shell');
+    const menu = document.querySelector('.proto-menu');
+    const burger = document.querySelector('.proto-hamburger');
+    const narrowMenu = window.matchMedia('(max-width: 900px)');
+
+    function setMenuOpen(open) {
+      const show = open && narrowMenu.matches;
+      shell.classList.toggle('is-menu-open', show);
+      burger.setAttribute('aria-expanded', show ? 'true' : 'false');
+      burger.setAttribute('aria-label', show ? '關閉選單' : '開啟選單');
+      burger.querySelector('i').className = show ? 'fas fa-xmark' : 'fas fa-bars';
+      menu.inert = narrowMenu.matches && !show;
+    }
+
+    burger.addEventListener('click', () => {
+      setMenuOpen(!shell.classList.contains('is-menu-open'));
+    });
+    document.querySelector('.proto-backdrop').addEventListener('click', () => setMenuOpen(false));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    });
+    narrowMenu.addEventListener('change', () => setMenuOpen(false));
+    setMenuOpen(false);
+
+    document.querySelector('.proto-menu').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-panel]');
+      if (!button) return;
+      const panel = button.dataset.panel;
+      document.querySelectorAll('.proto-menu [data-panel]').forEach((item) => {
+        item.classList.toggle('tab-active', item.dataset.panel === panel);
+      });
+      document.querySelectorAll('.proto-panel').forEach((item) => {
+        item.classList.toggle('hidden', item.dataset.panel !== panel);
+      });
+      setMenuOpen(false);
+    });
+    document.querySelector('[data-theme-toggle]').addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('portal-theme', next); } catch (e) {}
+    });
+
+    const url = new URL(location.href);
+    if (!url.searchParams.get('variant')) {
+      url.searchParams.set('variant', 'B');
+      history.replaceState(null, '', url);
+    }
+    paint();
+  </script>
+</body>
+</html>

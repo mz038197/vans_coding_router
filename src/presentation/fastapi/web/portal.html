@@ -851,23 +851,7 @@
       return `${count} 個模型`;
     }
 
-    function sessionModelAllowlistCell(classId, session) {
-      const label = sessionModelAllowlistLabel(session);
-      const edit = iconBtn(
-        'fas fa-pen',
-        '編輯本課對話模型',
-        `beginEditSessionChatLanguageModels(${classId}, ${session.id})`,
-      );
-      return `<div class="cell-with-action">
-        <div class="cell-main">
-          <span class="model-allowlist-label">${escapeHtml(label)}</span>
-          ${sessionModelChoiceControl(classId, session)}
-        </div>
-        ${edit}
-      </div>`;
-    }
-
-    function sessionModelChoiceControl(classId, session) {
+    function sessionModelChoiceControl(classId, session, compact) {
       const choice = session.classroom_model_choice === 'picked' || session.classroom_model_choice === 'automatic'
         ? session.classroom_model_choice
         : '';
@@ -876,7 +860,39 @@
         `<option value="picked"${choice === 'picked' ? ' selected' : ''}>學生自選</option>`,
         `<option value="automatic"${choice === 'automatic' ? ' selected' : ''}>自動</option>`,
       ].join('');
-      return `<label class="session-model-choice">模型選擇 <select aria-label="模型選擇" data-stored="${choice}" onchange="setClassroomModelChoice(${classId}, ${session.id}, this)">${options}</select></label>`;
+      return `<label class="session-model-choice${compact ? ' is-compact' : ''}">${compact ? '' : '模型選擇 '}<select aria-label="模型選擇" data-stored="${choice}" onchange="setClassroomModelChoice(${classId}, ${session.id}, this)">${options}</select></label>`;
+    }
+
+    function sessionTextModels(session) {
+      const rows = [];
+      const shelfFlags = ['decisionShelf', 'imageShelf', 'speechShelf', 'speechTranscriptionShelf'];
+      for (const provider of session.session_chat_language_models || []) {
+        for (const model of (provider && provider.models) || []) {
+          if (!model || !model.id) continue;
+          if (shelfFlags.some((flag) => model[flag] === true)) continue;
+          rows.push(model);
+        }
+      }
+      return rows;
+    }
+
+    function sessionModelAllowlistCell(classId, session) {
+      const edit = iconBtn(
+        'fas fa-pen',
+        '編輯本課對話模型',
+        `beginEditSessionChatLanguageModels(${classId}, ${session.id})`,
+      );
+      const chat = sessionTextModels(session);
+      const pills = chat.length
+        ? chat.map((model) => `<span class="session-model-pill" title="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</span>`).join('')
+        : '<span class="hint">尚未勾選對話模型</span>';
+      return `<div class="session-models">
+        <div class="session-models-head">
+          <span class="session-kicker">對話模型 ${edit}</span>
+          ${sessionModelChoiceControl(classId, session, true)}
+        </div>
+        <div class="session-model-pills">${pills}</div>
+      </div>`;
     }
 
     async function setClassroomModelChoice(classId, sessionId, selectEl) {
@@ -1851,6 +1867,58 @@
       renderSessionTable(classId, payload.items || []);
     }
 
+    function sessionLayoutState(classId) {
+      window.__sessionLayout = window.__sessionLayout || {};
+      const key = String(classId);
+      if (!window.__sessionLayout[key]) {
+        window.__sessionLayout[key] = { selectedId: null, expandedId: undefined };
+      }
+      return window.__sessionLayout[key];
+    }
+
+    function sessionLayoutIsWide(box) {
+      const width = box.clientWidth || 0;
+      if (box.dataset.sessionLayoutWide === '1') return width >= 640;
+      return width >= 700;
+    }
+
+    function rerenderSessionLayout(classId) {
+      document.querySelectorAll('[data-session-layout]').forEach((box) => {
+        const args = box.__sessionLayoutArgs;
+        if (args && String(args.classId) === String(classId)) {
+          renderSessionTable(args.classId, args.sessions, args.options);
+        }
+      });
+    }
+
+    function selectSessionLayout(classId, sessionId) {
+      const state = sessionLayoutState(classId);
+      state.selectedId = sessionId;
+      state.expandedId = sessionId;
+      rerenderSessionLayout(classId);
+    }
+
+    function toggleSessionLayoutBand(classId, sessionId) {
+      const state = sessionLayoutState(classId);
+      state.expandedId = state.expandedId === sessionId ? null : sessionId;
+      if (state.expandedId) state.selectedId = state.expandedId;
+      rerenderSessionLayout(classId);
+    }
+
+    function bindSessionLayoutObserver(box) {
+      if (box.dataset.sessionLayoutObserved) return;
+      box.dataset.sessionLayoutObserved = '1';
+      box.setAttribute('data-session-layout', '');
+      const observer = new ResizeObserver(() => {
+        const args = box.__sessionLayoutArgs;
+        if (!args) return;
+        const wide = sessionLayoutIsWide(box);
+        if ((wide ? '1' : '0') === box.dataset.sessionLayoutWide) return;
+        renderSessionTable(args.classId, args.sessions, args.options);
+      });
+      observer.observe(box);
+    }
+
     function renderSessionTable(classId, sessions, options = {}) {
       const course = teacherClasses.find(c => c.id === classId);
       const courseStatus = options.courseStatus || course?.status || 'active';
@@ -1858,40 +1926,77 @@
       const allowOwnerActions = options.allowOwnerActions !== false;
       const showRedemptions = options.showRedemptions !== false;
       if (!box) return;
+      box.__sessionLayoutArgs = { classId, sessions, options };
+      bindSessionLayoutObserver(box);
+      window.__sessionById = window.__sessionById || {};
+      sessions.forEach((s) => { window.__sessionById[s.id] = s; });
       if (!sessions.length) {
         box.innerHTML = '<p class="hint">尚無課堂。</p>';
         return;
       }
-      const colCount = 7 + (allowOwnerActions ? 1 : 0);
-      window.__sessionById = window.__sessionById || {};
-      sessions.forEach((s) => { window.__sessionById[s.id] = s; });
-      box.innerHTML = `<table class="session-table">
-        <tr>
-          <th>課堂</th>
-          <th>狀態</th>
-          <th>能力</th>
-          <th>邀請碼</th>
-          <th>key 到期</th>
-          ${allowOwnerActions ? '<th>安裝清單</th>' : ''}
-          <th>模型</th>
-          <th>課堂座位</th>
-        </tr>
-        ${sessions.map(s => `
-          <tr>
-            <td>${sessionNameCell(classId, s, allowOwnerActions)}</td>
-            <td>${sessionStatusCell(classId, s, courseStatus)}</td>
-            <td>${sessionCapabilitiesCell(classId, s, allowOwnerActions)}</td>
-            <td>${sessionInviteCell(s, allowOwnerActions)}</td>
-            <td>${sessionExpiresCell(classId, s)}</td>
-            ${allowOwnerActions ? `<td>${sessionCatalogCell(classId, s)}</td>` : ''}
-            <td>${sessionModelAllowlistCell(classId, s)}</td>
-            <td>${sessionSeatLimitCell(classId, s)}</td>
-          </tr>
-          ${showRedemptions ? `<tr id="redemption-row-${classId}-${s.id}" class="hidden">
-            <td colspan="${colCount}"><div id="redemption-body-${classId}-${s.id}"></div></td>
-          </tr>` : ''}
-        `).join('')}
-      </table>`;
+      const state = sessionLayoutState(classId);
+      const wide = sessionLayoutIsWide(box);
+      if ((wide ? '1' : '0') !== (box.dataset.sessionLayoutWide || '')) {
+        if (wide && state.expandedId) state.selectedId = state.expandedId;
+        if (!wide && state.selectedId) state.expandedId = state.selectedId;
+        box.dataset.sessionLayoutWide = wide ? '1' : '0';
+      }
+      if (!sessions.some((session) => session.id === state.selectedId)) state.selectedId = sessions[0].id;
+      if (state.expandedId != null && !sessions.some((session) => session.id === state.expandedId)) {
+        state.expandedId = sessions[0].id;
+      }
+      if (!wide && state.expandedId === undefined) state.expandedId = state.selectedId;
+
+      const statusMark = (session) => {
+        const active = isSessionActive(session, courseStatus);
+        return `<span class="tag ${active ? 'tag-active' : 'tag-ended'}">${active ? '進行中' : '已結束'}</span>`;
+      };
+      const redemptionBox = (session) => showRedemptions
+        ? `<div id="redemption-row-${classId}-${session.id}" class="session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
+        : '';
+      const fields = (session) => `
+        <div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>
+        <div class="session-fields">
+          <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
+          <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}</div>
+          <div class="session-field"><span class="session-kicker">Key 到期</span>${sessionExpiresCell(classId, session)}</div>
+          ${allowOwnerActions ? `<div class="session-field"><span class="session-kicker">安裝清單</span>${sessionCatalogCell(classId, session)}</div>` : ''}
+          <div class="session-field session-field-wide">${sessionModelAllowlistCell(classId, session)}</div>
+          <div class="session-field session-field-wide"><span class="session-kicker">能力</span>${sessionCapabilitiesCell(classId, session, allowOwnerActions)}</div>
+        </div>`;
+      const rowButton = (session) => {
+        const current = session.id === state.selectedId ? ' is-current' : '';
+        const when = formatLocalDateTime(session.session_at || session.created_at);
+        return `<button type="button" class="session-layout-row${current}" onclick="selectSessionLayout(${classId}, ${session.id})">
+          <span class="sl-name">${escapeHtml(sessionDisplayName(session))}</span>
+          ${statusMark(session)}
+          <span class="session-name-sub">${escapeHtml(when)}</span>
+          <span class="sl-seats">${sessionRedemptionCount(session)} / ${sessionSeatLimit(session)}</span>
+        </button>`;
+      };
+
+      if (wide) {
+        const selected = sessions.find((session) => session.id === state.selectedId) || sessions[0];
+        box.innerHTML = `<div class="session-layout session-layout-split">
+          <div class="session-layout-list">${sessions.map(rowButton).join('')}</div>
+          <div class="session-layout-inspector">${fields(selected)}</div>
+        </div>`;
+        return;
+      }
+      box.innerHTML = `<div class="session-layout session-layout-bands">${sessions.map((session) => {
+        const open = state.expandedId === session.id;
+        const when = formatLocalDateTime(session.session_at || session.created_at);
+        return `<section class="session-band${open ? ' is-open' : ''}">
+          <button type="button" class="session-band-summary" aria-expanded="${open ? 'true' : 'false'}" onclick="toggleSessionLayoutBand(${classId}, ${session.id})">
+            <span class="sl-name">${escapeHtml(sessionDisplayName(session))}</span>
+            ${statusMark(session)}
+            <span class="session-name-sub">${escapeHtml(when)}</span>
+            <span class="sl-seats">${sessionRedemptionCount(session)} / ${sessionSeatLimit(session)}</span>
+            <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+          </button>
+          ${open ? `<div class="session-band-body">${fields(session)}</div>` : ''}
+        </section>`;
+      }).join('')}</div>`;
     }
 
     const COURSE_CATALOG_TEMPLATE_YAML = `# Course Catalog 範本（與擴充 classroom-installs.yaml 同形）

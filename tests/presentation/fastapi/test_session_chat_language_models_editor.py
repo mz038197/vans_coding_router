@@ -668,7 +668,7 @@ def test_catalog_fetch_failure_does_not_clear_stored_rows(tmp_path):
 def test_portal_session_row_shows_session_chat_language_models_editor(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert "<th>模型</th>" in html
+    assert "session-layout" in html
     assert 'id="editSessionChatModelsModal"' in html
     assert "beginEditSessionChatLanguageModels" in html
     assert "downloadSessionChatModelsTemplate" in html

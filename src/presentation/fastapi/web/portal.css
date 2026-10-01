@@ -1831,3 +1831,126 @@
         overflow-y: visible;
       }
     }
+
+    .session-layout-split {
+      display: grid;
+      grid-template-columns: minmax(200px, 34%) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .session-layout-list { display: flex; flex-direction: column; gap: 6px; }
+
+    button.session-layout-row,
+    button.session-band-summary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      margin: 0;
+      padding: 10px 12px;
+      box-shadow: none;
+      font-weight: 500;
+      text-align: left;
+      background: var(--surface-1);
+      color: var(--text-primary);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+    }
+
+    button.session-layout-row:hover,
+    button.session-band-summary:hover { background: var(--surface-2); }
+
+    button.session-layout-row.is-current,
+    button.session-layout-row.is-current:hover {
+      border-color: var(--accent-border);
+      background: var(--accent-soft);
+    }
+
+    button.session-layout-row .sl-name,
+    button.session-band-summary .sl-name { flex: 1 1 140px; font-weight: 700; }
+
+    button.session-layout-row .session-name-sub,
+    button.session-band-summary .session-name-sub { display: inline; margin: 0; }
+
+    .sl-seats { color: var(--text-muted); font-size: 0.85rem; }
+
+    .session-layout-inspector,
+    .session-band {
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+    }
+
+    .session-layout-inspector,
+    .session-band-body { padding: 12px 14px; }
+
+    .session-band + .session-band { margin-top: 8px; }
+
+    .session-band.is-open button.session-band-summary { border: 0; border-radius: 12px 12px 0 0; background: transparent; }
+
+    .session-layout-head,
+    .session-models-head,
+    .session-kicker {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .session-kicker {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .session-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .session-field {
+      flex: 1 1 200px;
+      min-width: 0;
+      border: 1px solid var(--border-glass);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: var(--surface-overlay);
+    }
+
+    .session-field-wide { flex-basis: 100%; }
+
+    .session-models-head { justify-content: space-between; }
+
+    .session-model-choice.is-compact { margin: 0; }
+
+    .session-model-choice.is-compact select {
+      width: auto;
+      min-width: 6.5rem;
+      margin: 0;
+      padding: 4px 8px;
+    }
+
+    .session-model-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-height: 60px;
+      margin-top: 8px;
+      overflow: auto;
+    }
+
+    .session-model-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-2);
+      font-size: 0.82rem;
+    }
+
+    .session-redemptions { margin-top: 8px; }

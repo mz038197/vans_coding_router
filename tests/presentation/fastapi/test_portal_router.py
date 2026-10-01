@@ -189,10 +189,24 @@ def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
     assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
 
 
+def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert "session-layout-split" in html
+    assert "session-layout-bands" in html
+    assert "selectSessionLayout" in html
+    assert "toggleSessionLayoutBand" in html
+    assert "return width >= 700" in html
+    assert "width >= 640" in html
+    assert "session-model-pill" in html
+    assert "尚未勾選對話模型" in html
+    assert "<th>課堂座位</th>" not in html
+
+
 def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert "<th>課堂座位</th>" in html
+    assert "sessionSeatLimitCell" in html
     assert "<th>暱稱座位</th>" not in html
     assert "<th>已領取</th>" not in html
     assert "sessionSeatLimitCell" in html
@@ -208,7 +222,7 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
 def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert "<th>模型</th>" in html
+    assert "session-layout" in html
     assert "sessionModelAllowlistCell" in html
     assert "beginEditSessionChatLanguageModels" in html
     assert 'id="editSessionChatModelsModal"' in html
