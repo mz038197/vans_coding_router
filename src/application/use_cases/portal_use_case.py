@@ -14,7 +14,8 @@ from src.infrastructure.config import (
     settings_summary,
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
-from src.domain.vcr_auto import classroom_vscode_model_list
+from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
+from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
 from src.domain.session_model_allowlist import (
@@ -471,6 +472,7 @@ class PortalUseCase:
         seat_limit: int | None = None,
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
+        classroom_model_choice: Any = CLASSROOM_MODEL_CHOICE_UNCHANGED,
         invocation_channel: str | None = None,
         invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
@@ -508,6 +510,8 @@ class PortalUseCase:
             changes["model_allowlist"] = model_allowlist
         if invocation_arguments is None and session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
             changes["session_chat_language_models"] = session_chat_language_models
+        if invocation_arguments is None and classroom_model_choice is not CLASSROOM_MODEL_CHOICE_UNCHANGED:
+            changes["classroom_model_choice"] = classroom_model_choice
         changes.pop("decision_model", None)
         changes.pop("decision_model_allowlist", None)
         changes.pop("decision_enabled", None)
@@ -526,6 +530,7 @@ class PortalUseCase:
             model_allowlist=model_allowlist,
             session_chat_language_models=session_chat_language_models,
             decision_model=DECISION_MODEL_UNCHANGED,
+            classroom_model_choice=classroom_model_choice,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=user_id,
                 action=self._session_action(changes),
@@ -591,6 +596,8 @@ class PortalUseCase:
             return "change_session_chat_language_models"
         if fields == {"decision_model"}:
             return "change_session_decision_model"
+        if fields == {"classroom_model_choice"}:
+            return "change_classroom_model_choice"
         return "update_class_session"
 
     def extension_course_catalog(self, api_key: str) -> dict[str, str]:
@@ -639,16 +646,28 @@ class PortalUseCase:
             self._require_usable_api_key(api_key)
             context = self.repo.verify_api_key_context(api_key)
             if context is not None and context.session_id is not None:
-                self._presented_session_document(api_key)
-                return classroom_vscode_model_list(load_vans_template())
+                document = self._presented_session_document(api_key)
+                return classroom_student_chat_document(
+                    self.repo.get_classroom_model_choice(context.session_id),
+                    document,
+                    load_vans_template(),
+                )
         if portal_user_id is not None:
             return self.router_model_template(portal_user_id)
         raise PermissionError("需要 Portal 登入或 Classroom API Key")
 
     def vscode_install_models(self, api_key: str | None = None) -> list[dict[str, Any]]:
-        if api_key:
-            self._presented_session_document(api_key)
-        return classroom_vscode_model_list(load_vans_template())
+        if not api_key:
+            return classroom_vscode_model_list(load_vans_template())
+        context = self.repo.verify_api_key_context(api_key)
+        document = self._presented_session_document(api_key)
+        if context is None or context.session_id is None:
+            return classroom_vscode_model_list(load_vans_template())
+        return classroom_student_chat_document(
+            self.repo.get_classroom_model_choice(context.session_id),
+            document,
+            load_vans_template(),
+        )
 
     def _presented_session_document(self, api_key: str) -> list[Any] | None:
         self._require_usable_api_key(api_key)

@@ -236,6 +236,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
             )
             self._ensure_column(conn, "class_sessions", "model_allowlist_json", "TEXT")
             self._ensure_column(conn, "class_sessions", "session_chat_language_models_json", "TEXT")
+            self._ensure_column(conn, "class_sessions", "classroom_model_choice", "TEXT")
             self._ensure_column(conn, "class_members", "classroom_nickname", "TEXT")
             conn.execute(
                 """

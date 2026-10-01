@@ -19,6 +19,7 @@ from src.infrastructure.auth.extension_handoff import (
 from src.infrastructure.auth.google_oauth import GoogleOAuthService
 from src.infrastructure.config import RouterSettings
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
+from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -136,6 +137,7 @@ class SessionPatchRequest(BaseModel):
     seat_limit: int | None = None
     model_allowlist: list[str] | None = None
     session_chat_language_models: Any = None
+    classroom_model_choice: str | None = None
 
 
 class UserPatchRequest(BaseModel):
@@ -595,6 +597,11 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             if "decision_model" in data.model_fields_set
             else DECISION_MODEL_UNCHANGED
         )
+        if "classroom_model_choice" in data.model_fields_set:
+            classroom_model_choice = data.classroom_model_choice
+            invocation_arguments["classroom_model_choice"] = classroom_model_choice
+        else:
+            classroom_model_choice = CLASSROOM_MODEL_CHOICE_UNCHANGED
         invocation_arguments.pop("decision_model", None)
         if data.model_fields_set and data.model_fields_set <= {"decision_model"}:
             session = portal_call(
@@ -624,6 +631,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 seat_limit=data.seat_limit,
                 model_allowlist=model_allowlist,
                 session_chat_language_models=session_chat_language_models,
+                classroom_model_choice=classroom_model_choice,
                 invocation_channel=_webmcp_invocation_channel(request),
                 invocation_arguments=invocation_arguments,
             )

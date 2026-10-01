@@ -859,9 +859,40 @@
         `beginEditSessionChatLanguageModels(${classId}, ${session.id})`,
       );
       return `<div class="cell-with-action">
-        <div class="cell-main"><span class="model-allowlist-label">${escapeHtml(label)}</span></div>
+        <div class="cell-main">
+          <span class="model-allowlist-label">${escapeHtml(label)}</span>
+          ${sessionModelChoiceControl(classId, session)}
+        </div>
         ${edit}
       </div>`;
+    }
+
+    function sessionModelChoiceControl(classId, session) {
+      const choice = session.classroom_model_choice === 'picked' || session.classroom_model_choice === 'automatic'
+        ? session.classroom_model_choice
+        : '';
+      const options = [
+        choice ? '' : '<option value="" selected disabled>未設定</option>',
+        `<option value="picked"${choice === 'picked' ? ' selected' : ''}>學生自選</option>`,
+        `<option value="automatic"${choice === 'automatic' ? ' selected' : ''}>自動</option>`,
+      ].join('');
+      return `<label class="session-model-choice">模型選擇 <select aria-label="模型選擇" data-stored="${choice}" onchange="setClassroomModelChoice(${classId}, ${session.id}, this)">${options}</select></label>`;
+    }
+
+    async function setClassroomModelChoice(classId, sessionId, selectEl) {
+      const value = selectEl.value;
+      const stored = selectEl.dataset.stored || '';
+      if (value !== 'picked' && value !== 'automatic') return;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ classroom_model_choice: value }),
+        });
+        await reloadSessionViews(classId);
+      } catch (err) {
+        selectEl.value = stored;
+        throw err;
+      }
     }
 
     function sessionCatalogYaml(session) {

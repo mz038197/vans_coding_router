@@ -219,6 +219,27 @@ def create_api_router(
         data = await api_use_case.images_models(api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
+    async def _shelf_models(request: Request, loader):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+        return JSONResponse(content=await loader(auth_context))
+
+    @router.get("/v1/audio/speech/models")
+    async def speech_models(request: Request):
+        return await _shelf_models(request, api_use_case.speech_models)
+
+    @router.get("/v1/audio/transcriptions/models")
+    async def transcription_models(request: Request):
+        return await _shelf_models(request, api_use_case.transcription_models)
+
+    @router.get("/v1/decisions/models")
+    async def decision_models(request: Request):
+        return await _shelf_models(request, api_use_case.decision_models)
+
     def _audio_speech_media_type(response_format: str | None) -> str:
         if response_format == "pcm":
             return "audio/pcm"

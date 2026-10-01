@@ -46,6 +46,7 @@ def test_session_allowlist_rejects_disallowed_chat_model(tmp_path):
         klass["id"],
         session["id"],
         model_allowlist=["ollama_cloud@minimax-m3:cloud"],
+        classroom_model_choice="picked",
     )
     headers = {"Authorization": f"Bearer {student_key}"}
     body = {"model": "openrouter@minimax/minimax-m3", "messages": [{"role": "user", "content": "hi"}]}
@@ -63,7 +64,7 @@ def test_session_allowlist_rejects_disallowed_chat_model(tmp_path):
     assert allowed.status_code == 200
 
 
-def test_new_session_chat_rejects_model_id_not_in_template_copy(tmp_path):
+def test_new_automatic_session_rejects_named_models(tmp_path):
     client, repo, gateway = _sqlite_api_client(tmp_path)
     _klass, _session, student_key = _student_chat_setup(repo)
     headers = {"Authorization": f"Bearer {student_key}"}
@@ -77,12 +78,19 @@ def test_new_session_chat_rejects_model_id_not_in_template_copy(tmp_path):
     assert blocked.json()["error"]["code"] == "model_not_allowed"
     assert gateway.last_nonstream_req is None
 
-    allowed = client.post(
+    named = client.post(
         "/v1/chat/completions",
         headers=headers,
         json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
     )
-    assert allowed.status_code == 200
+    assert named.status_code == 403
+    assert named.json()["error"]["code"] == "model_not_allowed"
+    auto = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"model": "vcr-auto", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert auto.status_code == 200
 
 
 def test_missing_session_document_rejects_all_chat_models_without_writing(tmp_path):

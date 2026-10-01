@@ -71,6 +71,7 @@ test("supported browsers discover working context and list Classes", async () =>
       "update_session_capabilities",
       "change_session_expiry",
       "change_session_seat_limit",
+      "change_classroom_model_choice",
       "change_session_decision_model",
       "get_class_usage",
       "get_upstream_pool_status",

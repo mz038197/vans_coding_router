@@ -47,6 +47,7 @@
       "decision_model",
       "seat_limit",
       "redemption_count",
+      "classroom_model_choice",
     ]);
   }
 
@@ -304,6 +305,22 @@
       },
       async execute(input) {
         return updateSession(input, { seat_limit: input.seat_limit });
+      },
+    }, {
+      name: "change_classroom_model_choice",
+      title: "Change Classroom Model Choice",
+      description: "Set Classroom Model Choice for an explicit Class Session or the current Portal Class Session. picked is Picked Models. automatic is Automatic Models.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...sessionTargetProperties,
+          classroom_model_choice: { type: "string", enum: ["picked", "automatic"] },
+        },
+        required: ["classroom_model_choice"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        return updateSession(input, { classroom_model_choice: input.classroom_model_choice });
       },
     }, {
       name: "change_session_decision_model",

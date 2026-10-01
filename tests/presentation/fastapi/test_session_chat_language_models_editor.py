@@ -138,6 +138,11 @@ def _owner_session(repo):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     klass = repo.create_class(teacher["id"], "Demo", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE class_sessions SET classroom_model_choice = NULL WHERE id = ?"),
+            (session["id"],),
+        )
     return teacher, klass, session
 
 

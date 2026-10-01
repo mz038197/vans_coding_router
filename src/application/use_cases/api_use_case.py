@@ -26,6 +26,7 @@ from src.domain.model_shelf import (
     omit_non_text_shelf_models,
     shelf_model_ids,
 )
+from src.domain.classroom_model_choice import choice_accepts_model, student_list_ids
 from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
@@ -62,10 +63,12 @@ class ApiUseCase:
 
     async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
         if auth_context is not None and auth_context.session_id is not None:
-            return {
-                "object": "list",
-                "data": [{"id": VCR_AUTO_MODEL_ID, "object": "model"}],
-            }
+            return self._openai_model_list(
+                student_list_ids(
+                    self._classroom_model_choice(auth_context),
+                    self._text_model_ids(auth_context),
+                )
+            )
         return await self.gateway.models()
 
     async def chat_nonstream(
@@ -233,10 +236,43 @@ class ApiUseCase:
         ids = self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY)
         if not ids:
             raise ImageGenerationDisabledError()
+        return self._openai_model_list(
+            student_list_ids(self._classroom_model_choice(auth_context), ids)
+        )
+
+    async def speech_models(
+        self,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        return self._shelf_student_list(auth_context, SPEECH_SHELF_KEY)
+
+    async def transcription_models(
+        self,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        return self._shelf_student_list(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY)
+
+    async def decision_models(
+        self,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        return self._shelf_student_list(auth_context, DECISION_SHELF_KEY)
+
+    def _openai_model_list(self, model_ids: list[str]) -> dict[str, Any]:
         return {
             "object": "list",
-            "data": [{"id": VCR_AUTO_MODEL_ID, "object": "model"}],
+            "data": [{"id": model_id, "object": "model"} for model_id in model_ids],
         }
+
+    def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
+        ids = self._shelf_model_ids(auth_context, shelf_key)
+        if self._is_personal_api_key(auth_context):
+            return self._openai_model_list(ids)
+        if auth_context is None or auth_context.session_id is None:
+            return self._openai_model_list([])
+        return self._openai_model_list(
+            student_list_ids(self._classroom_model_choice(auth_context), ids)
+        )
 
     async def audio_speech_stream(
         self,
@@ -289,6 +325,12 @@ class ApiUseCase:
         return model_id == VCR_AUTO_MODEL_ID and auth_context is not None
 
     def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
+        if self._classroom_session(auth_context) and not choice_accepts_model(
+            self._classroom_model_choice(auth_context),
+            model_id,
+            self._text_model_ids(auth_context),
+        ):
+            raise ModelNotAllowedError()
         if self._use_vcr_auto_walk(model_id, auth_context):
             if not self._text_model_ids(auth_context):
                 raise ModelNotAllowedError()
@@ -416,6 +458,12 @@ class ApiUseCase:
         ids = self._shelf_model_ids(auth_context, shelf_key)
         if not ids:
             raise disabled_error()
+        if self._classroom_session(auth_context) and not choice_accepts_model(
+            self._classroom_model_choice(auth_context),
+            model_id,
+            ids,
+        ):
+            raise ModelNotAllowedError()
         if self._use_vcr_auto_walk(model_id, auth_context):
             return
         if not isinstance(model_id, str) or model_id not in ids:
@@ -749,6 +797,12 @@ class ApiUseCase:
         decision_ids = self._decision_model_ids(auth_context)
         if not decision_ids:
             raise DecisionDisabledError()
+        if self._classroom_session(auth_context) and not choice_accepts_model(
+            self._classroom_model_choice(auth_context),
+            model_id,
+            decision_ids,
+        ):
+            raise ModelNotAllowedError()
         if self._use_vcr_auto_walk(model_id, auth_context):
             return
         if not isinstance(model_id, str) or model_id not in decision_ids:
@@ -765,11 +819,24 @@ class ApiUseCase:
         ids = getter(auth_context.session_id) or []
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
+    def _classroom_session(self, auth_context: AuthContext | None) -> bool:
+        return (
+            auth_context is not None
+            and auth_context.session_id is not None
+            and callable(getattr(self.api_key_repo, "get_classroom_model_choice", None))
+        )
+
+    def _classroom_model_choice(self, auth_context: AuthContext | None) -> str | None:
+        if not self._classroom_session(auth_context):
+            return None
+        return self.api_key_repo.get_classroom_model_choice(auth_context.session_id)
+
     async def open_realtime(
         self,
         model_id: str,
         auth_context: AuthContext | None = None,
     ) -> tuple[RealtimeUpstreamTarget, Callable[[], Awaitable[None]] | None, str]:
+        self._assert_speech_transcription_allowed(auth_context, model_id)
         if not self._use_vcr_auto_walk(model_id, auth_context):
             return self.validate_realtime_request(model_id, auth_context), None, model_id
         model_ids = self._shelf_model_ids(auth_context, SPEECH_TRANSCRIPTION_SHELF_KEY)

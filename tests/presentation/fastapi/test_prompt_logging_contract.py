@@ -51,6 +51,11 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
     repo.update_user(teacher["id"], roles=["teacher"])
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE class_sessions SET classroom_model_choice = NULL WHERE id = ?"),
+            (session["id"],),
+        )
     student = repo.upsert_google_user("student@school.edu", "Student")
     student_key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     headers = {"Authorization": f"Bearer {student_key}"}

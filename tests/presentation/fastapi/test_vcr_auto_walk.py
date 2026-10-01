@@ -383,6 +383,13 @@ def test_empty_text_shelf_refuses_vcr_auto_before_upstream(harness: _Harness):
 
 def test_named_model_on_the_shelf_keeps_today_rules(harness: _Harness):
     harness.set_models(_text_shelf())
+    with harness.repo._connect() as conn:
+        conn.execute(
+            harness.repo._sql(
+                "UPDATE class_sessions SET classroom_model_choice = NULL WHERE id = ?"
+            ),
+            (harness.session["id"],),
+        )
     from fastapi.testclient import TestClient
 
     client = TestClient(harness.app)

@@ -17,6 +17,12 @@ from src.domain.decision_model import (
     normalize_decision_model,
 )
 from src.domain.model_shelf import omit_non_text_shelf_models, shelf_model_ids
+from src.domain.classroom_model_choice import (
+    AUTOMATIC_MODELS,
+    CLASSROOM_MODEL_CHOICE_UNCHANGED,
+    PICKED_MODELS,
+    normalize_classroom_model_choice,
+)
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -1008,8 +1014,8 @@ class RouterRepositoryBase(ABC):
                 """
                 INSERT INTO class_sessions(
                     class_id, invite_code, expires_at, session_at, name, created_by, created_at,
-                    course_catalog_yaml, session_chat_language_models_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    course_catalog_yaml, session_chat_language_models_json, classroom_model_choice
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     class_id,
@@ -1021,6 +1027,7 @@ class RouterRepositoryBase(ABC):
                     now,
                     DEFAULT_COURSE_CATALOG_YAML,
                     document_json,
+                    AUTOMATIC_MODELS,
                 ),
             )
             row = conn.execute(
@@ -1119,6 +1126,7 @@ class RouterRepositoryBase(ABC):
         model_allowlist: Any = MODEL_ALLOWLIST_UNCHANGED,
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
         decision_model: Any = DECISION_MODEL_UNCHANGED,
+        classroom_model_choice: Any = CLASSROOM_MODEL_CHOICE_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any] | None:
         if (
@@ -1134,6 +1142,7 @@ class RouterRepositoryBase(ABC):
             and model_allowlist is MODEL_ALLOWLIST_UNCHANGED
             and session_chat_language_models is SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED
             and decision_model is DECISION_MODEL_UNCHANGED
+            and classroom_model_choice is CLASSROOM_MODEL_CHOICE_UNCHANGED
         ):
             raise ValueError("nothing to update")
         if status is not None and status not in {"active", "ended"}:
@@ -1203,6 +1212,11 @@ class RouterRepositoryBase(ABC):
                     self._sql("UPDATE class_sessions SET seat_limit = ? WHERE id = ?"),
                     (int(seat_limit), session_id),
                 )
+            if classroom_model_choice is not CLASSROOM_MODEL_CHOICE_UNCHANGED:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET classroom_model_choice = ? WHERE id = ?"),
+                    (normalize_classroom_model_choice(classroom_model_choice), session_id),
+                )
             if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
                 conn.execute(
                     self._sql(
@@ -1234,6 +1248,19 @@ class RouterRepositoryBase(ABC):
             if updated is not None and agent_action_audit is not None:
                 self._insert_agent_action_audit(conn, agent_action_audit)
             return self._public_class_session(updated) if updated else None
+
+    def get_classroom_model_choice(self, session_id: int) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT classroom_model_choice FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+        if not row:
+            return None
+        value = row["classroom_model_choice"]
+        if value in {PICKED_MODELS, AUTOMATIC_MODELS}:
+            return value
+        return None
 
     def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
         with self._connect() as conn:

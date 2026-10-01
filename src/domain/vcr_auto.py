@@ -3,7 +3,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from src.domain.model_shelf import is_non_text_shelf_model
+from src.domain.classroom_model_choice import PICKED_MODELS
+from src.domain.model_shelf import is_non_text_shelf_model, omit_non_text_shelf_models
 
 VCR_AUTO_MODEL_ID = "vcr-auto"
 
@@ -28,6 +29,17 @@ def classroom_vscode_model_list(shipped: list[Any]) -> list[dict[str, Any]]:
             "models": [entry],
         }
     ]
+
+
+def classroom_student_chat_document(
+    choice: str | None,
+    session_document: list[Any] | None,
+    shipped: list[Any],
+) -> list[Any]:
+    if choice == PICKED_MODELS:
+        filtered = omit_non_text_shelf_models(session_document)
+        return filtered if isinstance(filtered, list) else []
+    return classroom_vscode_model_list(shipped)
 
 
 def _shipped_text_model(shipped: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
