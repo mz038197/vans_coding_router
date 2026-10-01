@@ -8,6 +8,10 @@ OpenAI-compatible cloud provider router for Vans Coding classes. Students call t
 A request identity of the form `provider@upstream_model` (for example `ollama_cloud@kimi-k3:cloud`). The router uses the provider segment for routing and forwards the upstream segment to that provider.
 _Avoid_: Bare model name, display name
 
+**vcr-auto**:
+The request Model ID `vcr-auto` on a Classroom API Key or a Personal API Key. It stands for the ordered Model IDs on that call's shelf — text for chat and Responses, otherwise the decision, image, speech, or speech-transcription shelf — tried from the top. The next Model ID is tried when Key Failover on the current one still ends in Extra Usage Exhaustion or Credit Exhaustion, when that provider's key pool has no free concurrency slot, or when that pool has no selectable key. A full pool does not wait out its queue while a later Model ID remains; the walk moves on immediately. When every Model ID on that shelf was passed over because its pool had no free slot, the call waits in the first Model ID's pool until that pool's queue timeout, then it is busy. That busy call has no model output. This holds for every provider. A later Model ID on the same provider shares that pool, so it adds no free slot. Model output ends the walk, including a stream that has already started, and an empty list refuses the call. The chat and Responses reply model string stays `vcr-auto`, including stream chunks. A Decision reply and an image reply keep the model string the upstream attached. The VS Code model list written by the extension and by the Portal install script is a single model whose id and display name are `vcr-auto`; it does not include that sitting's Model IDs. That entry keeps image input, tool calling, and thinking switched on, fixed to the shipped text model's Copilot settings, including that model's token limits, router address, and authorization. Those settings do not follow the Model ID `vcr-auto` resolves. A Classroom API Key's model lists name only `vcr-auto`. A Personal API Key's model lists stay the live shelf. A Classroom API Key draws the Model IDs checked onto that shelf in the sitting's Session Chat Language Models; a Personal API Key draws that shelf in its holder's Router Model Template. A request that names a Model ID is not `vcr-auto` and keeps that key's existing Model ID rules.
+_Avoid_: auto, Key Failover, round-robin, bare upstream name, first Model ID only, the only accepted request model, writing the sitting's Model IDs into the student VS Code model list, copying image, tool, or thinking switches from the resolved Model ID, rewriting a Decision or image reply model to vcr-auto, waiting out a full pool before the next Model ID, an immediate busy when every pool on the shelf is full, spillover limited to two providers
+
 **Upstream Refusal**:
 A provider response that rejects the request before any model output is produced (for example Ollama Extra Usage exhausted). It is a billing or entitlement failure at the provider, not a router routing mistake.
 _Avoid_: Copilot bug, no choices, model offline
@@ -73,7 +77,7 @@ A Class Session lets a Classroom API Key call image generation when its Session 
 _Avoid_: image_generation_enabled, a capability checkbox, 生圖開關, a provider capability flag that refuses a checked Image Generation Model
 
 **Image Generation Model**:
-A Model ID the teacher checked from the image shelf into that sitting’s Session Chat Language Models. An image generation call may use any of them. Comparison uses the Model ID on that request, exactly. For a Classroom API Key, the image model list is those checked ids; none checked means that list is refused. A Personal API Key sees the live image shelf. A text-shelf model, a Speech Model, a Speech Transcription Model, or a Decision Model is not an Image Generation Model.
+A Model ID the teacher checked from the image shelf into that sitting’s Session Chat Language Models. An image generation call may use any of them. Comparison uses the Model ID on that request, exactly. For a Classroom API Key, the image model list names only `vcr-auto`. A Personal API Key sees the live image shelf. A text-shelf model, a Speech Model, a Speech Transcription Model, or a Decision Model is not an Image Generation Model.
 _Avoid_: OpenRouter prefix as the qualification, a capability checkbox, a single chosen image field, the live image catalog as the classroom permission, a student list of unchecked image models
 
 **File Transcription**:
@@ -173,8 +177,8 @@ The text-shelf Model IDs inside that session’s Session Chat Language Models. D
 _Avoid_: a second chat-model id list, Decision Model Allowlist, counting a Decision Model as a chat id, unset-means-no-filter after the sitting has a document, stuffing the allowlist into Course Catalog YAML
 
 **Router Model Template**:
-The offerable chat-language-model set in `config/chatLanguageModels.vans.json`, returned by unauthenticated `GET /extension/chat-language-models`.
-_Avoid_: a second curated catalog, picking a whole upstream by provider name only, treating the live file as the student keyed GET
+The ordered shelf document owned by one teacher, checked from the Upstream Model Catalog the same way as Session Chat Language Models, including shelf and order. Save forces the VCRouter Stencil. That teacher's Personal API Key uses it as its vcr-auto candidate list. A new teacher starts from the shipped text-shelf starter. A new Class Session copies the class owner's template once at create into Session Chat Language Models; later edits to the template do not change a sitting that already has its own document. It is not a site-wide file and not the student keyed list. There is no model-list read without a teacher: Portal reads the logged-in teacher's template.
+_Avoid_: one shared template for every teacher, an empty template for a new teacher, rewriting an existing sitting when the template changes, a second curated catalog, picking a whole upstream by provider name only, treating the template as the student keyed GET, a model list with no teacher
 
 **VCRouter Stencil**:
 The locked classroom provider identity and routing fields for Session Chat Language Models: `VCRouter` / `customendpoint` / `responses` / router url / `Authorization: Bearer ${apiKey}`. Teacher save and upload force these fields; display name, thinking, and token limits may differ.
@@ -217,8 +221,8 @@ A backend record of a successful agent-initiated domain mutation, including the 
 _Avoid_: browser console log, frontend-only audit, authorization token, trusting an invocation header for permissions
 
 **Prompt Log** (Portal: 對話紀錄):
-One stored conversation from a student router call for a Class. The teacher of that Class can read it after the Class has ended, until it reaches Archive Age, unless it has already been archived. It is not authorization.
-_Avoid_: removing it because the Class ended, treating a Prompt Log as user authorization
+One stored conversation from a student router call for a Class. The stored model is the Model ID that produced the output, not `vcr-auto`. A walk that produced no output does not add another Prompt Log. The teacher of that Class can read it after the Class has ended, until it reaches Archive Age, unless it has already been archived. It is not authorization.
+_Avoid_: removing it because the Class ended, treating a Prompt Log as user authorization, storing the string vcr-auto as the model
 
 **Archive Age** (Portal: 歸檔天數):
 How old a Prompt Log must be, counting from when it was created, before it is archived. Ending a Class is not Archive Age.
