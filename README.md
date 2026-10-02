@@ -107,7 +107,7 @@ Supported endpoints:
 
 `/v1/responses` is stateless in this router. Requests with `previous_response_id` are rejected.
 
-Image generation, Speech, and Speech Transcription for a Classroom API Key follow the Model IDs checked onto that sitting's image, speech, and speech-transcription shelves. None checked means that call is off. `GET /v1/images/models` for a Classroom API Key returns only the checked Image Generation Models. A Personal API Key is outside the sitting. Prompt logging stays a session switch.
+Image generation, Speech, and Speech Transcription for a Classroom API Key follow the Model IDs checked onto that sitting's image, speech, and speech-transcription shelves. None checked means that call is off. `GET /v1/images/models` for a Classroom API Key returns only the checked Image Generation Models. A Personal API Key follows the shelves on its holder's Router Model Template: a non-empty shelf lists `vcr-auto` first, then those Model IDs, and an empty shelf lists nothing and refuses the call. Prompt logging stays a session switch.
 
 ## Portal Flow
 

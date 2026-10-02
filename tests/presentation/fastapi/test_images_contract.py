@@ -164,21 +164,45 @@ def test_classroom_image_generation_follows_the_image_shelf(tmp_path):
     assert gateway.last_images_body["model"] == "openrouter@black-forest-labs/flux.2-pro"
 
 
-def test_teacher_long_lived_key_bypasses_session_image_toggle(tmp_path):
-    client, repo, _gateway, _logger = _sqlite_api_client(tmp_path)
+def test_personal_api_key_image_call_follows_the_holder_template(tmp_path):
+    client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    repo.save_router_model_template(
+        teacher["id"],
+        [
+            {
+                "name": "VCRouter",
+                "models": [
+                    {
+                        "id": "openrouter@black-forest-labs/flux.2-pro",
+                        "name": "flux",
+                        "imageShelf": True,
+                    }
+                ],
+            }
+        ],
+    )
     teacher_key = repo.issue_long_lived_key(teacher["id"])
     repo.update_class_session(klass["id"], session["id"], image_generation_enabled=False)
+    headers = {"Authorization": f"Bearer {teacher_key}"}
 
     response = client.post(
         "/v1/images",
-        headers={"Authorization": f"Bearer {teacher_key}"},
+        headers=headers,
         json={"model": "openrouter@black-forest-labs/flux.2-pro", "prompt": "teacher test"},
     )
     assert response.status_code == 200
+    assert gateway.last_images_body["model"] == "openrouter@black-forest-labs/flux.2-pro"
+    refused = client.post(
+        "/v1/images",
+        headers=headers,
+        json={"model": "openrouter@other/flux", "prompt": "teacher test"},
+    )
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "model_not_allowed"
 
 
 @pytest.mark.asyncio

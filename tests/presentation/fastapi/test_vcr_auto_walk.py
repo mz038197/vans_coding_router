@@ -324,7 +324,7 @@ def test_personal_api_key_vcr_auto_on_an_empty_template_shelf_is_refused(harness
     assert harness.openrouter._client.request.await_count == 0
 
 
-def test_personal_api_key_named_model_keeps_forwarding(harness: _Harness):
+def test_personal_api_key_named_model_on_the_shelf_is_forwarded(harness: _Harness):
     harness.repo.save_router_model_template(harness.teacher["id"], _document([_model(SECOND)]))
     personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
     from fastapi.testclient import TestClient
@@ -333,12 +333,21 @@ def test_personal_api_key_named_model_keeps_forwarding(harness: _Harness):
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {personal}"},
-        json={"model": FIRST, "messages": [{"role": "user", "content": "hi"}]},
+        json={"model": SECOND, "messages": [{"role": "user", "content": "hi"}]},
     )
     assert response.status_code == 200
-    assert response.json()["model"] == FIRST_UPSTREAM
-    assert harness.ollama._client.request.await_args.kwargs["json"]["model"] == FIRST_UPSTREAM
-    assert harness.openrouter._client.request.await_count == 0
+    assert response.json()["model"] == SECOND_UPSTREAM
+    assert harness.openrouter._client.request.await_args.kwargs["json"]["model"] == SECOND_UPSTREAM
+    assert harness.ollama._client.request.await_count == 0
+
+    refused = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={"model": FIRST, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "model_not_allowed"
+    assert harness.ollama._client.request.await_count == 0
 
 
 @pytest.mark.asyncio

@@ -322,10 +322,17 @@ def test_every_decision_shelf_model_can_receive_a_decision_request(tmp_path):
     assert openrouter.last_decision_body["model"] == "~typesafe/jev-latest"
 
 
-def test_personal_api_key_decision_forwards_any_model_id(tmp_path):
+def test_personal_api_key_decision_forwards_a_template_shelf_model(tmp_path):
     client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
+    repo.save_router_model_template(
+        teacher["id"],
+        _openrouter_document(
+            "openrouter@typesafe/jev-9.9",
+            decision_ids=("openrouter@typesafe/jev-9.9",),
+        ),
+    )
     personal = repo.issue_long_lived_key(teacher["id"])
     openrouter.decision_response = {
         "id": "gen-dec-personal",
@@ -352,6 +359,13 @@ def test_personal_api_key_decision_forwards_any_model_id(tmp_path):
         "state": "付款失敗三天了",
         "questions": _DECISION_BODY["questions"],
     }
+    refused = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={**_DECISION_BODY, "model": "openrouter@typesafe/jev-1.13"},
+    )
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "model_not_allowed"
 
 
 def test_legacy_decision_columns_do_not_enable_decision(tmp_path):

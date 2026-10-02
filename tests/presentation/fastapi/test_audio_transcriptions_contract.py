@@ -165,20 +165,45 @@ def test_session_speech_transcription_follows_the_shelf(tmp_path):
     assert wrong.json()["error"]["code"] == "model_not_allowed"
 
 
-def test_teacher_long_lived_key_bypasses_speech_transcription_toggle(tmp_path):
-    client, repo, _gateway, _logger = _sqlite_api_client(tmp_path)
+def test_personal_api_key_transcription_follows_the_holder_template(tmp_path):
+    client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
     klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    repo.save_router_model_template(
+        teacher["id"],
+        [
+            {
+                "name": "VCRouter",
+                "models": [
+                    {
+                        "id": "openai@gpt-transcribe",
+                        "name": "transcribe",
+                        "speechTranscriptionShelf": True,
+                    }
+                ],
+            }
+        ],
+    )
     teacher_key = repo.issue_long_lived_key(teacher["id"])
     assert repo.is_speech_transcription_enabled(session["id"]) is False
+    headers = {"Authorization": f"Bearer {teacher_key}"}
 
     response = client.post(
         "/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {teacher_key}"},
+        headers=headers,
         data={"model": "openai@gpt-transcribe"},
         files={"file": ("speech.wav", b"RIFF....", "audio/wav")},
     )
     assert response.status_code == 200
+    assert gateway.last_audio_transcriptions_fields["model"] == "openai@gpt-transcribe"
+    refused = client.post(
+        "/v1/audio/transcriptions",
+        headers=headers,
+        data={"model": "openai@gpt-live-transcribe"},
+        files={"file": ("speech.wav", b"RIFF....", "audio/wav")},
+    )
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "model_not_allowed"
 

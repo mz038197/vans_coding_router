@@ -152,10 +152,16 @@ def test_classroom_key_model_lists_name_only_vcr_auto(tmp_path):
     personal_headers = {"Authorization": f"Bearer {personal}"}
     personal_models = client.get("/v1/models", headers=personal_headers)
     assert personal_models.status_code == 200
-    assert [item["id"] for item in personal_models.json()["data"]] == ["fake-model"]
+    assert [item["id"] for item in personal_models.json()["data"]] == [
+        "vcr-auto",
+        "ollama_cloud@minimax-m3:cloud",
+        "ollama_cloud@kimi-k2.7-code:cloud",
+        "openrouter@minimax/minimax-m3",
+    ]
+    assert "fake-model" not in personal_models.text
     personal_images = client.get("/v1/images/models", headers=personal_headers)
     assert personal_images.status_code == 200
-    assert personal_images.json()["data"][0]["id"] == "flux.2-pro"
+    assert personal_images.json()["data"] == []
 
 
 def test_classroom_image_list_is_refused_when_the_image_shelf_is_empty(tmp_path):

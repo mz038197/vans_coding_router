@@ -62,6 +62,10 @@ class ApiUseCase:
         return await self.gateway.health()
 
     async def models(self, auth_context: AuthContext | None = None) -> dict[str, Any]:
+        if self._held_personal_key(auth_context):
+            return self._openai_model_list(
+                self._personal_list_ids(self._text_model_ids(auth_context))
+            )
         if auth_context is not None and auth_context.session_id is not None:
             return self._openai_model_list(
                 student_list_ids(
@@ -231,6 +235,10 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
+        if self._held_personal_key(auth_context):
+            return self._openai_model_list(
+                self._personal_list_ids(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
+            )
         if self._is_personal_api_key(auth_context):
             return await self.gateway.images_models()
         ids = self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY)
@@ -264,8 +272,16 @@ class ApiUseCase:
             "data": [{"id": model_id, "object": "model"} for model_id in model_ids],
         }
 
+    def _personal_list_ids(self, shelf_ids: list[str]) -> list[str]:
+        if not shelf_ids:
+            return []
+        rest = [model_id for model_id in shelf_ids if model_id != VCR_AUTO_MODEL_ID]
+        return [VCR_AUTO_MODEL_ID, *rest]
+
     def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
         ids = self._shelf_model_ids(auth_context, shelf_key)
+        if self._held_personal_key(auth_context):
+            return self._openai_model_list(self._personal_list_ids(ids))
         if self._is_personal_api_key(auth_context):
             return self._openai_model_list(ids)
         if auth_context is None or auth_context.session_id is None:
@@ -306,7 +322,7 @@ class ApiUseCase:
         auth_context: AuthContext | None,
         model_id: Any,
     ) -> None:
-        self._assert_classroom_shelf(
+        self._assert_shelf_allowed(
             auth_context,
             IMAGE_SHELF_KEY,
             model_id,
@@ -314,7 +330,7 @@ class ApiUseCase:
         )
 
     def _assert_tts_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
-        self._assert_classroom_shelf(
+        self._assert_shelf_allowed(
             auth_context,
             SPEECH_SHELF_KEY,
             model_id,
@@ -325,6 +341,13 @@ class ApiUseCase:
         return model_id == VCR_AUTO_MODEL_ID and auth_context is not None
 
     def _assert_model_allowed(self, model_id: str, auth_context: AuthContext | None) -> None:
+        if self._held_personal_key(auth_context):
+            self._assert_holder_shelf(
+                self._text_model_ids(auth_context),
+                model_id,
+                ModelNotAllowedError,
+            )
+            return
         if self._classroom_session(auth_context) and not choice_accepts_model(
             self._classroom_model_choice(auth_context),
             model_id,
@@ -435,20 +458,27 @@ class ApiUseCase:
         auth_context: AuthContext | None,
         model_id: Any,
     ) -> None:
-        self._assert_classroom_shelf(
+        self._assert_shelf_allowed(
             auth_context,
             SPEECH_TRANSCRIPTION_SHELF_KEY,
             model_id,
             SpeechTranscriptionDisabledError,
         )
 
-    def _assert_classroom_shelf(
+    def _assert_shelf_allowed(
         self,
         auth_context: AuthContext | None,
         shelf_key: str,
         model_id: Any,
         disabled_error: type[Exception],
     ) -> None:
+        if self._held_personal_key(auth_context):
+            self._assert_holder_shelf(
+                self._shelf_model_ids(auth_context, shelf_key),
+                model_id,
+                disabled_error,
+            )
+            return
         if self._is_personal_api_key(auth_context):
             if self._use_vcr_auto_walk(model_id, auth_context) and not self._shelf_model_ids(
                 auth_context, shelf_key
@@ -774,7 +804,13 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         del api_key, client_ip
         model_id = body.get("model")
-        if self._is_personal_api_key(auth_context):
+        if self._held_personal_key(auth_context):
+            self._assert_holder_shelf(
+                self._decision_model_ids(auth_context),
+                model_id,
+                DecisionDisabledError,
+            )
+        elif self._is_personal_api_key(auth_context):
             if self._use_vcr_auto_walk(str(model_id or ""), auth_context) and not self._decision_model_ids(
                 auth_context
             ):
@@ -792,6 +828,26 @@ class ApiUseCase:
 
     def _is_personal_api_key(self, auth_context: AuthContext | None) -> bool:
         return auth_context is not None and auth_context.session_id is None
+
+    def _assert_holder_shelf(
+        self,
+        shelf_ids: list[str],
+        model_id: Any,
+        empty_error: type[Exception],
+    ) -> None:
+        if not shelf_ids:
+            raise empty_error()
+        if model_id == VCR_AUTO_MODEL_ID:
+            return
+        if not isinstance(model_id, str) or model_id not in shelf_ids:
+            raise ModelNotAllowedError()
+
+    def _held_personal_key(self, auth_context: AuthContext | None) -> bool:
+        return (
+            auth_context is not None
+            and auth_context.session_id is None
+            and auth_context.user_id is not None
+        )
 
     def _assert_classroom_decision_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
         decision_ids = self._decision_model_ids(auth_context)
