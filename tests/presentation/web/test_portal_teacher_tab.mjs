@@ -63,32 +63,47 @@ function loadTeacherTabFns() {
     "filterCourses",
     "escapeHtml",
     "currentTeacherTabId",
+    "placeClassroomInviteCard",
+    "syncClassroomInviteCard",
     "showTab",
     "setTeacherMenuOpen",
     "syncCourseSelect",
     "refresh",
     "reloadSessionViews",
+    "toggleDeviceSessions",
   ];
   const code = [
-    "const TEACHER_TAB_IDS = ['keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];",
+    "const TEACHER_TAB_IDS = ['inviteTab', 'keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];",
     ...names.map((name) => extractNamedFunction(portalHtml, name)),
   ].join("\n");
   return { code, names };
 }
 
 function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
-  const tabIds = ["keyTab", "classTab", "monitorTab", "probeTab", "adminTab"];
+  const tabIds = ["inviteTab", "keyTab", "classTab", "monitorTab", "probeTab", "adminTab"];
   const byId = {};
+  const pageMain = {
+    insertBefore(node) {
+      node.parentNode = this;
+      return node;
+    },
+  };
   for (const id of tabIds) {
-    byId[id] = { classList: makeClassList(id === activeTab ? [] : ["hidden"]) };
+    byId[id] = {
+      classList: makeClassList(id === activeTab ? [] : ["hidden"]),
+      appendChild(node) {
+        node.parentNode = this;
+        return node;
+      },
+    };
   }
   const navButtons = tabIds.map((id) => ({
     dataset: { tab: id },
     classList: makeClassList(id === activeTab ? ["tab-active"] : []),
   }));
   byId.navWho = { innerHTML: "" };
-  byId.student = { classList: makeClassList(["hidden"]) };
-  byId.teacher = { classList: makeClassList(["hidden"]) };
+  byId.student = { classList: makeClassList(["hidden"]), parentNode: byId.inviteTab };
+  byId.teacher = { classList: makeClassList(["hidden"]), parentNode: pageMain };
   byId.adminBtn = { classList: makeClassList(["hidden"]) };
   byId.appShell = { classList: makeClassList([]) };
   byId.teacherMenuButton = {
@@ -98,6 +113,7 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
     },
   };
   byId.teacherMenu = { inert: false };
+  byId.deviceSessions = { classList: makeClassList(["hidden"]) };
   byId["sessions-panel"] = { classList: makeClassList([]) };
   byId.courseSelect = { value: selectedCourseId, innerHTML: "" };
   byId.courseStatusFilter = { value: "active" };
@@ -152,6 +168,7 @@ function makeSandbox({ activeTab = "keyTab", selectedCourseId = "7" } = {}) {
     startUpstreamPoolsPoll() {},
     stopUpstreamPoolsPoll() {},
     enhancePortalWithWebMcp() {},
+    async loadDeviceSessions() {},
     async loadClassSessions() {},
     async loadAdminClassSessions() {},
   };
@@ -166,7 +183,54 @@ function activeTab(navButtons) {
   return active?.dataset.tab ?? null;
 }
 
-test("first teacher refresh still lands on personal API Key", async () => {
+test("opening the teacher rail with no selected tab lands on 課堂邀請碼", () => {
+  const { sandbox } = makeSandbox({ activeTab: "none" });
+  assert.equal(sandbox.currentTeacherTabId(), "inviteTab");
+});
+
+test("teacher refresh keeps the invite card on 課堂邀請碼 only", async () => {
+  const { sandbox, byId, navButtons } = makeSandbox({ activeTab: "inviteTab" });
+  await sandbox.refresh();
+  assert.equal(activeTab(navButtons), "inviteTab");
+  assert.equal(byId.student.parentNode, byId.inviteTab);
+  assert.equal(byId.student.classList.contains("hidden"), false);
+  assert.equal(byId.inviteTab.classList.contains("hidden"), false);
+  sandbox.showTab("keyTab");
+  assert.equal(byId.inviteTab.classList.contains("hidden"), true);
+  assert.equal(byId.keyTab.classList.contains("hidden"), false);
+  assert.equal(byId.student.parentNode, byId.inviteTab);
+});
+
+test("a student without the teacher rail still gets the centered invite card", async () => {
+  const { sandbox, byId } = makeSandbox({ activeTab: "inviteTab" });
+  sandbox.api = async (path) => {
+    if (path === "/auth/me") return { id: 2, roles: ["student"], keys: [], classes: [] };
+    return {};
+  };
+  await sandbox.refresh();
+  assert.equal(byId.teacher.classList.contains("hidden"), true);
+  assert.equal(byId.student.classList.contains("hidden"), false);
+  assert.equal(byId.student.parentNode, byId.teacher.parentNode);
+  assert.notEqual(byId.student.parentNode, byId.inviteTab);
+  await sandbox.toggleDeviceSessions();
+  assert.equal(byId.student.classList.contains("hidden"), true);
+  await sandbox.toggleDeviceSessions();
+  assert.equal(byId.student.classList.contains("hidden"), false);
+});
+
+test("登入裝置 hides the invite card until it closes", async () => {
+  const { sandbox, byId } = makeSandbox({ activeTab: "inviteTab" });
+  await sandbox.refresh();
+  await sandbox.toggleDeviceSessions();
+  assert.equal(byId.deviceSessions.classList.contains("hidden"), false);
+  assert.equal(byId.inviteTab.classList.contains("hidden"), true);
+  await sandbox.toggleDeviceSessions();
+  assert.equal(byId.deviceSessions.classList.contains("hidden"), true);
+  assert.equal(byId.inviteTab.classList.contains("hidden"), false);
+  assert.equal(byId.student.parentNode, byId.inviteTab);
+});
+
+test("teacher refresh keeps 個人 API Key when it is current", async () => {
   const { sandbox, byId, navButtons } = makeSandbox({ activeTab: "keyTab" });
   await sandbox.refresh();
   assert.equal(activeTab(navButtons), "keyTab");

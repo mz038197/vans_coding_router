@@ -87,44 +87,15 @@
         <p class="hint">只顯示瀏覽器類型與最近活動時間，不儲存完整 IP。</p>
         <div id="deviceSessionList" class="table-wrap"><p class="hint">載入中…</p></div>
       </section>
-      <section id="student" class="glass-card hidden">
-        <h2>課堂邀請碼</h2>
-        <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
-        <input id="invite" placeholder="輸入老師提供的邀請碼" />
-        <button onclick="redeem()">領取 API Key</button>
-        <div id="redeemResultWrap" class="hidden">
-          <pre id="redeemResult" class="key-display"></pre>
-          <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
-        </div>
-        <h3>VS Code 一鍵設定</h3>
-        <p id="vscodeInstallHint" class="hint"></p>
-        <div id="vscodeInstallPrimary" class="vscode-install-primary"></div>
-        <details id="vscodeInstallAlt" class="vscode-install-alt">
-          <summary>需要其他系統版本？</summary>
-          <div id="vscodeInstallAltLinks" class="vscode-install-alt-links"></div>
-        </details>
-        <div id="activeKeysSection" class="active-keys-section is-collapsed">
-          <button
-            type="button"
-            class="active-keys-header"
-            id="activeKeysHeader"
-            aria-expanded="false"
-            aria-controls="keys"
-            onclick="toggleActiveKeys()"
-          >
-            <span class="active-keys-chevron" aria-hidden="true">▶</span>
-            <h3 class="active-keys-title">有效 Key（<span id="activeKeysCount">0</span>）</h3>
-            <span class="active-keys-toggle-label" id="activeKeysToggleLabel">展開</span>
-          </button>
-          <div id="keys" class="table-wrap active-keys-body"></div>
-        </div>
-      </section>
-
       <section id="teacher" class="glass-card hidden">
         <div class="teacher-layout glass-panel">
           <nav class="app-sidebar" id="teacherMenu" aria-label="老師功能">
+            <div class="sidebar-section-label">學生</div>
+            <button type="button" class="sidebar-nav-btn tab-active" data-tab="inviteTab" onclick="showTab('inviteTab')">
+              <i class="fas fa-ticket"></i> 課堂邀請碼
+            </button>
             <div class="sidebar-section-label">老師</div>
-            <button type="button" class="sidebar-nav-btn tab-active" data-tab="keyTab" onclick="showTab('keyTab')">
+            <button type="button" class="sidebar-nav-btn" data-tab="keyTab" onclick="showTab('keyTab')">
               <i class="fas fa-key"></i> 個人 API Key
             </button>
             <button type="button" class="sidebar-nav-btn" data-tab="classTab" onclick="showTab('classTab')">
@@ -145,7 +116,41 @@
           </nav>
           <div class="teacher-menu-backdrop" id="teacherMenuBackdrop"></div>
           <div class="teacher-content">
-        <div id="keyTab">
+        <div id="inviteTab">
+          <section id="student" class="glass-card hidden">
+            <h2>課堂邀請碼</h2>
+            <p class="hint">若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）。</p>
+            <input id="invite" placeholder="輸入老師提供的邀請碼" />
+            <button onclick="redeem()">領取 API Key</button>
+            <div id="redeemResultWrap" class="hidden">
+              <pre id="redeemResult" class="key-display"></pre>
+              <button class="btn-secondary" id="copyRedeemKeyBtn" onclick="copyText(this, lastRedeemedKey)">複製 API Key</button>
+            </div>
+            <h3>VS Code 一鍵設定</h3>
+            <p id="vscodeInstallHint" class="hint"></p>
+            <div id="vscodeInstallPrimary" class="vscode-install-primary"></div>
+            <details id="vscodeInstallAlt" class="vscode-install-alt">
+              <summary>需要其他系統版本？</summary>
+              <div id="vscodeInstallAltLinks" class="vscode-install-alt-links"></div>
+            </details>
+            <div id="activeKeysSection" class="active-keys-section is-collapsed">
+              <button
+                type="button"
+                class="active-keys-header"
+                id="activeKeysHeader"
+                aria-expanded="false"
+                aria-controls="keys"
+                onclick="toggleActiveKeys()"
+              >
+                <span class="active-keys-chevron" aria-hidden="true">▶</span>
+                <h3 class="active-keys-title">有效 Key（<span id="activeKeysCount">0</span>）</h3>
+                <span class="active-keys-toggle-label" id="activeKeysToggleLabel">展開</span>
+              </button>
+              <div id="keys" class="table-wrap active-keys-body"></div>
+            </div>
+          </section>
+        </div>
+        <div id="keyTab" class="hidden">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
           <button onclick="resetTeacherKey()">重設個人 API Key</button>
           <button type="button" class="btn-secondary" onclick="beginEditRouterModelTemplate()">編輯模型範本</button>
@@ -1183,6 +1188,7 @@
     async function toggleDeviceSessions() {
       const panel = document.getElementById('deviceSessions');
       panel.classList.toggle('hidden');
+      syncClassroomInviteCard();
       if (!panel.classList.contains('hidden')) await loadDeviceSessions();
     }
 
@@ -1209,12 +1215,37 @@
     }
 
     let upstreamPoolsTimer = null;
-    const TEACHER_TAB_IDS = ['keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];
+    const TEACHER_TAB_IDS = ['inviteTab', 'keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];
 
     function currentTeacherTabId() {
       const active = document.querySelector('.sidebar-nav-btn.tab-active[data-tab]');
       const id = active && active.dataset ? active.dataset.tab : '';
-      return TEACHER_TAB_IDS.includes(id) ? id : 'keyTab';
+      return TEACHER_TAB_IDS.includes(id) ? id : 'inviteTab';
+    }
+
+    function placeClassroomInviteCard(teacherOn) {
+      const card = document.getElementById('student');
+      if (teacherOn) {
+        document.getElementById('inviteTab').appendChild(card);
+      } else {
+        const teacher = document.getElementById('teacher');
+        teacher.parentNode.insertBefore(card, teacher);
+      }
+      syncClassroomInviteCard();
+    }
+
+    function syncClassroomInviteCard() {
+      const card = document.getElementById('student');
+      const teacherOn = document.getElementById('appShell').classList.contains('has-teacher-menu');
+      const panel = document.getElementById('deviceSessions');
+      const devicesOpen = Boolean(panel) && !panel.classList.contains('hidden');
+      if (teacherOn) {
+        card.classList.remove('hidden');
+        const showInvite = currentTeacherTabId() === 'inviteTab' && !devicesOpen;
+        document.getElementById('inviteTab').classList.toggle('hidden', !showInvite);
+        return;
+      }
+      card.classList.toggle('hidden', devicesOpen || !currentRoles.includes('student'));
     }
 
     function setTeacherMenuOpen(open) {
@@ -1240,6 +1271,7 @@
         btn.classList.toggle('tab-active', btn.dataset.tab === id);
       });
       setTeacherMenuOpen(false);
+      syncClassroomInviteCard();
       if (id === 'monitorTab') {
         syncMonitorCourseSelect();
         startUpstreamPoolsPoll();
@@ -1518,9 +1550,9 @@
       document.getElementById('navWho').innerHTML = renderProfileLine(me);
       renderActiveKeysSection(me.keys || []);
       const teacherOn = currentRoles.includes('teacher') || currentRoles.includes('admin');
-      document.getElementById('student').classList.toggle('hidden', !currentRoles.includes('student'));
       document.getElementById('teacher').classList.toggle('hidden', !teacherOn);
       document.getElementById('appShell').classList.toggle('has-teacher-menu', teacherOn);
+      placeClassroomInviteCard(teacherOn);
       setTeacherMenuOpen(false);
       if (teacherOn) {
         document.getElementById('adminBtn').classList.toggle('hidden', !currentRoles.includes('admin'));

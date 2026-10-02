@@ -189,6 +189,23 @@ def test_portal_catalog_modal_edits_actions_and_snippets_as_tabs(tmp_path):
     assert 'id="catalogActionsTab" class="tab-active"' in html or 'class="tab-active" id="catalogActionsTab"' in html
 
 
+def test_portal_teacher_rail_home_is_classroom_invite_redeem(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    nav = html.split('id="teacherMenu"', 1)[1].split("teacher-menu-backdrop", 1)[0]
+    assert nav.index('sidebar-section-label">學生') < nav.index("課堂邀請碼") < nav.index('sidebar-section-label">老師') < nav.index("個人 API Key")
+    assert 'class="sidebar-nav-btn tab-active" data-tab="inviteTab"' in nav
+    assert 'data-tab="keyTab"' in nav
+    assert "tab-active" not in nav.split('data-tab="inviteTab"', 1)[1]
+    invite_panel = html.split('id="inviteTab"', 1)[1].split('id="keyTab"', 1)[0]
+    assert 'id="student"' in invite_panel
+    assert 'id="invite"' in invite_panel
+    assert "有效 Key" in invite_panel
+    assert "VS Code 一鍵設定" in invite_panel
+    assert "const TEACHER_TAB_IDS = ['inviteTab', 'keyTab', 'classTab', 'monitorTab', 'probeTab', 'adminTab'];" in html
+    assert "return TEACHER_TAB_IDS.includes(id) ? id : 'inviteTab';" in html
+
+
 def test_portal_teacher_menu_is_a_full_height_rail_and_a_hamburger(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
