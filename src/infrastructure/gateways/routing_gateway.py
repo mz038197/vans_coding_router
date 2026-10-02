@@ -91,30 +91,49 @@ class RoutingGateway:
             raise ValueError(f"provider「{provider}」不支援查詢隔離狀態")
         return bool(status_fn(index))
 
+    async def provider_models(
+        self,
+        provider: str,
+        *,
+        output_modalities: str | None = None,
+    ) -> dict[str, Any]:
+        gateway = self.gateways.get(provider)
+        if gateway is None:
+            return {
+                "object": "list",
+                "data": [],
+                "provider_errors": {provider: "unknown provider"},
+            }
+        try:
+            if provider == "openrouter" and output_modalities:
+                models = await gateway.models(output_modalities=output_modalities)
+            else:
+                models = await gateway.models()
+        except Exception as exc:
+            return {"object": "list", "data": [], "provider_errors": {provider: str(exc)}}
+        data: list[dict[str, Any]] = []
+        for item in models.get("data", []):
+            if not isinstance(item, dict):
+                continue
+            upstream_id = str(item.get("id", ""))
+            if not upstream_id:
+                continue
+            entry = dict(item)
+            client_upstream_id = upstream_id
+            if provider == _OLLAMA_CLOUD_PROVIDER:
+                client_upstream_id = to_ollama_cloud_inference_id(upstream_id)
+            entry["id"] = format_model_id(provider, client_upstream_id)
+            entry["provider"] = provider
+            data.append(entry)
+        return {"object": "list", "data": data}
+
     async def models(self, *, output_modalities: str | None = None) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}
-        for name, gateway in self.gateways.items():
-            try:
-                if name == "openrouter" and output_modalities:
-                    models = await gateway.models(output_modalities=output_modalities)
-                else:
-                    models = await gateway.models()
-                for item in models.get("data", []):
-                    if not isinstance(item, dict):
-                        continue
-                    upstream_id = str(item.get("id", ""))
-                    if not upstream_id:
-                        continue
-                    entry = dict(item)
-                    client_upstream_id = upstream_id
-                    if name == _OLLAMA_CLOUD_PROVIDER:
-                        client_upstream_id = to_ollama_cloud_inference_id(upstream_id)
-                    entry["id"] = format_model_id(name, client_upstream_id)
-                    entry["provider"] = name
-                    data.append(entry)
-            except Exception as exc:
-                errors[name] = str(exc)
+        for name in self.gateways:
+            portion = await self.provider_models(name, output_modalities=output_modalities)
+            data.extend(portion.get("data") or [])
+            errors.update(portion.get("provider_errors") or {})
         result: dict[str, Any] = {"object": "list", "data": data}
         if errors:
             result["provider_errors"] = errors

@@ -1,3 +1,6 @@
+from contextlib import asynccontextmanager
+import weakref
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -70,7 +73,7 @@ def _catalog_gateway() -> RoutingGateway:
 
 
 class _FailingModelsGateway:
-    async def models(self):
+    async def models(self, *, output_modalities: str | None = None):
         raise RuntimeError("upstream /models down")
 
 
@@ -89,13 +92,34 @@ def _settings(tmp_path, providers=None) -> RouterSettings:
     )
 
 
-def _client(tmp_path, *, llm_gateway=None, providers=None, api_gateway=None):
+def _client(
+    tmp_path,
+    *,
+    llm_gateway=None,
+    providers=None,
+    api_gateway=None,
+    catalog_fetch_timeout_sec: float = 30.0,
+):
     settings = _settings(tmp_path, providers=providers)
     repo = SqliteRouterRepository(settings.database.path, settings)
-    app = FastAPI()
+    portal = PortalUseCase(
+        repo,
+        settings,
+        llm_gateway=llm_gateway,
+        catalog_fetch_timeout_sec=catalog_fetch_timeout_sec,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        await portal.fill_upstream_model_catalog()
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.portal_use_case = portal
     register_error_handlers(app)
     auth_use_case = AuthUseCase(api_key_repo=repo)
     gateway = api_gateway or FakeLLMGateway()
+    app.state.api_gateway = gateway
     api_use_case = ApiUseCase(
         gateway=gateway,
         api_key_repo=repo,
@@ -103,18 +127,15 @@ def _client(tmp_path, *, llm_gateway=None, providers=None, api_gateway=None):
     )
     app.add_middleware(ApiKeyMiddleware, auth_use_case=auth_use_case)
     app.include_router(create_api_router(api_use_case))
-    app.include_router(
-        create_portal_router(PortalUseCase(repo, settings, llm_gateway=llm_gateway), settings)
+    app.include_router(create_portal_router(portal, settings))
+    client = TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        headers={"Origin": settings.public_url},
     )
-    return (
-        TestClient(
-            app,
-            base_url="http://127.0.0.1",
-            headers={"Origin": settings.public_url},
-        ),
-        repo,
-        settings,
-    )
+    client.__enter__()
+    weakref.finalize(client, client.__exit__, None, None, None)
+    return client, repo, settings
 
 
 def _portal_cookie(repo, user_id: int) -> dict[str, str]:
@@ -454,7 +475,6 @@ def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_pa
     )
     decision_ids = [item["id"] for item in decisions.json()["models"] if item["provider"] == "openrouter"]
     assert decision_ids == ["openrouter@typesafe/jev-1.13"]
-    assert openrouter.last_output_modalities == "decisions"
 
     text = client.get(
         "/teacher/upstream-model-catalog?output_modalities=text",
@@ -462,7 +482,6 @@ def test_upstream_model_catalog_can_request_the_openrouter_decision_shelf(tmp_pa
     )
     text_ids = [item["id"] for item in text.json()["models"] if item["provider"] == "openrouter"]
     assert text_ids == ["openrouter@minimax/minimax-m3"]
-    assert openrouter.last_output_modalities == "text"
 
 
 def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp_path):
@@ -484,7 +503,6 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     teacher, _, _ = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
-    openrouter = gateway.gateways["openrouter"]
 
     image = client.get(
         "/teacher/upstream-model-catalog?output_modalities=image",
@@ -495,7 +513,6 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert [item["id"] for item in image.json()["models"]] == [
         "openrouter@black-forest-labs/flux.2-pro"
     ]
-    assert openrouter.last_output_modalities == "image"
 
     speech = client.get(
         "/teacher/upstream-model-catalog?output_modalities=speech",
@@ -505,7 +522,6 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert [item["id"] for item in speech.json()["models"]] == [
         "openrouter@openai/gpt-4o-mini-tts"
     ]
-    assert openrouter.last_output_modalities == "speech"
 
     transcription = client.get(
         "/teacher/upstream-model-catalog?output_modalities=speech_transcription",
@@ -515,7 +531,6 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert [item["id"] for item in transcription.json()["models"]] == [
         "openrouter@openai/whisper-large-v3"
     ]
-    assert openrouter.last_output_modalities == "transcription"
 
 
 def test_non_openrouter_shelf_check_is_saved(tmp_path):
@@ -615,7 +630,7 @@ def test_session_chat_language_models_accept_openrouter_jev_ids(tmp_path):
 
 
 class _AllChatProvidersFailedGateway:
-    async def models(self):
+    async def models(self, *, output_modalities: str | None = None):
         return {
             "object": "list",
             "data": [{"id": "openai@gpt-4o-mini-tts", "provider": "openai", "name": "tts"}],

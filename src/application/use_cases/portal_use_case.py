@@ -7,10 +7,14 @@ from src.domain.entities.auth import PortalSessionContext
 from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
+from src.application.upstream_model_catalog import (
+    CATALOG_FETCH_TIMEOUT_SEC,
+    KIND_SPLIT_MODALITIES,
+    UpstreamModelCatalogMemory,
+)
 from src.infrastructure.config import (
     RouterSettings,
     apply_runtime_settings,
-    provider_has_kind_split,
     settings_summary,
 )
 from src.infrastructure.repositories.router_repository_helpers import parse_dt
@@ -43,27 +47,27 @@ _SESSION_CAPABILITY_FIELDS = frozenset(
 )
 
 
-_KIND_SPLIT_MODALITIES = {
-    "text": "text",
-    "decisions": "decisions",
-    "image": "image",
-    "speech": "speech",
-    "speech_transcription": "transcription",
-}
-
-
 class PortalUseCase:
     def __init__(
         self,
         repo: RouterRepositoryPort,
         base_settings: RouterSettings,
         llm_gateway: Any | None = None,
+        catalog_fetch_timeout_sec: float = CATALOG_FETCH_TIMEOUT_SEC,
     ):
         self.repo = repo
         self._base_settings = base_settings
         self._llm_gateway = llm_gateway
         self._agent_quarantine_release_at: dict[tuple[str, int], float] = {}
         self.refresh_settings()
+        self._upstream_catalog = UpstreamModelCatalogMemory(
+            lambda: self.settings,
+            llm_gateway,
+            fetch_timeout_sec=catalog_fetch_timeout_sec,
+        )
+
+    async def fill_upstream_model_catalog(self) -> None:
+        await self._upstream_catalog.fill()
 
     def refresh_settings(self) -> None:
         self.settings = apply_runtime_settings(self._base_settings, self.repo.get_runtime_settings())
@@ -169,70 +173,12 @@ class PortalUseCase:
         output_modalities: str | None = None,
     ) -> dict[str, Any]:
         self._assert_teacher(user_id)
-        if output_modalities not in (None, "all", *_KIND_SPLIT_MODALITIES):
+        if output_modalities not in (None, "all", *KIND_SPLIT_MODALITIES):
             raise ValueError(
                 "output_modalities 必須是 all、text、decisions、image、speech 或 speech_transcription"
             )
         requested = output_modalities or "text"
-        enabled = [
-            name for name, provider in self.settings.providers.items() if provider.enabled
-        ]
-        kind_split = [name for name in enabled if provider_has_kind_split(name)]
-        all_models_providers = [name for name in enabled if not provider_has_kind_split(name)]
-        if requested == "all":
-            providers = all_models_providers
-            upstream_modality = None
-        else:
-            providers = kind_split
-            upstream_modality = _KIND_SPLIT_MODALITIES[requested]
-        gateway = self._llm_gateway
-        groups = {
-            "all_models_providers": all_models_providers,
-            "kind_split_providers": kind_split,
-        }
-        if gateway is None:
-            return {"providers": providers, "models": [], "unavailable": True, **groups}
-        try:
-            raw = await self._catalog_models(gateway, upstream_modality)
-        except Exception:
-            return {"providers": providers, "models": [], "unavailable": True, **groups}
-        allowed = set(providers)
-        models: list[dict[str, Any]] = []
-        for item in (raw or {}).get("data") or []:
-            if not isinstance(item, dict):
-                continue
-            model_id = item.get("id")
-            provider = item.get("provider")
-            if not isinstance(model_id, str) or not model_id:
-                continue
-            if provider not in allowed:
-                continue
-            name = item.get("name")
-            models.append(
-                {
-                    "id": model_id,
-                    "provider": provider,
-                    "name": name if isinstance(name, str) and name else model_id,
-                }
-            )
-        errors = (raw or {}).get("provider_errors") or {}
-        failed = {name: errors[name] for name in providers if name in errors}
-        unavailable = bool(providers) and not models and set(providers) <= set(failed)
-        return {
-            "providers": providers,
-            "models": models,
-            "unavailable": unavailable,
-            **groups,
-        }
-
-    @staticmethod
-    async def _catalog_models(gateway: Any, upstream_modality: str | None) -> dict[str, Any]:
-        models_fn = getattr(gateway, "models", None)
-        if not callable(models_fn):
-            raise RuntimeError("models catalog unavailable")
-        if upstream_modality:
-            return await models_fn(output_modalities=upstream_modality)
-        return await models_fn()
+        return self._upstream_catalog.read(requested)
 
     async def release_key_quarantine(
         self,

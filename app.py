@@ -12,6 +12,7 @@ from src.presentation.fastapi.routers.api_router import create_api_router
 from src.presentation.fastapi.routers.lobby_router import create_lobby_router
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 from src.infrastructure.jobs.log_archive_job import run_daily_archive_job
+from src.infrastructure.jobs.upstream_model_catalog_job import run_upstream_model_catalog_refresh
 
 REQUEST_TIMEOUT = 900.0
 
@@ -22,24 +23,43 @@ container = build_container(
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def application_lifespan(app_container):
     archive_stop_event = asyncio.Event()
+    catalog_stop_event = asyncio.Event()
     archive_task = None
-    if container.archive_repo is not None:
+    catalog_task = None
+    if app_container.archive_repo is not None:
         archive_task = asyncio.create_task(
             run_daily_archive_job(
-                container.archive_repo,
+                app_container.archive_repo,
                 archive_stop_event,
             )
         )
-    await container.llm_gateway.startup()
+    await app_container.llm_gateway.startup()
+    if app_container.portal_use_case is not None:
+        await app_container.portal_use_case.fill_upstream_model_catalog()
+        catalog_task = asyncio.create_task(
+            run_upstream_model_catalog_refresh(
+                app_container.portal_use_case,
+                catalog_stop_event,
+            )
+        )
     try:
         yield
     finally:
         archive_stop_event.set()
+        catalog_stop_event.set()
         if archive_task is not None:
             archive_task.cancel()
-        await container.llm_gateway.shutdown()
+        if catalog_task is not None:
+            catalog_task.cancel()
+        await app_container.llm_gateway.shutdown()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    async with application_lifespan(container):
+        yield
 
 
 app = FastAPI(title="Vans Coding Router", lifespan=lifespan)
