@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=session-chat-models-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=model-editor-columns-5" />
 </head>
 <body>
   <div id="loginShell">
@@ -339,60 +339,61 @@
   </div>
 
   <div class="modal" id="editSessionChatModelsModal">
-    <div class="modal-content modal-content-catalog">
-      <div class="modal-header" id="editSessionChatModelsTitle">編輯本課對話模型</div>
-      <div class="modal-body">
-        <p class="hint">與本課安裝清單相同：可上傳或下載 JSON。主要畫面是上游模型目錄；勾選後可改顯示名稱、思考與 token 上限。路由欄位固定為 VCRouter。</p>
-        <div
-          id="sessionChatModelsDropzone"
-          class="catalog-dropzone"
-          tabindex="0"
-          role="button"
-          aria-label="上傳 Session Chat Language Models JSON"
-        >
+    <div class="modal-content modal-content-models">
+      <div class="modal-header model-editor-header">
+        <span id="editSessionChatModelsTitle">編輯本課對話模型</span>
+        <div class="model-editor-header-actions">
+          <button type="button" class="btn-secondary model-editor-icon" id="sessionChatModelsUploadBtn" aria-label="上傳" title="上傳">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>
+          </button>
           <input type="file" id="sessionChatModelsFileInput" accept=".json,application/json" hidden />
-          <p class="catalog-dropzone-title">拖拉 JSON 到此上傳</p>
-          <p class="hint-inline">或 <button type="button" class="btn-link" id="sessionChatModelsPickFileBtn">選擇 .json 檔</button></p>
+          <button type="button" class="btn-secondary model-editor-icon" aria-label="下載範本" title="下載範本" onclick="downloadSessionChatModelsTemplate()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+          </button>
+          <button type="button" class="btn-secondary model-editor-icon" aria-label="下載目前清單" title="下載目前清單" onclick="downloadCurrentSessionChatModels()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+          </button>
+          <button type="button" class="btn-secondary model-editor-icon" aria-label="取消" title="取消" onclick="requestCloseSessionChatModelsModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+          <button type="button" class="model-editor-icon" id="sessionChatModelsSaveBtn" aria-label="儲存" title="儲存" onclick="saveSessionChatLanguageModels()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
+          </button>
         </div>
-        <p id="sessionChatModelsUploadMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
-        <p id="sessionChatModelsCatalogMsg" class="hint-inline catalog-upload-msg" aria-live="polite"></p>
-        <div class="session-chat-models-toolbar">
-          <label class="modal-field-label" for="sessionChatModelsProvider">廠商</label>
-          <select id="sessionChatModelsProvider" class="modal-datetime-input" onchange="onSessionChatModelsProviderChange()"></select>
-          <label class="modal-field-label" for="sessionChatModelsSearch">搜尋</label>
-          <input id="sessionChatModelsSearch" type="search" class="modal-datetime-input" placeholder="名稱或 id" oninput="renderSessionChatModelsList()" />
-        </div>
-        <div id="sessionDecisionShelfRow" class="session-decision-model-row hidden">
-          <label class="modal-field-label" for="sessionDecisionShelf">模型種類</label>
-          <select id="sessionDecisionShelf" class="modal-datetime-input" onchange="onSessionDecisionShelfChange()">
-            <option value="text">文字</option>
-            <option value="decisions">決策</option>
-            <option value="image">生圖</option>
-            <option value="speech">語音</option>
-            <option value="speech_transcription">語音轉寫</option>
-          </select>
-        </div>
-        <div id="sessionAllModelsShelfRow" class="session-decision-model-row hidden">
-          <label class="modal-field-label" for="sessionAllModelsShelf">指定架</label>
-          <select id="sessionAllModelsShelf" class="modal-datetime-input" onchange="renderSessionChatModelsList()">
-            <option value="text">文字</option>
-            <option value="speech">語音</option>
-            <option value="speech_transcription">語音轉寫</option>
-          </select>
-        </div>
-        <div id="sessionChatModelsList" class="session-chat-models-list"></div>
-        <p id="sessionChatModelsSaveMsg" class="hint-inline catalog-save-msg" aria-live="polite"></p>
       </div>
-      <div class="modal-footer">
-        <div class="modal-footer-actions modal-footer-actions-split">
-          <div class="modal-footer-start">
-            <button type="button" class="btn-secondary" onclick="downloadSessionChatModelsTemplate()">下載範本</button>
-            <button type="button" class="btn-secondary" onclick="downloadCurrentSessionChatModels()">下載目前清單</button>
-          </div>
-          <div class="modal-footer-end">
-            <button type="button" class="btn-secondary" onclick="requestCloseSessionChatModelsModal()">取消</button>
-            <button type="button" id="sessionChatModelsSaveBtn" onclick="saveSessionChatLanguageModels()">儲存</button>
-          </div>
+      <div class="modal-body">
+        <p id="sessionChatModelsUploadMsg" class="model-editor-msg" aria-live="polite"></p>
+        <p id="sessionChatModelsCatalogMsg" class="model-editor-msg" aria-live="polite"></p>
+        <p id="sessionChatModelsSaveMsg" class="model-editor-msg" aria-live="polite"></p>
+        <div class="model-editor-columns">
+          <section class="model-editor-col model-editor-col-candidates">
+            <h3>候選清單</h3>
+            <div class="model-editor-controls">
+              <select id="sessionChatModelsProvider" aria-label="廠商" onchange="onSessionChatModelsProviderChange()"></select>
+              <div id="sessionDecisionShelfRow">
+                <select id="sessionDecisionShelf" aria-label="模型種類" onchange="onSessionDecisionShelfChange()">
+                  <option value="text">文字</option>
+                  <option value="decisions">決策</option>
+                  <option value="image">生圖</option>
+                  <option value="speech">語音</option>
+                  <option value="speech_transcription">語音轉寫</option>
+                </select>
+              </div>
+              <div id="sessionAllModelsShelfRow" class="hidden">
+                <select id="sessionAllModelsShelf" aria-label="指定架">
+                  <option value="text">文字</option>
+                  <option value="speech">語音</option>
+                  <option value="speech_transcription">語音轉寫</option>
+                </select>
+              </div>
+              <input id="sessionChatModelsSearch" type="search" aria-label="搜尋" placeholder="名稱或 id" oninput="renderSessionChatCandidates()" />
+            </div>
+            <div id="sessionChatModelsList" class="model-editor-scroll"></div>
+          </section>
+          <section class="model-editor-col model-editor-col-draft">
+            <h3>已勾選</h3>
+            <div id="sessionChatModelsDraft" class="model-editor-scroll"></div>
+          </section>
         </div>
       </div>
     </div>
@@ -2969,8 +2970,17 @@ snippets:
     let sessionChatModelsDraft = { models: [], removed: {} };
     let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false, shelf: 'text' };
     let sessionChatProviderGroups = { kindSplit: [], allModels: [] };
-    let sessionChatModelsDropzoneBound = false;
+    let sessionChatModelsUploadBound = false;
+    let sessionChatModelsCatalogRequest = 0;
     let sessionChatModelsLocked = false;
+    let sessionChatModelsCollapsed = {};
+    const SESSION_CHAT_MODEL_SHELVES = [
+      { id: 'text', label: '文字' },
+      { id: 'decisions', label: '決策' },
+      { id: 'image', label: '生圖' },
+      { id: 'speech', label: '語音' },
+      { id: 'speech_transcription', label: '語音轉寫' },
+    ];
     let routerModelTemplate = null;
 
     function defaultVcrouterModel(modelId, displayName) {
@@ -3067,50 +3077,18 @@ snippets:
       return routerModelTemplate;
     }
 
-    function ensureSessionChatModelsDropzoneBound() {
-      if (sessionChatModelsDropzoneBound) return;
-      const zone = document.getElementById('sessionChatModelsDropzone');
+    function ensureSessionChatModelsUploadBound() {
+      if (sessionChatModelsUploadBound) return;
+      const button = document.getElementById('sessionChatModelsUploadBtn');
       const input = document.getElementById('sessionChatModelsFileInput');
-      const pickBtn = document.getElementById('sessionChatModelsPickFileBtn');
-      if (!zone || !input || !pickBtn) return;
-      pickBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        input.click();
-      });
-      zone.addEventListener('click', (event) => {
-        if (event.target === pickBtn || pickBtn.contains(event.target)) return;
-        input.click();
-      });
-      zone.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          input.click();
-        }
-      });
+      if (!button || !input) return;
+      button.addEventListener('click', () => input.click());
       input.addEventListener('change', () => {
         const file = input.files && input.files[0];
         if (file) loadSessionChatModelsFile(file);
         input.value = '';
       });
-      zone.addEventListener('dragenter', (event) => {
-        event.preventDefault();
-        zone.classList.add('is-dragover');
-      });
-      zone.addEventListener('dragover', (event) => {
-        event.preventDefault();
-        zone.classList.add('is-dragover');
-      });
-      zone.addEventListener('dragleave', (event) => {
-        if (!zone.contains(event.relatedTarget)) zone.classList.remove('is-dragover');
-      });
-      zone.addEventListener('drop', (event) => {
-        event.preventDefault();
-        zone.classList.remove('is-dragover');
-        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-        if (file) loadSessionChatModelsFile(file);
-      });
-      sessionChatModelsDropzoneBound = true;
+      sessionChatModelsUploadBound = true;
     }
 
     function loadSessionChatModelsFile(file) {
@@ -3127,6 +3105,7 @@ snippets:
             models,
             removed: { ...sessionChatModelsDraft.removed },
           };
+          sessionChatModelsCollapsed.text = false;
           setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
           renderSessionChatModelsList();
         } catch (err) {
@@ -3178,54 +3157,35 @@ snippets:
       return sessionChatModelsDraft.models.find((model) => model.id === modelId);
     }
 
-    function visibleCatalogRows() {
+    function draftModelIds() {
+      return new Set((sessionChatModelsDraft.models || []).map((model) => model.id));
+    }
+
+    function candidateRows() {
       const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
       const q = (document.getElementById('sessionChatModelsSearch')?.value || '').trim().toLowerCase();
-      const catalogById = new Map((sessionChatModelsCatalog.models || []).map((item) => [item.id, item]));
-      const rows = [];
-      const seen = new Set();
-      const currentShelf = assignmentShelf();
-      for (const model of sessionChatModelsDraft.models) {
-        if (modelShelf(model) !== currentShelf) continue;
-        const catalog = catalogById.get(model.id);
-        rows.push({
-          id: model.id,
-          name: model.name || (catalog && catalog.name) || model.id,
-          provider: catalog ? catalog.provider : modelIdPrefix(model.id),
-          missing: !catalog,
-          checked: true,
-        });
-        seen.add(model.id);
-      }
-      for (const model of Object.values(sessionChatModelsDraft.removed || {})) {
-        if (!model || !model.id || seen.has(model.id) || modelShelf(model) !== currentShelf) continue;
-        const catalog = catalogById.get(model.id);
-        rows.push({
-          id: model.id,
-          name: model.name || (catalog && catalog.name) || model.id,
-          provider: catalog ? catalog.provider : modelIdPrefix(model.id),
-          missing: !catalog,
-          checked: false,
-        });
-        seen.add(model.id);
-      }
-      if (!sessionChatModelsCatalog.unavailable) {
-        for (const item of sessionChatModelsCatalog.models || []) {
-          if (seen.has(item.id)) continue;
-          rows.push({
-            id: item.id,
-            name: item.name || item.id,
-            provider: item.provider,
-            missing: false,
-            checked: false,
-          });
-        }
-      }
-      return rows.filter((row) => {
-        if (provider && row.provider !== provider) return false;
+      const taken = draftModelIds();
+      if (sessionChatModelsCatalog.unavailable) return [];
+      return (sessionChatModelsCatalog.models || []).filter((item) => {
+        if (!item || !item.id || taken.has(item.id)) return false;
+        if (provider && item.provider !== provider) return false;
         if (!q) return true;
-        return `${row.id} ${row.name}`.toLowerCase().includes(q);
+        return `${item.id} ${item.name || ''}`.toLowerCase().includes(q);
       });
+    }
+
+    function catalogListsModel(model) {
+      if (!model || !model.id) return true;
+      const snapshot = sessionChatModelsCatalog;
+      if (snapshot.unavailable) return true;
+      const listed = (snapshot.models || []).some((item) => item.id === model.id);
+      if (snapshot.shelf === 'all') {
+        const provider = modelIdPrefix(model.id);
+        if (!(sessionChatProviderGroups.allModels || []).includes(provider)) return true;
+        return listed;
+      }
+      if (modelShelf(model) !== snapshot.shelf) return true;
+      return listed;
     }
 
     function currentDecisionShelf() {
@@ -3288,7 +3248,6 @@ snippets:
         `<option value="${value}">${labels[value]}</option>`
       )).join('');
       select.value = choices.includes(previous) ? previous : choices[0];
-      row.classList.toggle('hidden', choices.length === 1 && choices[0] === 'text');
       const assignment = document.getElementById('sessionAllModelsShelfRow');
       if (assignment) assignment.classList.toggle('hidden', select.value !== 'all');
     }
@@ -3306,44 +3265,79 @@ snippets:
       renderSessionChatModelsList();
     }
 
-    function renderSessionChatModelsList() {
-      renderSessionDecisionShelf();
+    function draftModelFields(model) {
+      return `
+        <div class="session-chat-models-fields">
+          <label class="catalog-field">顯示名稱
+            <input class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-field="name" value="${escapeHtml(model.name || '')}" />
+          </label>
+          <label class="catalog-field session-chat-models-check-field">思考
+            <input type="checkbox" data-model-id="${escapeHtml(model.id)}" data-field="thinking" ${model.thinking ? 'checked' : ''} />
+          </label>
+          <label class="catalog-field">最大輸入 tokens
+            <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxInputTokens" value="${escapeHtml(String(model.maxInputTokens ?? ''))}" />
+          </label>
+          <label class="catalog-field">最大輸出 tokens
+            <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(model.maxOutputTokens ?? ''))}" />
+          </label>
+        </div>`;
+    }
+
+    function renderSessionChatCandidates() {
       const listEl = document.getElementById('sessionChatModelsList');
       if (!listEl) return;
-      const rows = visibleCatalogRows();
-      const canCheckNew = !sessionChatModelsCatalog.unavailable;
-      listEl.innerHTML = rows.map((row) => {
-        const draft = draftModelById(row.id);
-        const expanded = Boolean(row.checked && draft);
-        const missing = row.missing ? '<span class="session-chat-models-missing">目錄未列出</span>' : '';
-        const details = expanded ? `
-          <div class="session-chat-models-fields">
-            <label class="catalog-field">顯示名稱
-              <input class="catalog-field-input" data-model-id="${escapeHtml(row.id)}" data-field="name" value="${escapeHtml(draft.name || '')}" />
-            </label>
-            <label class="catalog-field session-chat-models-check-field">思考
-              <input type="checkbox" data-model-id="${escapeHtml(row.id)}" data-field="thinking" ${draft.thinking ? 'checked' : ''} />
-            </label>
-            <label class="catalog-field">最大輸入 tokens
-              <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(row.id)}" data-field="maxInputTokens" value="${escapeHtml(String(draft.maxInputTokens ?? ''))}" />
-            </label>
-            <label class="catalog-field">最大輸出 tokens
-              <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(row.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(draft.maxOutputTokens ?? ''))}" />
-            </label>
-          </div>` : '';
-        const disableNew = !row.checked && !canCheckNew;
-        return `<div class="session-chat-models-row${row.missing ? ' is-missing' : ''}">
+      const rows = candidateRows();
+      listEl.innerHTML = rows.map((item) => `
+        <div class="session-chat-models-row">
           <label class="model-allowlist-item">
-            <input type="checkbox" value="${escapeHtml(row.id)}" ${row.checked ? 'checked' : ''} ${disableNew ? 'disabled' : ''} onchange="onSessionChatModelCheck(this)" />
-            <span>${escapeHtml(row.name || row.id)} <code>${escapeHtml(row.id)}</code> ${missing}</span>
+            <input type="checkbox" value="${escapeHtml(item.id)}" onchange="onSessionChatModelCheck(this)" />
+            <span>${escapeHtml(item.name || item.id)} <code>${escapeHtml(item.id)}</code></span>
           </label>
-          ${details}
-        </div>`;
-      }).join('') || '<p class="hint">沒有可顯示的模型。</p>';
+        </div>`).join('') || '<p class="hint">沒有可顯示的模型。</p>';
+    }
+
+    function renderSessionChatDraft() {
+      const listEl = document.getElementById('sessionChatModelsDraft');
+      if (!listEl) return;
+      const groups = SESSION_CHAT_MODEL_SHELVES.map((shelf) => ({
+        ...shelf,
+        models: (sessionChatModelsDraft.models || []).filter((model) => modelShelf(model) === shelf.id),
+      })).filter((group) => group.models.length);
+      if (!groups.length) {
+        listEl.innerHTML = '<p class="hint">還沒勾選。</p>';
+        return;
+      }
+      listEl.innerHTML = groups.map((group) => {
+        const collapsed = Boolean(sessionChatModelsCollapsed[group.id]);
+        const rows = collapsed ? '' : group.models.map((model) => {
+          const missing = catalogListsModel(model)
+            ? ''
+            : '<span class="session-chat-models-missing">目錄未列出</span>';
+          return `<div class="session-chat-models-row${missing ? ' is-missing' : ''}">
+            <label class="model-allowlist-item">
+              <input type="checkbox" value="${escapeHtml(model.id)}" checked onchange="onSessionChatModelCheck(this)" />
+              <span>${escapeHtml(model.name || model.id)} <code>${escapeHtml(model.id)}</code> ${missing}</span>
+            </label>
+            ${draftModelFields(model)}
+          </div>`;
+        }).join('');
+        return `<button type="button" class="model-editor-shelf" data-shelf="${group.id}" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="toggleSessionChatModelShelf('${group.id}')">${collapsed ? '▸' : '▾'} ${group.label}<span class="model-editor-shelf-count">${group.models.length}</span></button>${rows}`;
+      }).join('');
       listEl.querySelectorAll('[data-field]').forEach((input) => {
         input.addEventListener('input', onSessionChatModelField);
         input.addEventListener('change', onSessionChatModelField);
       });
+    }
+
+    function toggleSessionChatModelShelf(shelf) {
+      sessionChatModelsCollapsed[shelf] = !sessionChatModelsCollapsed[shelf];
+      renderSessionChatDraft();
+    }
+
+    function renderSessionChatModelsList() {
+      renderSessionDecisionShelf();
+      renderSessionChatCandidates();
+      renderSessionChatDraft();
     }
 
     function onSessionChatModelCheck(input) {
@@ -3357,7 +3351,9 @@ snippets:
           : restored
             ? { ...restored }
             : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
-        applyShelf(next, assignmentShelf());
+        const shelf = assignmentShelf();
+        applyShelf(next, shelf);
+        sessionChatModelsCollapsed[shelf] = false;
         if (!existing) sessionChatModelsDraft.models.push(next);
         delete sessionChatModelsDraft.removed[modelId];
       } else {
@@ -3391,6 +3387,7 @@ snippets:
       if (modal) modal.classList.remove('show');
       sessionChatModelsContext = null;
       sessionChatModelsDraft = { models: [], removed: {} };
+      sessionChatModelsCollapsed = {};
       sessionChatModelsLocked = false;
       setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
       setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
@@ -3427,8 +3424,10 @@ snippets:
     async function loadSessionChatModelsCatalog(outputModalities) {
       const known = ['text', 'decisions', 'image', 'speech', 'speech_transcription', 'all'];
       const shelf = known.includes(outputModalities) ? outputModalities : 'text';
+      const requestId = ++sessionChatModelsCatalogRequest;
       try {
         const catalog = await api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`);
+        if (requestId !== sessionChatModelsCatalogRequest) return;
         if (Array.isArray(catalog.kind_split_providers)) {
           sessionChatProviderGroups.kindSplit = catalog.kind_split_providers;
         }
@@ -3449,6 +3448,7 @@ snippets:
           sessionChatModelsCatalog.unavailable,
         );
       } catch (err) {
+        if (requestId !== sessionChatModelsCatalogRequest) return;
         sessionChatModelsCatalog = { providers: [], models: [], unavailable: true, shelf };
         setSessionChatModelsMsg(
           'sessionChatModelsCatalogMsg',
@@ -3462,11 +3462,12 @@ snippets:
       const modal = document.getElementById('editSessionChatModelsModal');
       const title = document.getElementById('editSessionChatModelsTitle');
       if (!modal) return;
-      ensureSessionChatModelsDropzoneBound();
+      ensureSessionChatModelsUploadBound();
       const data = await api('/teacher/router-model-template');
       routerModelTemplate = Array.isArray(data) ? data : [];
       sessionChatModelsContext = { mode: 'template' };
       sessionChatModelsLocked = false;
+      sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = {
         models: modelsFromDocument(routerModelTemplate),
         removed: {},
@@ -3488,10 +3489,11 @@ snippets:
       const modal = document.getElementById('editSessionChatModelsModal');
       const title = document.getElementById('editSessionChatModelsTitle');
       if (!modal) return;
-      ensureSessionChatModelsDropzoneBound();
+      ensureSessionChatModelsUploadBound();
       const session = window.__sessionById && window.__sessionById[sessionId];
       sessionChatModelsContext = { classId, sessionId };
       sessionChatModelsLocked = false;
+      sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = {
         models: modelsFromDocument(session && session.session_chat_language_models),
         removed: {},

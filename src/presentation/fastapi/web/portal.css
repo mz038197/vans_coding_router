@@ -1047,6 +1047,194 @@
       gap: 8px;
     }
 
+    #editSessionChatModelsModal.show {
+      align-items: stretch;
+      justify-content: stretch;
+      padding: 76px 16px 16px;
+    }
+
+    .modal-content-models {
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      max-height: none;
+      min-height: 0;
+    }
+
+    #editSessionChatModelsModal .modal-header { flex-shrink: 0; }
+
+    #editSessionChatModelsModal .modal-body {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+    }
+
+    .model-editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .model-editor-header span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-editor-header-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .model-editor-icon {
+      width: 32px;
+      height: 32px;
+      margin: 0;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+
+    .model-editor-icon svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+
+    .model-editor-msg {
+      margin: 0;
+      flex-shrink: 0;
+    }
+
+    .model-editor-msg:empty { display: none; }
+
+    .model-editor-msg.is-error { color: var(--error-fg); }
+
+    .model-editor-columns {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .model-editor-col {
+      container-type: inline-size;
+      min-width: 0;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+      overflow: hidden;
+    }
+
+    .model-editor-col-candidates { flex: 2 1 0; }
+
+    .model-editor-col-draft { flex: 3 1 0; }
+
+    .model-editor-col h3 {
+      margin: 0;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-strong);
+      font-size: 0.95rem;
+      flex-shrink: 0;
+    }
+
+    .model-editor-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-strong);
+    }
+
+    .model-editor-controls select,
+    .model-editor-controls input[type="search"] {
+      margin: 0;
+      padding: 6px 8px;
+      min-width: 0;
+      width: auto;
+      max-width: none;
+    }
+
+    .model-editor-controls select {
+      flex: 1 1 9rem;
+      appearance: none;
+      padding-right: 1.6rem;
+      background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+      background-position: calc(100% - 14px) 55%, calc(100% - 9px) 55%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+
+    .model-editor-controls input[type="search"] { flex: 2 1 9rem; }
+
+    .model-editor-controls .session-decision-model-row,
+    #sessionDecisionShelfRow,
+    #sessionAllModelsShelfRow {
+      display: contents;
+    }
+
+    .model-editor-scroll {
+      overflow: auto;
+      flex: 1;
+      min-height: 0;
+      padding: 8px 10px;
+    }
+
+    .model-editor-shelf {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      margin: 10px 0 6px;
+      padding: 6px 2px;
+      background: transparent;
+      color: var(--text-primary);
+      box-shadow: none;
+      border: 0;
+      border-radius: 0;
+      font-weight: 600;
+      text-align: left;
+    }
+
+    .model-editor-shelf:hover {
+      background: transparent;
+      color: var(--accent-text);
+    }
+
+    .model-editor-shelf-count {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @container (max-width: 460px) {
+      .session-chat-models-fields { grid-template-columns: 1fr; }
+      .model-editor-controls select,
+      .model-editor-controls input[type="search"] {
+        flex: 1 0 100%;
+      }
+    }
+
     .model-allowlist-restrict {
       display: flex;
       gap: 8px;

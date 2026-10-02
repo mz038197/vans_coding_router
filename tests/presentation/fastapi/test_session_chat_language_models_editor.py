@@ -688,8 +688,13 @@ def test_portal_session_row_shows_session_chat_language_models_editor(tmp_path):
     assert "beginEditSessionChatLanguageModels" in html
     assert "downloadSessionChatModelsTemplate" in html
     assert "downloadCurrentSessionChatModels" in html
-    assert "sessionChatModelsDropzone" in html
+    assert 'id="sessionChatModelsUploadBtn"' in html
+    assert 'aria-label="下載範本"' in html
+    assert 'aria-label="下載目前清單"' in html
+    assert 'aria-label="上傳"' in html
+    assert 'aria-label="取消"' in html
+    assert 'aria-label="儲存"' in html
+    assert "model-editor-col-candidates" in html
+    assert "model-editor-col-draft" in html
     assert "session_chat_language_models" in html
     assert 'id="sessionChatModelsJson"' not in html
-    assert "下載範本" in html
-    assert "下載目前清單" in html
