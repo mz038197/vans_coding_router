@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROTOTYPE — 編輯模型左右欄</title>
+  <!--
+    PROTOTYPE — throwaway. Not production.
+    Three layouts of the model editor, switchable via ?variant=, on /portal/prototype/model-editor.
+    Settled: left = 候選清單, right = 已勾選, filters on the left, ~1200px, columns scroll.
+    Open questions: 指定架, where upload sits, empty shelves, column width.
+  -->
+  <link rel="stylesheet" href="/portal/static/portal.css?v=model-editor-prototype-1" />
+  <style>
+    html, body { height: 100%; overflow: hidden; }
+    body { margin: 0; background: var(--bg-base); color: var(--text-primary); }
+    .proto-page {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .proto-page .site-nav { position: static; padding: 8px 16px; }
+    .proto-stage {
+      flex: 1;
+      min-height: 0;
+      padding: 8px;
+      display: flex;
+      justify-content: center;
+    }
+    .proto-modal {
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-glass-strong);
+      border: 1px solid var(--border-glass);
+      border-radius: 12px;
+      box-shadow: var(--card-shadow);
+    }
+    .proto-modal .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px 6px 12px;
+    }
+    .proto-modal .modal-header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .proto-header-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .proto-modal .modal-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+      overflow: hidden;
+    }
+    .proto-modal .modal-footer { padding: 4px 8px; }
+    .proto-icon-btn {
+      width: 32px;
+      height: 32px;
+      margin: 0;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    .proto-icon-btn svg { width: 16px; height: 16px; display: block; }
+    .proto-columns { display: flex; gap: 8px; flex: 1; min-height: 0; min-width: 0; }
+    .proto-col {
+      container-type: inline-size;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+      overflow: hidden;
+    }
+    .proto-col h3 {
+      margin: 0;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-strong);
+      font-size: 0.95rem;
+    }
+    .proto-col-scroll { overflow: auto; flex: 1; min-height: 0; padding: 8px 10px; }
+    .proto-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-strong);
+      background: var(--surface-1);
+    }
+    .proto-controls select,
+    .proto-controls input[type="search"] {
+      margin: 0;
+      padding: 6px 8px;
+      min-width: 0;
+    }
+    .proto-controls select { flex: 1 1 7rem; width: 0; max-width: none; }
+    .proto-controls input[type="search"] { flex: 2 1 9rem; }
+    .model-allowlist-item { min-width: 0; }
+    .model-allowlist-item span,
+    .model-allowlist-item code { overflow-wrap: anywhere; }
+    @container (max-width: 460px) {
+      .session-chat-models-fields { grid-template-columns: 1fr; }
+      .proto-controls input[type="search"] { flex-basis: 100%; }
+    }
+    .proto-modal .modal-footer button { margin: 0; }
+    @media (max-width: 800px) {
+      .proto-modal { border-radius: 0; }
+      .proto-switcher span { width: auto; font-size: 0.78rem; }
+      .modal-footer-actions-split { flex-wrap: nowrap; }
+      .proto-modal .modal-footer button { padding: 6px 8px; }
+    }
+    .proto-shelf-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      margin: 10px 0 6px;
+      padding: 6px 2px;
+      background: transparent;
+      color: var(--text-primary);
+      box-shadow: none;
+      border: 0;
+      border-radius: 0;
+      font-weight: 600;
+      text-align: left;
+    }
+    .proto-shelf-toggle:hover { background: transparent; color: var(--accent-text); }
+    .proto-lane-head .proto-shelf-toggle { margin: 0; width: auto; flex: 1; }
+    .proto-empty {
+      padding: 14px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 10px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    .proto-lane {
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      background: var(--surface-overlay);
+    }
+    .proto-lane.is-armed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--focus-ring); }
+    .proto-lane-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      font-weight: 600;
+    }
+    .proto-lane-head button { box-shadow: none; }
+    .proto-lane-tools { display: flex; gap: 4px; flex-shrink: 0; }
+    .proto-drop {
+      border: 1px dashed var(--accent-border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      text-align: center;
+      color: var(--text-muted);
+      background: var(--accent-soft);
+    }
+    .proto-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .proto-chips button, .proto-mini {
+      box-shadow: none;
+      padding: 4px 8px;
+      font-size: 0.78rem;
+      border-radius: 999px;
+    }
+    .proto-note { margin: 0 0 8px; color: var(--warning); font-size: 0.82rem; }
+    .proto-dock {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px 8px;
+      min-width: 0;
+    }
+    .proto-state {
+      position: static;
+      flex: 1;
+      min-width: 0;
+      width: auto;
+      height: 2rem;
+      max-height: 2rem;
+      overflow: auto;
+      margin: 0;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: #111827;
+      color: #e5e7eb;
+      font-size: 0.75rem;
+      line-height: 2rem;
+      white-space: nowrap;
+    }
+    .proto-switcher {
+      position: static;
+      transform: none;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: #111827;
+      color: #f9fafb;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .proto-switcher button {
+      background: #f9fafb;
+      color: #111827;
+      box-shadow: none;
+      border-radius: 999px;
+      min-width: 36px;
+    }
+    .proto-switcher span { width: 11rem; min-width: 0; text-align: center; font-size: 0.88rem; }
+  </style>
+</head>
+<body>
+  <div class="proto-page">
+    <header class="site-nav">
+      <div class="nav-brand">
+        <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
+      </div>
+    </header>
+    <div class="proto-stage">
+      <div class="proto-modal" id="editor"></div>
+    </div>
+    <div class="proto-dock">
+      <pre class="proto-state" id="state"></pre>
+      <div class="proto-switcher">
+        <button type="button" id="prevVariant" aria-label="上一個畫面">←</button>
+        <span id="variantLabel"></span>
+        <button type="button" id="nextVariant" aria-label="下一個畫面">→</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const VARIANTS = [
+      { key: 'A', name: '欄上控制' },
+      { key: 'B', name: '點右欄的架' },
+      { key: 'C', name: '列上選架' },
+    ];
+    const SHELVES = [
+      { id: 'text', label: '文字' },
+      { id: 'decisions', label: '決策' },
+      { id: 'image', label: '生圖' },
+      { id: 'speech', label: '語音' },
+      { id: 'speech_transcription', label: '語音轉寫' },
+    ];
+    const ASSIGNABLE = ['text', 'speech', 'speech_transcription'];
+    const CATALOG = {
+      openrouter: {
+        kindSplit: true,
+        text: [
+          ['openrouter/openai/gpt-4.1', 'GPT-4.1'],
+          ['openrouter/anthropic/claude-sonnet-4', 'Claude Sonnet 4'],
+          ['openrouter/google/gemini-2.5-pro', 'Gemini 2.5 Pro'],
+          ['openrouter/openai/gpt-4.1-mini', 'GPT-4.1 Mini'],
+          ['openrouter/google/gemini-2.5-flash', 'Gemini 2.5 Flash'],
+        ],
+        decisions: [
+          ['openrouter/openai/o3', 'o3'],
+          ['openrouter/anthropic/claude-opus-4', 'Claude Opus 4'],
+        ],
+        image: [
+          ['openrouter/google/gemini-2.5-flash-image', 'Gemini Flash Image'],
+          ['openrouter/black-forest-labs/flux-1.1-pro', 'Flux 1.1 Pro'],
+        ],
+        speech: [
+          ['openrouter/openai/gpt-4o-mini-tts', 'GPT-4o mini TTS'],
+        ],
+        speech_transcription: [
+          ['openrouter/openai/whisper-1', 'Whisper'],
+        ],
+      },
+      'ollama-cloud': {
+        kindSplit: false,
+        all: [
+          ['ollama-cloud/qwen3:32b', 'Qwen3 32B'],
+          ['ollama-cloud/llama3.3', 'Llama 3.3'],
+          ['ollama-cloud/mistral-small', 'Mistral Small'],
+          ['ollama-cloud/gemma3:12b', 'Gemma 3 12B'],
+        ],
+      },
+    };
+
+    function padCatalog(list, prefix, label, count) {
+      for (let i = 1; i <= count; i += 1) {
+        const n = String(i).padStart(3, '0');
+        list.push([`${prefix}/extra-${n}`, `${label} ${n}`]);
+      }
+    }
+    padCatalog(CATALOG.openrouter.text, 'openrouter/openai', 'GPT extra', 140);
+    padCatalog(CATALOG.openrouter.decisions, 'openrouter/openai', 'Decision extra', 48);
+    padCatalog(CATALOG.openrouter.image, 'openrouter/black-forest-labs', 'Flux extra', 40);
+    padCatalog(CATALOG.openrouter.speech, 'openrouter/openai', 'TTS extra', 32);
+    padCatalog(CATALOG.openrouter.speech_transcription, 'openrouter/openai', 'Whisper extra', 32);
+    padCatalog(CATALOG['ollama-cloud'].all, 'ollama-cloud', 'Ollama extra', 100);
+
+    const state = {
+      variant: 'A',
+      provider: 'openrouter',
+      kind: 'text',
+      assignShelf: 'text',
+      armedShelf: 'text',
+      search: '',
+      notice: '',
+      collapsed: {},
+      draft: [
+        row('openrouter/openai/gpt-4.1', 'GPT-4.1', 'text', true),
+        row('openrouter/anthropic/claude-sonnet-4', 'Claude Sonnet 4', 'text', false),
+        row('openrouter/retired/old-teacher-model', '舊模型', 'text', false),
+        row('openrouter/openai/o3', 'o3', 'decisions', true),
+        row('ollama-cloud/qwen3:32b', 'Qwen3 32B', 'speech', false),
+      ],
+    };
+
+    function row(id, name, shelf, thinking) {
+      return { id, name, shelf, thinking, maxInputTokens: 128000, maxOutputTokens: 8000 };
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function shelfLabel(id) {
+      return (SHELVES.find((shelf) => shelf.id === id) || { label: id }).label;
+    }
+
+    function providerMeta() {
+      return CATALOG[state.provider];
+    }
+
+    function knownIds() {
+      const ids = new Set();
+      Object.values(CATALOG).forEach((provider) => {
+        Object.values(provider).forEach((value) => {
+          if (!Array.isArray(value)) return;
+          value.forEach(([id]) => ids.add(id));
+        });
+      });
+      return ids;
+    }
+
+    const KNOWN = knownIds();
+
+    function currentCatalog() {
+      const meta = providerMeta();
+      const pairs = meta.kindSplit ? (meta[state.kind] || []) : meta.all;
+      const q = state.search.trim().toLowerCase();
+      const taken = new Set(state.draft.map((model) => model.id));
+      return pairs
+        .filter(([id, name]) => !taken.has(id))
+        .filter(([id, name]) => !q || `${id} ${name}`.toLowerCase().includes(q))
+        .map(([id, name]) => ({ id, name }));
+    }
+
+    function groupedDraft() {
+      return SHELVES.map((shelf) => ({
+        ...shelf,
+        models: state.draft.filter((model) => model.shelf === shelf.id),
+      }));
+    }
+
+    function checkModel(id, name, shelf) {
+      if (state.draft.some((model) => model.id === id)) return;
+      if (!ASSIGNABLE.includes(shelf) && !providerMeta().kindSplit) {
+        state.notice = '這個上游只能放上文字、語音或語音轉寫。';
+        return;
+      }
+      state.notice = '';
+      state.collapsed[shelf] = false;
+      state.draft.push(row(id, name, shelf, false));
+    }
+
+    function uncheck(id) {
+      state.draft = state.draft.filter((model) => model.id !== id);
+      state.notice = '';
+    }
+
+    function addUpload() {
+      const id = 'uploaded/from-json';
+      if (!state.draft.some((model) => model.id === id)) {
+        state.draft.push(row(id, '上傳的模型', 'text', false));
+      }
+      state.collapsed.text = false;
+      state.notice = '上傳進文字架。這是原型，沒有真的讀檔。';
+    }
+
+    function targetShelf() {
+      if (providerMeta().kindSplit) return state.kind;
+      if (state.variant === 'B') return state.armedShelf;
+      return state.assignShelf;
+    }
+
+    function controlsHtml() {
+      const meta = providerMeta();
+      const kind = meta.kindSplit
+        ? `<select aria-label="模型種類" data-field="kind">${SHELVES.map((shelf) => `<option value="${shelf.id}" ${state.kind === shelf.id ? 'selected' : ''}>${shelf.label}</option>`).join('')}</select>`
+        : `<select aria-label="模型種類" disabled><option>全部</option></select>`;
+      const assign = !meta.kindSplit && state.variant === 'A'
+        ? `<select aria-label="指定架" data-field="assignShelf">${ASSIGNABLE.map((id) => `<option value="${id}" ${state.assignShelf === id ? 'selected' : ''}>${shelfLabel(id)}</option>`).join('')}</select>`
+        : '';
+      return `<div class="proto-controls">
+        <select aria-label="廠商" data-field="provider">
+          <option value="openrouter" ${state.provider === 'openrouter' ? 'selected' : ''}>openrouter</option>
+          <option value="ollama-cloud" ${state.provider === 'ollama-cloud' ? 'selected' : ''}>ollama-cloud</option>
+        </select>
+        ${kind}
+        ${assign}
+        <input id="candidateSearch" type="search" aria-label="搜尋" data-field="search" value="${escapeHtml(state.search)}" placeholder="搜尋名稱或 id" />
+      </div>`;
+    }
+
+    function candidateRowsHtml() {
+      const items = currentCatalog();
+      if (!items.length) {
+        return `<p class="proto-empty">這個篩選底下沒有還沒勾的模型。</p>`;
+      }
+      return items.map((item) => {
+        if (state.variant === 'C' && !providerMeta().kindSplit) {
+          const chips = ASSIGNABLE.map((id) => `<button type="button" class="btn-secondary proto-mini" data-action="check" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" data-shelf="${id}">${shelfLabel(id)}</button>`).join('');
+          return `<div class="session-chat-models-row"><div>${escapeHtml(item.name)} <code>${escapeHtml(item.id)}</code></div><div class="proto-chips">${chips}</div></div>`;
+        }
+        const shelf = state.variant === 'C' ? state.kind : targetShelf();
+        const box = state.variant === 'C'
+          ? iconButton('check', `勾到${shelfLabel(shelf)}`, ICONS.plus, true, `data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" data-shelf="${shelf}"`)
+          : `<input type="checkbox" data-action="check" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" data-shelf="${shelf}" />`;
+        return `<label class="model-allowlist-item">${box}<span>${escapeHtml(item.name)} <code>${escapeHtml(item.id)}</code></span></label>`;
+      }).join('');
+    }
+
+    function fieldsHtml(model) {
+      return `<div class="session-chat-models-fields">
+        <label class="catalog-field">顯示名稱<input class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-edit="name" value="${escapeHtml(model.name)}" /></label>
+        <label class="catalog-field session-chat-models-check-field">思考<input type="checkbox" data-model-id="${escapeHtml(model.id)}" data-edit="thinking" ${model.thinking ? 'checked' : ''} /></label>
+        <label class="catalog-field">最大輸入 tokens<input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-edit="maxInputTokens" value="${model.maxInputTokens}" /></label>
+        <label class="catalog-field">最大輸出 tokens<input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-edit="maxOutputTokens" value="${model.maxOutputTokens}" /></label>
+      </div>`;
+    }
+
+    function checkedRowHtml(model) {
+      const missing = KNOWN.has(model.id) ? '' : '<span class="session-chat-models-missing">目錄未列出</span>';
+      return `<div class="session-chat-models-row${missing ? ' is-missing' : ''}">
+        <label class="model-allowlist-item">
+          <input type="checkbox" checked data-action="uncheck" data-id="${escapeHtml(model.id)}" />
+          <span>${escapeHtml(model.name)} <code>${escapeHtml(model.id)}</code> ${missing}</span>
+        </label>
+        ${fieldsHtml(model)}
+      </div>`;
+    }
+
+    function shelfToggleHtml(group) {
+      const collapsed = Boolean(state.collapsed[group.id]);
+      return `<button type="button" class="proto-shelf-toggle" data-action="toggle-shelf" data-shelf="${group.id}" aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '▸' : '▾'} ${group.label}<span>${group.models.length}</span></button>`;
+    }
+
+    function checkedColumnHtml() {
+      const groups = groupedDraft();
+      const visible = state.variant === 'A' ? groups.filter((group) => group.models.length) : groups;
+      if (state.variant === 'A') {
+        const body = visible.length
+          ? visible.map((group) => {
+            const models = state.collapsed[group.id] ? '' : group.models.map(checkedRowHtml).join('');
+            return `${shelfToggleHtml(group)}${models}`;
+          }).join('')
+          : `<p class="proto-empty">還沒勾選。</p>`;
+        return column('已勾選', body, 3);
+      }
+      const body = visible.map((group) => {
+        const armed = state.variant === 'B' && state.armedShelf === group.id;
+        const armable = providerMeta().kindSplit || ASSIGNABLE.includes(group.id);
+        const empty = group.models.length
+          ? group.models.map(checkedRowHtml).join('')
+          : `<p class="proto-empty">${state.variant === 'B' && group.id === 'text' ? '這個架是空的。JSON 上傳會進這裡。' : '這個架還沒有模型。'}</p>`;
+        const head = state.variant === 'B'
+          ? iconButton('arm', armed ? '指定中' : '指定這個架', armed ? ICONS.pinOn : ICONS.pin, false, `data-shelf="${group.id}"${armable ? '' : ' disabled'}`)
+          : '';
+        const upload = state.variant === 'B' && group.id === 'text'
+          ? iconButton('upload', '上傳 JSON 到文字架', ICONS.upload, false)
+          : '';
+        const inner = state.collapsed[group.id] ? '' : `<div style="padding:8px 10px 10px">${empty}</div>`;
+        const tools = `${upload}${head}`;
+        return `<section class="proto-lane${armed ? ' is-armed' : ''}"><div class="proto-lane-head">${shelfToggleHtml(group)}<span class="proto-lane-tools">${tools}</span></div>${inner}</section>`;
+      }).join('');
+      const grow = state.variant === 'B' ? 1 : 2;
+      return column('已勾選', body, grow);
+    }
+
+    function column(title, body, grow, pinned = '') {
+      return `<section class="proto-col" style="flex:${grow} 1 0"><h3>${title}</h3>${pinned}<div class="proto-col-scroll">${body}</div></section>`;
+    }
+
+    function leftColumnHtml() {
+      const hint = state.variant === 'B' && !providerMeta().kindSplit
+        ? `<p class="proto-note">先點右欄的架，再勾左欄。現在會進「${shelfLabel(state.armedShelf)}」。</p>`
+        : '';
+      const grow = state.variant === 'A' ? 2 : 1;
+      return column('候選清單', candidateRowsHtml(), grow, `${controlsHtml()}${hint}`);
+    }
+
+    function uploadBannerHtml() {
+      return '';
+    }
+
+    const ICONS = {
+      upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>',
+      file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+      download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>',
+      close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+      check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg>',
+      pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/></svg>',
+      pinOn: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>',
+      plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+    };
+
+    function iconButton(action, label, svg, primary, extra = '') {
+      const cls = primary ? 'proto-icon-btn' : 'btn-secondary proto-icon-btn';
+      const actionAttr = action ? ` data-action="${action}"` : '';
+      return `<button type="button" class="${cls}" title="${label}" aria-label="${label}"${actionAttr} ${extra}>${svg}</button>`;
+    }
+
+    function headerActionsHtml() {
+      const upload = state.variant === 'B'
+        ? ''
+        : iconButton('upload', '上傳 JSON', ICONS.upload, false);
+      return `<div class="proto-header-actions">${upload}${iconButton('', '下載範本', ICONS.file, false)}${iconButton('', '下載目前清單', ICONS.download, false)}${iconButton('', '取消', ICONS.close, false)}${iconButton('', '儲存', ICONS.check, true)}</div>`;
+    }
+
+    function render(focusId) {
+      const variant = VARIANTS.find((item) => item.key === state.variant);
+      document.getElementById('variantLabel').textContent = `${variant.key} — ${variant.name}`;
+      const notice = state.notice ? `<p class="proto-note">${escapeHtml(state.notice)}</p>` : '';
+      document.getElementById('editor').innerHTML = `
+        <div class="modal-header"><span>編輯本課對話模型 · 原型 ${variant.key}</span>${headerActionsHtml()}</div>
+        <div class="modal-body">${notice}${uploadBannerHtml()}<div class="proto-columns">${leftColumnHtml()}${checkedColumnHtml()}</div></div>`;
+      const lines = ['variant ' + state.variant + ' — ' + variant.name, 'provider ' + state.provider, 'kind ' + (providerMeta().kindSplit ? state.kind : 'all')];
+      if (!providerMeta().kindSplit) lines.push('assign ' + (state.variant === 'B' ? state.armedShelf : state.assignShelf));
+      SHELVES.forEach((shelf) => {
+        const ids = state.draft.filter((model) => model.shelf === shelf.id).map((model) => model.id);
+        lines.push(shelf.label + ': ' + (ids.join(', ') || '—'));
+      });
+      document.getElementById('state').textContent = lines.join(' · ');
+      if (focusId) {
+        const el = document.getElementById(focusId) || document.querySelector(`[data-edit][data-model-id="${CSS.escape(focusId)}"]`);
+        if (el) {
+          el.focus();
+          if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length);
+        }
+      }
+    }
+
+    function setVariant(key) {
+      const index = VARIANTS.findIndex((item) => item.key === key);
+      state.variant = VARIANTS[(index + VARIANTS.length) % VARIANTS.length].key;
+      const url = new URL(location.href);
+      url.searchParams.set('variant', state.variant);
+      history.replaceState(null, '', url);
+      render();
+    }
+
+    function cycle(step) {
+      const index = VARIANTS.findIndex((item) => item.key === state.variant);
+      setVariant(VARIANTS[(index + step + VARIANTS.length) % VARIANTS.length].key);
+    }
+
+    document.getElementById('prevVariant').addEventListener('click', () => cycle(-1));
+    document.getElementById('nextVariant').addEventListener('click', () => cycle(1));
+    document.addEventListener('keydown', (event) => {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (event.key === 'ArrowLeft') cycle(-1);
+      if (event.key === 'ArrowRight') cycle(1);
+    });
+
+    document.body.addEventListener('change', (event) => {
+      const field = event.target.getAttribute('data-field');
+      if (field === 'provider') {
+        state.provider = event.target.value;
+        if (providerMeta().kindSplit && state.kind === 'all') state.kind = 'text';
+        render();
+        return;
+      }
+      if (field === 'kind') {
+        state.kind = event.target.value;
+        if (state.variant === 'B') state.armedShelf = event.target.value;
+        render();
+        return;
+      }
+      if (field === 'assignShelf') {
+        state.assignShelf = event.target.value;
+        render();
+        return;
+      }
+      const edit = event.target.getAttribute('data-edit');
+      const id = event.target.getAttribute('data-model-id');
+      if (!edit || !id) return;
+      const model = state.draft.find((item) => item.id === id);
+      if (!model) return;
+      if (edit === 'thinking') model.thinking = event.target.checked;
+      else model[edit] = event.target.value;
+      render(id);
+    });
+
+    document.body.addEventListener('input', (event) => {
+      if (event.target.getAttribute('data-field') === 'search') {
+        state.search = event.target.value;
+        render('candidateSearch');
+      }
+    });
+
+    document.body.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action]');
+      if (!target) return;
+      const action = target.getAttribute('data-action');
+      if (action === 'upload') addUpload();
+      if (action === 'arm') {
+        state.armedShelf = target.getAttribute('data-shelf');
+        if (providerMeta().kindSplit) state.kind = state.armedShelf;
+        state.notice = '';
+      }
+      if (action === 'check') {
+        checkModel(target.getAttribute('data-id'), target.getAttribute('data-name'), target.getAttribute('data-shelf'));
+      }
+      if (action === 'uncheck') uncheck(target.getAttribute('data-id'));
+      if (action === 'toggle-shelf') {
+        const shelf = target.getAttribute('data-shelf');
+        state.collapsed[shelf] = !state.collapsed[shelf];
+      }
+      render();
+    });
+
+    const initial = new URL(location.href).searchParams.get('variant');
+    if (VARIANTS.some((item) => item.key === initial)) state.variant = initial;
+    render();
+  </script>
+</body>
+</html>
