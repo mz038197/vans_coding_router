@@ -146,7 +146,7 @@ def test_each_error_log_posts_again():
         receiver.close()
 
 
-def test_exception_traceback_stays_out_of_the_signal():
+def test_exception_stack_is_kept_in_the_signal():
     receiver = _SignalsReceiver()
     forwarder = start_signal_forwarding(receiver.url, "router-token")
     assert forwarder is not None
@@ -159,9 +159,9 @@ def test_exception_traceback_stays_out_of_the_signal():
 
         assert len(receiver.posts) == 1
         message = receiver.posts[0]["body"]["message"]
-        assert message == "Portal request failed"
-        assert "secret traceback detail" not in message
-        assert "Traceback" not in message
+        assert message.startswith("Portal request failed\n")
+        assert "Traceback (most recent call last):" in message
+        assert "RuntimeError: secret traceback detail" in message
     finally:
         forwarder.close()
         receiver.close()
@@ -372,9 +372,13 @@ def test_catalog_round_with_failed_upstreams_posts_one_signal_naming_them():
         asyncio.run(memory.fill())
         _wait_until(lambda: len(receiver.posts) >= 1)
         assert len(receiver.posts) == 1
-        assert receiver.posts[0]["body"]["message"] == (
-            "Upstream Model Catalog round did not update: openrouter, ollama_cloud"
+        message = receiver.posts[0]["body"]["message"]
+        assert message.startswith(
+            "Upstream Model Catalog round did not update: openrouter, ollama_cloud\n"
         )
+        assert "Traceback (most recent call last):" in message
+        assert "RuntimeError: openrouter down" in message
+        assert "RuntimeError: ollama_cloud down" in message
         assert receiver.posts[0]["body"]["level"] == "ERROR"
     finally:
         forwarder.close()
@@ -440,8 +444,9 @@ def test_thrown_catalog_round_posts_the_existing_error_once():
         asyncio.run(scenario())
         assert len(receiver.posts) == 1
         message = receiver.posts[0]["body"]["message"]
-        assert message == "Upstream Model Catalog refresh failed"
-        assert "broken round" not in message
+        assert message.startswith("Upstream Model Catalog refresh failed\n")
+        assert "Traceback (most recent call last):" in message
+        assert "RuntimeError: broken round" in message
         assert "did not update" not in message
     finally:
         forwarder.close()
@@ -480,9 +485,10 @@ def test_startup_catalog_round_that_throws_posts_that_error_once(monkeypatch):
         _wait_until(lambda: len(receiver.posts) >= 1)
         assert len(receiver.posts) == 1
         message = receiver.posts[0]["body"]["message"]
-        assert message == "Upstream Model Catalog refresh failed"
+        assert message.startswith("Upstream Model Catalog refresh failed\n")
+        assert "Traceback (most recent call last):" in message
+        assert "RuntimeError: broken round" in message
         assert "did not update" not in message
-        assert "broken round" not in message
     finally:
         receiver.close()
 

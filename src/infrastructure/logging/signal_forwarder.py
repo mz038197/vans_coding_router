@@ -14,6 +14,15 @@ SIGNAL_TIMEOUT_SEC = 2.0
 _FAILURE_LOGGER = "vans_signals_forwarder"
 
 
+def _signal_message(record: logging.LogRecord) -> str:
+    message = record.getMessage()
+    if record.exc_info and record.exc_info[0] is not None:
+        stack = logging.Formatter().formatException(record.exc_info)
+        if stack:
+            return f"{message}\n{stack}"
+    return message
+
+
 class SignalForwarder(logging.Handler):
     def __init__(self, url: str, token: str):
         super().__init__(level=logging.ERROR)
@@ -28,7 +37,7 @@ class SignalForwarder(logging.Handler):
             "log_time": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
             "logger_name": record.name,
             "level": record.levelname,
-            "message": record.getMessage(),
+            "message": _signal_message(record),
             "source": SIGNAL_SOURCE,
         }
         worker = threading.Thread(target=self._post, args=(payload,), daemon=True)

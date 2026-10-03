@@ -14,4 +14,4 @@ The operator cannot see a production failure once the Fly machine restarts, incl
 - Production sends only when both `VANS_SIGNALS_URL` and `VANS_SIGNALS_TOKEN` are set. The token is the vans-signals bearer whose service name is `vans-coding-router`. Neither value belongs in the router config file.
 - A failed post is written on the `vans_signals_forwarder` logger, which is outside `src`, and is not posted again.
 - Process shutdown waits for an in-flight post, up to that same timeout, so a thrown startup catalog round still reaches vans-signals. A student request does not wait.
-- The Signal body is the log time, logger name, level, message, and source. The traceback stays in Fly process output.
+- The Signal body is the log time, logger name, level, message, and source. When the log record has an exception, the message keeps that sentence and then the exception stack, so an agent can read the failure from Slack and from the stored row. A catalog round that names upstreams which did not update also keeps each failed fetch's stack after that sentence. Fly process output still has the same stack.

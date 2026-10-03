@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from typing import Any, Callable
 
 from src.infrastructure.config import RouterSettings, provider_has_kind_split
@@ -55,19 +56,23 @@ class UpstreamModelCatalogMemory:
             return
         results = await asyncio.gather(*tasks)
         updated = dict(self._snapshots)
-        failed: list[str] = []
-        for provider, kind, models in results:
+        failed: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for provider, kind, models, stack in results:
             if models is None:
-                if provider not in failed:
-                    failed.append(provider)
+                if provider not in seen:
+                    seen.add(provider)
+                    failed.append((provider, stack))
                 continue
             updated[(provider, kind)] = models
         self._snapshots = updated
         if failed:
-            logger.error(
-                "Upstream Model Catalog round did not update: %s",
-                ", ".join(failed),
-            )
+            names = ", ".join(name for name, _stack in failed)
+            stacks = "\n\n".join(stack for _name, stack in failed if stack)
+            message = f"Upstream Model Catalog round did not update: {names}"
+            if stacks:
+                message = f"{message}\n{stacks}"
+            logger.error(message)
 
     def read(self, requested: str) -> dict[str, Any]:
         kind_split, all_models_providers = self._provider_groups()
@@ -125,8 +130,8 @@ class UpstreamModelCatalogMemory:
                 kind or "all",
                 exc_info=True,
             )
-            return provider, kind, None
-        return provider, kind, _accepted_models(raw, provider)
+            return provider, kind, None, traceback.format_exc()
+        return provider, kind, _accepted_models(raw, provider), ""
 
     async def _fetch_raw(self, provider: str, modality: str | None) -> Any:
         one = getattr(self._gateway, "provider_models", None)
