@@ -19,6 +19,7 @@ class SignalForwarder(logging.Handler):
         super().__init__(level=logging.ERROR)
         self._url = url.rstrip("/") + "/signals"
         self._token = token
+        self._inflight: list[threading.Thread] = []
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.levelno < logging.ERROR:
@@ -30,7 +31,9 @@ class SignalForwarder(logging.Handler):
             "message": record.getMessage(),
             "source": SIGNAL_SOURCE,
         }
-        threading.Thread(target=self._post, args=(payload,), daemon=True).start()
+        worker = threading.Thread(target=self._post, args=(payload,), daemon=True)
+        self._inflight.append(worker)
+        worker.start()
 
     def _post(self, payload: dict) -> None:
         try:
@@ -49,6 +52,13 @@ class SignalForwarder(logging.Handler):
 
     def close(self) -> None:
         logging.getLogger("src").removeHandler(self)
+        self.acquire()
+        try:
+            workers = list(self._inflight)
+        finally:
+            self.release()
+        for worker in workers:
+            worker.join(timeout=SIGNAL_TIMEOUT_SEC + 1.0)
         super().close()
 
 

@@ -244,6 +244,36 @@ def test_a_failed_post_is_not_retried(caplog):
         receiver.close()
 
 
+def test_shutdown_finishes_the_in_flight_post_before_the_process_can_exit():
+    receiver = _SignalsReceiver()
+    receiver.hold_responses()
+    forwarder = start_signal_forwarding(receiver.url, "router-token")
+    assert forwarder is not None
+
+    def release_after_the_request_is_in_flight():
+        _wait_until(lambda: len(receiver.posts) >= 1)
+        time.sleep(0.3)
+        receiver.release_responses()
+
+    releaser = threading.Thread(target=release_after_the_request_is_in_flight, daemon=True)
+    releaser.start()
+    try:
+        logging.getLogger("src.boot").error("startup catalog round failed")
+        started = time.monotonic()
+        forwarder.close()
+        forwarder = None
+        elapsed = time.monotonic() - started
+        assert elapsed >= 0.25
+        assert len(receiver.posts) == 1
+        assert receiver.posts[0]["body"]["message"] == "startup catalog round failed"
+    finally:
+        receiver.release_responses()
+        if forwarder is not None:
+            forwarder.close()
+        releaser.join(timeout=2)
+        receiver.close()
+
+
 def test_a_dead_destination_gives_up_after_about_two_seconds(caplog):
     receiver = _SignalsReceiver()
     receiver.hold_responses()
