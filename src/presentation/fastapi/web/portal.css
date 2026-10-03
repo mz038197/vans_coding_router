@@ -2190,6 +2190,7 @@
     .session-fields {
       display: flex;
       flex-wrap: wrap;
+      align-items: flex-start;
       gap: 8px;
       margin-top: 12px;
     }
@@ -2235,4 +2236,8 @@
       font-size: 0.82rem;
     }
 
-    .session-redemptions { margin-top: 8px; }
+    .session-field.session-redemptions { margin-top: 0; min-width: 0; overflow: hidden; }
+
+    .session-redemptions .subtable { width: 100%; margin: 0; }
+
+    .session-redemptions .roster-nowrap { white-space: nowrap; }

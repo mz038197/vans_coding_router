@@ -260,6 +260,16 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert "seat_limit" in html
     assert '{"seat_limit"' in html or "{ seat_limit" in html
     assert "該席仍佔用課堂座位" in html
+    fields = html[html.index("const fields = (session)"):html.index("const rowButton")]
+    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox(session)}") < fields.index('session-kicker">安裝清單')
+    assert "${sessionSeatLimitCell(classId, session)}</div>" in fields
+    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}" not in html
+    assert 'class="session-field session-field-wide session-redemptions hidden"' in html
+    assert 'class="roster-nowrap"' in html
+    css = client.get("/portal/static/portal.css").text
+    assert "align-items: flex-start" in css
+    assert ".session-field.session-redemptions { margin-top: 0; min-width: 0; overflow: hidden; }" in css
+    assert ".session-redemptions .roster-nowrap { white-space: nowrap; }" in css
 
 
 def test_portal_session_row_shows_model_allowlist_editor(tmp_path):

@@ -2028,14 +2028,15 @@
         return `<span class="tag ${active ? 'tag-active' : 'tag-ended'}">${active ? '進行中' : '已結束'}</span>`;
       };
       const redemptionBox = (session) => showRedemptions
-        ? `<div id="redemption-row-${classId}-${session.id}" class="session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
+        ? `<div id="redemption-row-${classId}-${session.id}" class="session-field session-field-wide session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
         : '';
       const fields = (session) => `
         <div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>
         <div class="session-fields">
           <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
-          <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}</div>
+          <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}</div>
           <div class="session-field"><span class="session-kicker">Key 到期</span>${sessionExpiresCell(classId, session)}</div>
+          ${redemptionBox(session)}
           ${allowOwnerActions ? `<div class="session-field"><span class="session-kicker">安裝清單</span>${sessionCatalogCell(classId, session)}</div>` : ''}
           <div class="session-field session-field-wide">${sessionModelAllowlistCell(classId, session)}</div>
           <div class="session-field session-field-wide"><span class="session-kicker">能力</span>${sessionCapabilitiesCell(classId, session, allowOwnerActions)}</div>
@@ -2780,14 +2781,14 @@ snippets:
     function renderRedemptionSubtable(classId, items) {
       if (!items.length) return '<p class="hint">尚無人領取</p>';
       return `<table class="subtable">
-        <tr><th>學生</th><th>身分</th><th>狀態</th><th>領取時間</th><th></th></tr>
+        <tr><th>學生</th><th class="roster-nowrap">身分</th><th class="roster-nowrap">狀態</th><th class="roster-nowrap">領取時間</th><th></th></tr>
         ${items.map(item => `
           <tr>
             <td>${escapeHtml(item.name || '—')}</td>
-            <td>${redemptionIdentityCell(item)}</td>
-            <td>${renderStatusTag('user', item.status === 'inactive' ? 'inactive' : 'active')}</td>
-            <td>${escapeHtml(formatLocalDateTime(item.redeemed_at))}</td>
-            <td>${redemptionActionCell(classId, item.session_id, item)}</td>
+            <td class="roster-nowrap">${redemptionIdentityCell(item)}</td>
+            <td class="roster-nowrap">${renderStatusTag('user', item.status === 'inactive' ? 'inactive' : 'active')}</td>
+            <td class="roster-nowrap">${escapeHtml(formatLocalDateTime(item.redeemed_at))}</td>
+            <td class="roster-nowrap">${redemptionActionCell(classId, item.session_id, item)}</td>
           </tr>
         `).join('')}
       </table>`;
