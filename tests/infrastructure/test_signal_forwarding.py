@@ -5,6 +5,8 @@ import json
 import logging
 import threading
 import time
+
+import pytest
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -72,6 +74,9 @@ class _SignalsReceiver:
     @property
     def posts(self) -> list[dict]:
         return self._server.posts
+
+    def fail_with(self, status: int) -> None:
+        self._server.status = status
 
     def hold_responses(self) -> None:
         self._server.hold_response.set()
@@ -223,7 +228,7 @@ def test_student_request_does_not_wait_for_the_signal_post():
 
 def test_a_failed_post_is_not_retried(caplog):
     receiver = _SignalsReceiver()
-    receiver._server.status = 500
+    receiver.fail_with(500)
     forwarder = start_signal_forwarding(receiver.url, "router-token")
     assert forwarder is not None
     try:
@@ -410,6 +415,45 @@ def test_thrown_catalog_round_posts_the_existing_error_once():
         assert "did not update" not in message
     finally:
         forwarder.close()
+        receiver.close()
+
+
+def test_startup_catalog_round_that_throws_posts_that_error_once(monkeypatch):
+    receiver = _SignalsReceiver()
+    monkeypatch.setenv("VANS_SIGNALS_URL", receiver.url)
+    monkeypatch.setenv("VANS_SIGNALS_TOKEN", "router-token")
+
+    class Gateway:
+        async def startup(self):
+            return None
+
+        async def shutdown(self):
+            return None
+
+    class Portal:
+        async def fill_upstream_model_catalog(self):
+            raise RuntimeError("broken round")
+
+    container = SimpleNamespace(
+        archive_repo=None,
+        llm_gateway=Gateway(),
+        portal_use_case=Portal(),
+    )
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="broken round"):
+            async with application_lifespan(container):
+                pass
+
+    try:
+        asyncio.run(scenario())
+        _wait_until(lambda: len(receiver.posts) >= 1)
+        assert len(receiver.posts) == 1
+        message = receiver.posts[0]["body"]["message"]
+        assert message == "Upstream Model Catalog refresh failed"
+        assert "did not update" not in message
+        assert "broken round" not in message
+    finally:
         receiver.close()
 
 

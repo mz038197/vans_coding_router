@@ -12,7 +12,10 @@ from src.presentation.fastapi.routers.api_router import create_api_router
 from src.presentation.fastapi.routers.lobby_router import create_lobby_router
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 from src.infrastructure.jobs.log_archive_job import run_daily_archive_job
-from src.infrastructure.jobs.upstream_model_catalog_job import run_upstream_model_catalog_refresh
+from src.infrastructure.jobs.upstream_model_catalog_job import (
+    fill_catalog_round,
+    run_upstream_model_catalog_refresh,
+)
 from src.infrastructure.logging.signal_forwarder import start_signal_forwarding
 
 REQUEST_TIMEOUT = 900.0
@@ -40,7 +43,7 @@ async def application_lifespan(app_container):
             )
         await app_container.llm_gateway.startup()
         if app_container.portal_use_case is not None:
-            await app_container.portal_use_case.fill_upstream_model_catalog()
+            await fill_catalog_round(app_container.portal_use_case)
             catalog_task = asyncio.create_task(
                 run_upstream_model_catalog_refresh(
                     app_container.portal_use_case,

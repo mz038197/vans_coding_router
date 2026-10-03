@@ -15,11 +15,10 @@ _FAILURE_LOGGER = "vans_signals_forwarder"
 
 
 class SignalForwarder(logging.Handler):
-    def __init__(self, url: str, token: str, *, timeout_sec: float = SIGNAL_TIMEOUT_SEC):
+    def __init__(self, url: str, token: str):
         super().__init__(level=logging.ERROR)
         self._url = url.rstrip("/") + "/signals"
         self._token = token
-        self._timeout_sec = timeout_sec
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.levelno < logging.ERROR:
@@ -39,7 +38,7 @@ class SignalForwarder(logging.Handler):
                 self._url,
                 json=payload,
                 headers={"Authorization": f"Bearer {self._token}"},
-                timeout=self._timeout_sec,
+                timeout=SIGNAL_TIMEOUT_SEC,
             )
             response.raise_for_status()
         except Exception as exc:
