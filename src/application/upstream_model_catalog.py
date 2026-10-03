@@ -55,11 +55,19 @@ class UpstreamModelCatalogMemory:
             return
         results = await asyncio.gather(*tasks)
         updated = dict(self._snapshots)
+        failed: list[str] = []
         for provider, kind, models in results:
             if models is None:
+                if provider not in failed:
+                    failed.append(provider)
                 continue
             updated[(provider, kind)] = models
         self._snapshots = updated
+        if failed:
+            logger.error(
+                "Upstream Model Catalog round did not update: %s",
+                ", ".join(failed),
+            )
 
     def read(self, requested: str) -> dict[str, Any]:
         kind_split, all_models_providers = self._provider_groups()

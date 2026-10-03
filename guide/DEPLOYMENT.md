@@ -68,6 +68,7 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 | `OPENROUTER_API_KEY` | 選填（OpenRouter 帳號 A） |
 | `OPENROUTER_API_KEY_2` | 選填（帳號 B；與 A 為不同帳號時可內部分流） |
 | `OPENAI_API_KEY` | 選填 |
+| `VANS_SIGNALS_URL` / `VANS_SIGNALS_TOKEN` | 正式環境才設。把 `src` 的 ERROR 日誌送到 vans-signals。網址是服務根位址（例如 `https://vans-signals.fly.dev`），權杖是該服務發給 `vans-coding-router` 的 bearer。少一項就完全不送，本機與 staging 維持空白 |
 
 `ollama_cloud` 在 [`config/router.prod.yaml`](../config/router.prod.yaml) 使用 `api_key_envs` 掛兩把 key：學生仍用同一把 `vcr_sk_` 與 `ollama_cloud@...`，router 以 least-in-flight 分流，並以 `max_concurrent_per_key`（預設 3）在打上游前排隊，降低 Ollama Cloud rate limit。只設第一把 key 時行為與單帳號相同。
 
