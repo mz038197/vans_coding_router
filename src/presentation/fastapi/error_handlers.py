@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -21,6 +23,7 @@ from src.domain.errors import (
     UnresolvedApiKeyPlaceholderError,
     WrongCredentialTypeError,
 )
+from src.domain.extra_usage import is_key_failover_exhaustion
 from src.presentation.fastapi.openai_errors import (
     is_chat_completions_path,
     is_openai_compatible_path,
@@ -28,6 +31,48 @@ from src.presentation.fastapi.openai_errors import (
     make_openai_error_body,
     openai_error_response,
 )
+
+logger = logging.getLogger(__name__)
+UNEXPECTED_STUDENT_MESSAGE = "Internal server error"
+
+
+def _upstream_failure_reaches_the_operator(exc: UpstreamServiceError) -> bool:
+    if exc.status_code in (401, 403):
+        return True
+    body = (exc.details or {}).get("body")
+    return is_key_failover_exhaustion(exc.status_code, body)
+
+
+def log_operational_failure(method: str, path: str, exc: BaseException) -> None:
+    exc_info = (type(exc), exc, exc.__traceback__)
+    if isinstance(exc, UpstreamServiceError):
+        if not _upstream_failure_reaches_the_operator(exc):
+            return
+        backend = str((exc.details or {}).get("backend") or "")
+        logger.error(
+            "%s %s -> %s backend=%s: %s",
+            method,
+            path,
+            exc.status_code,
+            backend,
+            exc.user_facing_message(),
+            exc_info=exc_info,
+        )
+        return
+    if isinstance(exc, ServiceUnavailableError):
+        status_code = exc.status_code
+        sentence = exc.message
+    else:
+        status_code = 500
+        sentence = UNEXPECTED_STUDENT_MESSAGE
+    logger.error(
+        "%s %s -> %s: %s",
+        method,
+        path,
+        status_code,
+        sentence,
+        exc_info=exc_info,
+    )
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -81,6 +126,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(UpstreamServiceError)
     async def handle_upstream_error(request: Request, exc: UpstreamServiceError):
+        log_operational_failure(request.method, request.url.path, exc)
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 502 if exc.status_code in (401, 403) else exc.status_code,
@@ -120,6 +166,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ServiceUnavailableError)
     async def handle_service_unavailable(request: Request, exc: ServiceUnavailableError):
+        log_operational_failure(request.method, request.url.path, exc)
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 exc.status_code,
@@ -256,6 +303,20 @@ def register_error_handlers(app: FastAPI) -> None:
         if exc.details is not None:
             payload["detail"]["details"] = exc.details
         return JSONResponse(status_code=exc.status_code, content=payload)
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_exception(request: Request, exc: Exception):
+        log_operational_failure(request.method, request.url.path, exc)
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                500,
+                UNEXPECTED_STUDENT_MESSAGE,
+                error_type="server_error",
+            )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": UNEXPECTED_STUDENT_MESSAGE},
+        )
 
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError):

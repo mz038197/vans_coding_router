@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -743,6 +744,90 @@ async def test_realtime_vcr_auto_uses_the_transcription_shelf_in_order(tmp_path)
     assert harness.openrouter._pool.in_flight_snapshot() == [1]
     await release()
     assert harness.openrouter._pool.in_flight_snapshot() == [0]
+
+
+def test_chat_stream_unexpected_exception_hides_the_exception_text(tmp_path, caplog):
+    harness = _Harness(tmp_path)
+    harness.set_models(_text_shelf())
+
+    async def explode(*_args, **_kwargs):
+        raise RuntimeError("secret boom")
+        yield b""
+
+    harness.api.chat_stream = explode
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    with caplog.at_level(logging.ERROR, logger="src"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers=harness.headers,
+            json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        )
+
+    assert response.status_code == 200
+    assert "Internal server error" in response.text
+    assert "secret boom" not in response.text
+    records = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert len(records) == 1
+    assert records[0].getMessage() == "POST /v1/chat/completions -> 500: Internal server error"
+    assert records[0].exc_info[0] is RuntimeError
+
+
+def test_recovered_extra_usage_exhaustion_emits_no_error(harness: _Harness, caplog):
+    harness.set_models(_text_shelf())
+    harness.ollama._client.request = AsyncMock(return_value=_json_response(402, EXTRA_USAGE))
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    with caplog.at_level(logging.ERROR, logger="src"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers=harness.headers,
+            json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert response.status_code == 200
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR] == []
+
+
+def test_exhaustion_on_every_model_emits_one_error(harness: _Harness, caplog):
+    harness.set_models(_text_shelf())
+    harness.ollama._client.request = AsyncMock(return_value=_json_response(402, EXTRA_USAGE))
+    harness.openrouter._client.request = AsyncMock(return_value=_json_response(402, CREDIT))
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    with caplog.at_level(logging.ERROR, logger="src"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers=harness.headers,
+            json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert response.status_code == 402
+    records = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert len(records) == 1
+    assert "402" in records[0].getMessage()
+    assert "backend=openrouter" in records[0].getMessage()
+    assert "Insufficient credits" in records[0].getMessage()
+
+
+def test_image_stream_when_image_generation_is_off_emits_no_error(harness: _Harness, caplog):
+    harness.set_models(_text_shelf())
+    from fastapi.testclient import TestClient
+
+    client = TestClient(harness.app)
+    with caplog.at_level(logging.ERROR, logger="src"):
+        response = client.post(
+            "/v1/images",
+            headers=harness.headers,
+            json={"model": VCR_AUTO_MODEL_ID, "prompt": "a cat", "stream": True},
+        )
+
+    assert response.status_code == 200
+    assert "此課堂未開放生圖" in response.text
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR] == []
 
 
 def _chat_request():

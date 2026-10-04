@@ -10,6 +10,7 @@ from src.application.dto.chat_dto import ChatCompletionInputDto
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.domain.errors import (
+    AppError,
     InvalidModelIdError,
     ModelNotAllowedError,
     ServiceUnavailableError,
@@ -19,6 +20,10 @@ from src.domain.errors import (
     UpstreamServiceError,
 )
 from src.presentation.fastapi.auth_responses import openai_auth_error_response
+from src.presentation.fastapi.error_handlers import (
+    UNEXPECTED_STUDENT_MESSAGE,
+    log_operational_failure,
+)
 from src.presentation.fastapi.openai_errors import (
     openai_error_response,
     openai_stream_chat_error_bytes,
@@ -88,7 +93,9 @@ def create_api_router(
             }
         return openai_auth_error_response(api_key, api_use_case.api_key_repo)
 
-    async def _stream_with_error_handling(domain_req, api_key, client_ip, auth_context):
+    async def _stream_with_error_handling(
+        domain_req, api_key, client_ip, auth_context, http_method: str, http_path: str
+    ):
         """包含錯誤處理的流式生成器"""
         try:
             async with aclosing(
@@ -97,15 +104,22 @@ def create_api_router(
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
+            log_operational_failure(http_method, http_path, e)
             yield openai_stream_chat_error_bytes(_upstream_error_message(e), model=domain_req.model)
         except UpstreamBusyError as e:
             yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except ServiceUnavailableError as e:
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
+        except AppError as e:
             yield openai_stream_chat_error_bytes(e.message, model=domain_req.model)
         except Exception as e:
-            yield openai_stream_chat_error_bytes(str(e), model=domain_req.model)
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_chat_error_bytes(UNEXPECTED_STUDENT_MESSAGE, model=domain_req.model)
 
-    async def _responses_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+    async def _responses_stream_with_error_handling(
+        body: dict[str, Any], api_key, client_ip, auth_context, http_method: str, http_path: str
+    ):
         model = str(body.get("model") or "")
         try:
             async with aclosing(
@@ -114,13 +128,18 @@ def create_api_router(
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
+            log_operational_failure(http_method, http_path, e)
             yield openai_stream_responses_error_bytes(_upstream_error_message(e), model=model)
         except UpstreamBusyError as e:
             yield openai_stream_responses_error_bytes(e.message, model=model)
         except ServiceUnavailableError as e:
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_responses_error_bytes(e.message, model=model)
+        except AppError as e:
             yield openai_stream_responses_error_bytes(e.message, model=model)
         except Exception as e:
-            yield openai_stream_responses_error_bytes(str(e), model=model)
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_responses_error_bytes(UNEXPECTED_STUDENT_MESSAGE, model=model)
 
     @router.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionsRequestSchema, request: Request):
@@ -147,7 +166,9 @@ def create_api_router(
         api_use_case.validate_model_allowed(domain_req.model, auth_context)
 
         if domain_req.stream:
-            generator = _stream_with_error_handling(domain_req, api_key, client_ip, auth_context)
+            generator = _stream_with_error_handling(
+                domain_req, api_key, client_ip, auth_context, request.method, request.url.path
+            )
             return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.chat_nonstream(domain_req, api_key, client_ip, auth_context)
@@ -168,13 +189,17 @@ def create_api_router(
         api_use_case.validate_model_allowed(str(body.get("model") or ""), auth_context)
 
         if body.get("stream"):
-            generator = _responses_stream_with_error_handling(body, api_key, client_ip, auth_context)
+            generator = _responses_stream_with_error_handling(
+                body, api_key, client_ip, auth_context, request.method, request.url.path
+            )
             return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.responses_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
-    async def _images_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+    async def _images_stream_with_error_handling(
+        body: dict[str, Any], api_key, client_ip, auth_context, http_method: str, http_path: str
+    ):
         try:
             async with aclosing(
                 api_use_case.images_create_stream(body, api_key, client_ip, auth_context)
@@ -182,11 +207,16 @@ def create_api_router(
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
+            log_operational_failure(http_method, http_path, e)
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except AppError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
-            yield openai_stream_error_bytes(str(e), error_type="server_error")
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(UNEXPECTED_STUDENT_MESSAGE, error_type="server_error")
 
     @router.post("/v1/images")
     async def images_create(req: ImageGenerationRequestSchema, request: Request):
@@ -200,7 +230,9 @@ def create_api_router(
 
         body = req.model_dump(exclude_none=True)
         if req.stream:
-            generator = _images_stream_with_error_handling(body, api_key, client_ip, auth_context)
+            generator = _images_stream_with_error_handling(
+                body, api_key, client_ip, auth_context, request.method, request.url.path
+            )
             return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
         data = await api_use_case.images_create(body, api_key, client_ip, auth_context)
@@ -255,7 +287,9 @@ def create_api_router(
             return "audio/flac"
         return "application/octet-stream"
 
-    async def _audio_speech_stream_with_error_handling(body: dict[str, Any], api_key, client_ip, auth_context):
+    async def _audio_speech_stream_with_error_handling(
+        body: dict[str, Any], api_key, client_ip, auth_context, http_method: str, http_path: str
+    ):
         try:
             async with aclosing(
                 api_use_case.audio_speech_stream(body, api_key, client_ip, auth_context)
@@ -263,11 +297,16 @@ def create_api_router(
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
+            log_operational_failure(http_method, http_path, e)
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except AppError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
-            yield openai_stream_error_bytes(str(e), error_type="server_error")
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(UNEXPECTED_STUDENT_MESSAGE, error_type="server_error")
 
     @router.post("/v1/audio/speech")
     async def audio_speech_create(req: AudioSpeechRequestSchema, request: Request):
@@ -281,7 +320,9 @@ def create_api_router(
 
         body = req.model_dump(exclude_none=True)
         api_use_case.validate_audio_speech_request(body, auth_context)
-        generator = _audio_speech_stream_with_error_handling(body, api_key, client_ip, auth_context)
+        generator = _audio_speech_stream_with_error_handling(
+            body, api_key, client_ip, auth_context, request.method, request.url.path
+        )
         media_type = _audio_speech_media_type(body.get("response_format"))
         return AclosingStreamingResponse(generator, media_type=media_type)
 
@@ -291,6 +332,8 @@ def create_api_router(
         api_key,
         client_ip,
         auth_context,
+        http_method: str,
+        http_path: str,
     ):
         try:
             async with aclosing(
@@ -301,11 +344,16 @@ def create_api_router(
                 async for chunk in stream:
                     yield chunk
         except UpstreamServiceError as e:
+            log_operational_failure(http_method, http_path, e)
             yield openai_stream_error_bytes(_upstream_error_message(e), error_type="server_error")
         except ServiceUnavailableError as e:
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(e.message, error_type="server_error")
+        except AppError as e:
             yield openai_stream_error_bytes(e.message, error_type="server_error")
         except Exception as e:
-            yield openai_stream_error_bytes(str(e), error_type="server_error")
+            log_operational_failure(http_method, http_path, e)
+            yield openai_stream_error_bytes(UNEXPECTED_STUDENT_MESSAGE, error_type="server_error")
 
     @router.post("/v1/audio/transcriptions")
     async def audio_transcriptions_create(request: Request):
@@ -343,7 +391,7 @@ def create_api_router(
         stream_flag = str(fields.get("stream", "")).lower() in {"1", "true", "yes"}
         if stream_flag:
             generator = _audio_transcriptions_stream_with_error_handling(
-                fields, file, api_key, client_ip, auth_context
+                fields, file, api_key, client_ip, auth_context, request.method, request.url.path
             )
             return AclosingStreamingResponse(generator, media_type="text/event-stream")
 
