@@ -131,7 +131,9 @@ def test_one_error_log_under_src_posts_one_signal():
 
 def test_posted_json_matches_the_example_keys():
     example = json.loads(
-        Path("tests/fixtures/signal_body.example.json").read_text(encoding="utf-8")
+        (Path(__file__).resolve().parents[1] / "fixtures" / "signal_body.example.json").read_text(
+            encoding="utf-8"
+        )
     )
     receiver = _SignalsReceiver()
     forwarder = start_signal_forwarding(receiver.url, "router-token")
@@ -142,8 +144,10 @@ def test_posted_json_matches_the_example_keys():
         body = receiver.posts[0]["body"]
         assert body.keys() == example.keys()
         assert len(body) == 5
-        assert body["level"] == "ERROR"
-        assert body["source"] == "vans-coding-router"
+        assert example["level"] == "ERROR"
+        assert example["source"] == ROUTER_SOURCE
+        assert body["level"] == example["level"]
+        assert body["source"] == example["source"]
         logged_at = datetime.fromisoformat(body["log_time"])
         assert logged_at.tzinfo is not None and logged_at.utcoffset() is not None
         assert body["logger_name"] == example["logger_name"]
