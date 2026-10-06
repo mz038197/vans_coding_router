@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from datetime import datetime
@@ -123,6 +124,30 @@ def test_one_error_log_under_src_posts_one_signal():
         logged_at = datetime.fromisoformat(body["log_time"])
         assert logged_at.tzinfo is not None and logged_at.utcoffset() is not None
         assert "Traceback" not in body["message"]
+    finally:
+        forwarder.close()
+        receiver.close()
+
+
+def test_posted_json_matches_the_example_keys():
+    example = json.loads(
+        Path("tests/fixtures/signal_body.example.json").read_text(encoding="utf-8")
+    )
+    receiver = _SignalsReceiver()
+    forwarder = start_signal_forwarding(receiver.url, "router-token")
+    try:
+        logging.getLogger("src.jobs.catalog").error("upstream openrouter did not update")
+        _wait_until(lambda: len(receiver.posts) >= 1)
+
+        body = receiver.posts[0]["body"]
+        assert body.keys() == example.keys()
+        assert len(body) == 5
+        assert body["level"] == "ERROR"
+        assert body["source"] == "vans-coding-router"
+        logged_at = datetime.fromisoformat(body["log_time"])
+        assert logged_at.tzinfo is not None and logged_at.utcoffset() is not None
+        assert body["logger_name"] == example["logger_name"]
+        assert body["message"] == example["message"]
     finally:
         forwarder.close()
         receiver.close()
