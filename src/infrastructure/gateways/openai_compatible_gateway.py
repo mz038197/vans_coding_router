@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from contextlib import aclosing
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -18,7 +19,7 @@ from src.domain.errors import (
 from src.domain.extra_usage import (
     DEFAULT_EXTRA_USAGE_MESSAGE,
     account_credit_remaining_from_credits_payload,
-    included_monthly_usage_from_usage_payload,
+    included_monthly_usage_from_documents,
     is_key_failover_exhaustion,
 )
 from src.infrastructure.config import (
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 _ollama_thinking_cache = OllamaThinkingCache()
 _OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
+_OLLAMA_CLOUD_ME_URL = "https://ollama.com/api/me"
 _OPENROUTER_CREDITS_PATH = "/credits"
 _USAGE_TIMEOUT = httpx.Timeout(2.0)
 _USAGE_CACHE_TTL_SEC = 45.0
@@ -62,7 +64,7 @@ class OpenAICompatibleGateway:
         self._client: httpx.AsyncClient | None = None
         self._usage_client = usage_client
         self._created_usage_client = False
-        self._monthly_usage_cache: dict[int, tuple[float, float]] = {}
+        self._monthly_usage_cache: dict[int, tuple[dict[str, Any], float]] = {}
         self._account_credit_cache: dict[int, tuple[float, float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
@@ -243,7 +245,7 @@ class OpenAICompatibleGateway:
             self._created_usage_client = True
         return self._usage_client
 
-    async def _included_monthly_usage_for_index(self, index: int) -> float | None:
+    async def _included_monthly_usage_for_index(self, index: int) -> dict[str, Any] | None:
         now = time.monotonic()
         cached = self._monthly_usage_cache.get(index)
         if cached is not None and cached[1] > now:
@@ -253,19 +255,29 @@ class OpenAICompatibleGateway:
             self._monthly_usage_cache[index] = (usage, now + _USAGE_CACHE_TTL_SEC)
         return usage
 
-    async def _fetch_included_monthly_usage(self, index: int) -> float | None:
+    async def _fetch_included_monthly_usage(self, index: int) -> dict[str, Any] | None:
         pool = self._ensure_pool()
         if pool is None or not (0 <= index < pool.key_count):
             return None
         api_key = pool.key_at(index)
         if not api_key:
             return None
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
             client = await self._ensure_usage_client()
-            response = await client.get(
-                _OLLAMA_CLOUD_USAGE_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-                timeout=_USAGE_TIMEOUT,
+            account_response, usage_response = await asyncio.gather(
+                client.post(
+                    _OLLAMA_CLOUD_ME_URL,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json={},
+                    timeout=_USAGE_TIMEOUT,
+                ),
+                client.get(
+                    _OLLAMA_CLOUD_USAGE_URL,
+                    params={"range": "30d"},
+                    headers=headers,
+                    timeout=_USAGE_TIMEOUT,
+                ),
             )
         except asyncio.CancelledError:
             raise
@@ -276,13 +288,18 @@ class OpenAICompatibleGateway:
                 index,
             )
             return None
-        if response.status_code >= 400:
+        if account_response.status_code >= 400 or usage_response.status_code >= 400:
             return None
         try:
-            payload = response.json()
+            account_payload = account_response.json()
+            usage_payload = usage_response.json()
         except json.JSONDecodeError:
             return None
-        return included_monthly_usage_from_usage_payload(payload)
+        return included_monthly_usage_from_documents(
+            usage_payload,
+            account_payload,
+            now=datetime.now(timezone.utc),
+        )
 
     async def release_key_quarantine(self, index: int) -> None:
         pool = self._ensure_pool()

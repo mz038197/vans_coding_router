@@ -1617,6 +1617,11 @@
       white-space: nowrap;
     }
 
+    .upstream-monthly-usage {
+      white-space: pre-line;
+      line-height: 1.25;
+    }
+
     .upstream-quarantine-badge {
       color: var(--danger);
       font-size: 0.78rem;

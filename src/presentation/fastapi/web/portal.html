@@ -1364,11 +1364,10 @@
     }
 
     function formatIncludedMonthlyUsage(value) {
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
-        return `月用量 ${pct}%`;
-      }
-      return '月用量無法取得';
+      const summary = value && typeof value.summary === 'string' ? value.summary : '';
+      const resets = value && typeof value.resets === 'string' ? value.resets : '';
+      if (!summary) return '月用量無法取得';
+      return resets ? `${summary}\n${resets}` : summary;
     }
 
     function formatAccountCreditRemaining(value) {

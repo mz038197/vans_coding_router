@@ -24,9 +24,9 @@ _Avoid_: quota full (ambiguous), rate limit, UpstreamBusy, session usage limit (
 The remaining Extra Usage balance for one upstream key. It is a remaining-entitlement, not Extra Usage Exhaustion, Credit Exhaustion, Key Quarantine, Included Monthly Usage, or Account Credit Remaining. It is not shown on the Portal upstream-pool row.
 _Avoid_: credits remaining, quota remaining, Extra Usage Exhaustion (as the displayed number), account balance, session usage, weekly usage, Included Monthly Usage, Account Credit Remaining
 
-**Included Monthly Usage** (Portal: 月用量):
-The included monthly plan usage already consumed for the Ollama account of one upstream key, as the 0–1 fraction `limits.monthly.usage` on that key's usage document. Higher means more of the monthly cap is used. It is not Extra Usage Remaining, not session usage, not Extra Usage Exhaustion, and not Account Credit Remaining.
-_Avoid_: Extra Usage Remaining, weekly usage, quota remaining, session usage, credits, Extra Usage Exhaustion, Account Credit Remaining, 餘額
+**Included Monthly Usage** (Portal: `$X of $Y used` / `Resets in …`):
+The included monthly plan usage already consumed for the Ollama account of one upstream key, as dollars used out of that plan's included monthly amount, plus when that amount resets. Higher dollars mean more of the included amount is used. It is not Extra Usage Remaining, not a used-fraction, not session usage, not Extra Usage Exhaustion, and not Account Credit Remaining.
+_Avoid_: Extra Usage Remaining, weekly usage, quota remaining, session usage, credits, Extra Usage Exhaustion, Account Credit Remaining, 餘額, 月用量 N%
 
 **Account Credit Remaining** (Portal: 餘額):
 The remaining prepaid credit, in dollars, on the OpenRouter account that one upstream key draws from. Every key on that account has the same Account Credit Remaining. Zero and a negative amount are still this balance. It is not Included Monthly Usage, not Extra Usage Remaining, not that key's own spend, and not a per-key spending cap.

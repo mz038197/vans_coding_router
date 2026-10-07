@@ -2037,18 +2037,32 @@ def _ollama_usage_router(tmp_path, monkeypatch, handler, envs: dict[str, str]):
     return client, repo
 
 
-def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeypatch):
-    def handler(request: httpx.Request) -> httpx.Response:
-        key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-        monthly = 0.125 if key == "secret-a" else 0
+def _meter_documents(request: httpx.Request, used_usd: float) -> httpx.Response:
+    from datetime import datetime, timezone
+
+    url = str(request.url)
+    if url == "https://ollama.com/api/me":
+        return httpx.Response(
+            200,
+            json={"Plan": "pro", "renews_at": "2020-01-01T00:00:00Z"},
+        )
+    if url == "https://ollama.com/api/usage?range=30d":
+        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         return httpx.Response(
             200,
             json={
-                "limits": {
-                    "monthly": {"usage": monthly, "models": []},
-                }
+                "from": "2020-01-01T00:00:00Z",
+                "buckets": [{"from": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "usage_usd": used_usd}],
             },
         )
+    return httpx.Response(404, json={"error": "unexpected"})
+
+
+def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+        used = 2.14271 if key == "secret-a" else 0
+        return _meter_documents(request, used)
 
     http, repo = _ollama_usage_router(
         tmp_path,
@@ -2060,7 +2074,10 @@ def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeyp
     response = http.get("/teacher/upstream-pools", cookies=_portal_cookie(repo, teacher))
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert [item["included_monthly_usage"] for item in keys] == [0.125, 0.0]
+    assert [item["included_monthly_usage"]["summary"] for item in keys] == [
+        "$2.14 of $60 used",
+        "$0 of $60 used",
+    ]
     assert "included_weekly_usage" not in keys[0]
     assert [item["in_flight"] for item in keys] == [0, 0]
     assert [item["quarantined"] for item in keys] == [False, False]
@@ -2081,8 +2098,8 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
             if key == "or-secret-a":
                 return httpx.Response(401, json={"error": "unauthorized"})
             return httpx.Response(200, json={"data": {"total_credits": 10, "total_usage": 10.5, "limit_remaining": 1}})
-        if url == "https://ollama.com/api/usage":
-            return httpx.Response(200, json={"limits": {"monthly": {"usage": 0.25, "models": []}}})
+        if url.startswith("https://ollama.com/api/"):
+            return _meter_documents(request, 2.5)
         return httpx.Response(404, json={"error": "unexpected"})
 
     for name, value in {
@@ -2128,7 +2145,7 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
     assert "included_monthly_usage" not in openrouter_keys[1]
     assert [item["in_flight"] for item in openrouter_keys] == [0, 0]
     assert [item["quarantined"] for item in openrouter_keys] == [False, False]
-    assert ollama_keys[0]["included_monthly_usage"] == 0.25
+    assert ollama_keys[0]["included_monthly_usage"]["summary"] == "$2.50 of $60 used"
     assert "account_credit_remaining" not in ollama_keys[0]
     text = response.text
     assert "or-secret-a" not in text
@@ -2141,10 +2158,7 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
         key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
         if key == "secret-a":
             return httpx.Response(401, json={"error": "unauthorized"})
-        return httpx.Response(
-            200,
-            json={"limits": {"monthly": {"usage": 0.08, "models": []}}},
-        )
+        return _meter_documents(request, 0.08)
 
     http, repo = _ollama_usage_router(
         tmp_path,
@@ -2157,6 +2171,6 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
     assert keys[0]["included_monthly_usage"] is None
-    assert keys[1]["included_monthly_usage"] == 0.08
+    assert keys[1]["included_monthly_usage"]["summary"] == "$0.08 of $60 used"
     assert [item["in_flight"] for item in keys] == [0, 0]
 
