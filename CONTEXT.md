@@ -137,7 +137,7 @@ The exchange of an Invite Code plus a Classroom Nickname for a Classroom API Key
 _Avoid_: Guest redeem, shared class-wide API key, teacher long-lived key, dev login, 連線登入 as the name of this path, Pegasi parity for this path, Portal web Nickname Redeem, Cursor Nickname Redeem
 
 **Session Seat Limit** (Portal: 課堂座位):
-A teacher-set maximum of distinct student identities that may redeem a Classroom API Key into one Class Session, by Nickname Redeem, Sign-in Handoff, or Portal Google redeem. Default 60; the teacher may change it. Occupancy is one redemption per user in that sitting. Rejoin with an already-redeemed identity does not take a new seat. A disabled student still occupies a seat. Lowering the limit does not evict. When the limit is reached, new identities are rejected on every redeem path.
+A teacher-set maximum of distinct student identities that may redeem a Classroom API Key into one Class Session, by Nickname Redeem, Sign-in Handoff, or Portal Google redeem. Default 60; the teacher may change it. Occupancy is one redemption per user in that sitting. Rejoin with an already-redeemed identity does not take a new seat. A second live Classroom API Key for that same student in that sitting is still one seat. A disabled student still occupies a seat. Lowering the limit does not evict. When the limit is reached, new identities are rejected on every redeem path.
 _Avoid_: 暱稱座位, nickname-only cap, capping only Nickname Redeem, treating disable as freeing a seat, coupling this limit to open_registration
 
 **Sign-in Handoff**:
@@ -153,8 +153,8 @@ A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_�
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
 
 **Classroom API Key**:
-A per-student credential the router issues for one Class Session. Each service that accepts it checks the router's own issuance. It is distinct from a Personal API Key.
-_Avoid_: Personal API Key, Portal Session, Sign-in Handoff, class-wide shared key, a secret another service resolves by reading the router's key table
+A per-student credential the router issues for one Class Session. One student has at most two live keys for that sitting, and issuing another ends the oldest. Each service that accepts it checks the router's own issuance. It is distinct from a Personal API Key.
+_Avoid_: Personal API Key, Portal Session, Sign-in Handoff, class-wide shared key, a secret another service resolves by reading the router's key table, one live key per student, a key that stays live after a newer one is issued past the two-key limit, a second seat
 
 **Personal API Key** (Portal: 個人 API Key):
 A long-lived key held by one teacher or admin and bound to no Class Session. It has no Classroom Model Choice. A call may name `vcr-auto` or a Model ID on that call's shelf in the holder's Router Model Template. Any other id is refused. An empty shelf refuses that call. When that shelf has at least one Model ID, its list names `vcr-auto` once, first, then those ids in document order. An empty shelf's list names nothing. Only the router checks it. vans-mcp-server and pokemon-world-mcp do not accept it. It is distinct from a Classroom API Key.
