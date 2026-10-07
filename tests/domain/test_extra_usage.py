@@ -148,6 +148,59 @@ def test_maps_settings_meter_and_treats_zero_spend_as_used():
     assert zero["summary"] == "$0 of $300 used"
 
 
+def test_recovers_anniversary_from_the_settings_meter_for_that_signup():
+    now = datetime(2026, 10, 7, 9, 22, tzinfo=timezone.utc)
+    usage = {
+        "from": "2026-09-07T00:00:00Z",
+        "buckets": [
+            {"from": "2026-09-19T00:00:00Z", "usage_usd": 5.53},
+            {"from": "2026-09-20T00:00:00Z", "usage_usd": 0.2},
+            {"from": "2026-09-21T00:00:00Z", "usage_usd": 2.14271},
+        ],
+    }
+    meter = included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "pro", "CreatedAt": "2026-01-19T06:56:45.74848Z"},
+        now=now,
+    )
+    assert meter["summary"] == "$2.14 of $60 used"
+    assert meter["resets"] == "Resets in 1 week."
+    assert meter["resets_at"] == "2026-10-21T01:23:55Z"
+    later = included_monthly_usage_from_documents(
+        {
+            "from": "2026-09-07T00:00:00Z",
+            "buckets": usage["buckets"] + [{"from": "2026-10-08T00:00:00Z", "usage_usd": 1}],
+        },
+        {"Plan": "pro", "CreatedAt": "2026-01-19T06:56:45.74848Z"},
+        now=datetime(2026, 10, 8, 9, 22, tzinfo=timezone.utc),
+    )
+    assert later["summary"] == "$3.14 of $60 used"
+    assert later["resets_at"] == "2026-10-21T01:23:55Z"
+    assert included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "pro", "CreatedAt": "2026-02-02T00:00:00Z"},
+        now=now,
+    ) is None
+
+
+def test_recovers_second_account_anniversary_from_its_settings_meter():
+    now = datetime(2026, 10, 7, 10, 6, tzinfo=timezone.utc)
+    meter = included_monthly_usage_from_documents(
+        {
+            "from": "2026-09-07T00:00:00Z",
+            "buckets": [
+                {"from": "2026-09-16T00:00:00Z", "usage_usd": 40},
+                {"from": "2026-09-17T00:00:00Z", "usage_usd": 11.15},
+            ],
+        },
+        {"Plan": "pro", "Name": "vanscoding"},
+        now=now,
+    )
+    assert meter["summary"] == "$11.15 of $60 used"
+    assert meter["resets"] == "Resets in 1 week."
+    assert meter["resets_at"] == "2026-10-17T12:02:38Z"
+
+
 def test_rejects_meter_when_plan_or_window_cannot_price_the_month():
     now = datetime(2026, 10, 7, 9, 22, tzinfo=timezone.utc)
     usage = {

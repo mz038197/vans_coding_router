@@ -167,12 +167,40 @@ def included_monthly_usage_from_documents(
     }
 
 
+# Reversed from settings meters on 2026-10-07. Signup CreatedAt is not the
+# anniversary: the first account's 19th summed to $7.87, while $2.14 matched
+# the 21st at 01:23:55Z. The second account's meter is $11.15 of $60, resetting
+# at 2026-10-17T12:02:38Z. Name or CreatedAt only identifies the account.
+_RECOVERED_ANNIVERSARIES = (
+    {
+        "name": "mz038197",
+        "created_at": "2026-01-19T06:56:45.74848Z",
+        "anniversary": "2026-01-21T01:23:55Z",
+    },
+    {
+        "name": "vanscoding",
+        "anniversary": "2026-01-17T12:02:38Z",
+    },
+)
+
+
 def _subscription_anchor(account: dict[str, Any]) -> datetime | None:
     """Subscription anniversary. Account CreatedAt is not this instant."""
     for key in ("SubscriptionRenewsAt", "renews_at"):
         parsed = _parse_time(account.get(key))
         if parsed is not None:
             return parsed
+    return _recovered_anchor(account)
+
+
+def _recovered_anchor(account: dict[str, Any]) -> datetime | None:
+    created = _parse_time(account.get("CreatedAt"))
+    name = account.get("Name", account.get("name"))
+    for record in _RECOVERED_ANNIVERSARIES:
+        created_match = created is not None and created == _parse_time(record.get("created_at"))
+        name_match = isinstance(name, str) and name == record.get("name")
+        if created_match or name_match:
+            return _parse_time(record["anniversary"])
     return None
 
 
