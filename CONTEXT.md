@@ -152,9 +152,13 @@ _Avoid_: session cookie, login cookie, Class Session, Sign-in Handoff
 A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_…`). In the Vans VS Code extension the default redeem is Nickname Redeem; Google users may still redeem with Sign-in Handoff (extension, secondary) or a Portal session (website). Portal web redeem stays Google-only.
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname
 
+**Classroom API Key**:
+A per-student credential the router issues for one Class Session. Each service that accepts it checks the router's own issuance. It is distinct from a Personal API Key.
+_Avoid_: Personal API Key, Portal Session, Sign-in Handoff, class-wide shared key, a secret another service resolves by reading the router's key table
+
 **Personal API Key** (Portal: 個人 API Key):
-A long-lived key held by one teacher or admin and bound to no Class Session. It has no Classroom Model Choice. A call may name `vcr-auto` or a Model ID on that call's shelf in the holder's Router Model Template. Any other id is refused. An empty shelf refuses that call. When that shelf has at least one Model ID, its list names `vcr-auto` once, first, then those ids in document order. An empty shelf's list names nothing. It is not a Classroom API Key.
-_Avoid_: admin key, 老師個人金鑰, teacher long-lived key, dev key, upstream key, a provider capability list as its speech permission, forwarding a model id that is not on that shelf, an empty shelf still accepting the call
+A long-lived key held by one teacher or admin and bound to no Class Session. It has no Classroom Model Choice. A call may name `vcr-auto` or a Model ID on that call's shelf in the holder's Router Model Template. Any other id is refused. An empty shelf refuses that call. When that shelf has at least one Model ID, its list names `vcr-auto` once, first, then those ids in document order. An empty shelf's list names nothing. Only the router checks it. vans-mcp-server and pokemon-world-mcp do not accept it. It is distinct from a Classroom API Key.
+_Avoid_: admin key, 老師個人金鑰, teacher long-lived key, dev key, upstream key, Classroom API Key, a credential accepted by vans-mcp-server or pokemon-world-mcp, a provider capability list as its speech permission, forwarding a model id that is not on that shelf, an empty shelf still accepting the call
 
 **Class Session**:
 A teacher-managed classroom instance under a Class: invite lifecycle, Session Seat Limit, Session Chat Language Models, Classroom Model Choice, capability switches, and the optional Course Catalog for that sitting. Decision, Speech, Image Generation, and Speech Transcription are carried by the shelf Model IDs inside Session Chat Language Models. Prompt logging stays a capability switch. It is not the student project folder and not a materials CMS beyond the catalog attachment. Ending the sitting expires Classroom API Keys: students cannot read Course Catalog or keyed `GET /extension/chat-language-models`, same as they cannot call `/v1`.
