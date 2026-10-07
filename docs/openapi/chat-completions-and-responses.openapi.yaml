@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Vans Coding Router — Chat Completions and Responses
-  version: "1.0.0"
+  title: Vans Coding Router — Chat Completions, Responses, and Decisions
+  version: "1.1.0"
   description: |
-    OpenAI-compatible subset for third-party clients.
+    OpenAI-compatible subset for third-party clients, plus Decision.
 
     Authenticate with `Authorization: Bearer <api_key>` or `X-API-Key`.
     `model` is a Model ID of the form `provider@upstream_model`
@@ -19,6 +19,11 @@ info:
       the client receives `summary` entries of `{ "type": "summary_text", "text": "..." }`.
       Matching stream events are rewritten from `response.reasoning_text.*` to
       `response.reasoning_summary_text.*`.
+
+    Decision is a separate call. It is not a chat completion. A Decision Request
+    sends only `model`, `state`, and `questions`. The reply is the upstream
+    decision body (answers, model, usage), not assistant text. Extra JSON fields
+    are dropped before the provider sees the call.
 
     Non-streaming failures use the OpenAI error object and an HTTP error status.
     Streaming failures stay HTTP 200 and put the readable message in the stream
@@ -40,6 +45,11 @@ tags:
     description: OpenAI Chat Completions.
   - name: Responses
     description: OpenAI Responses. Stateful `previous_response_id` is not supported.
+  - name: Decisions
+    description: |
+      Decision Requests. A Classroom API Key may call this when the sitting has
+      at least one Decision Model checked. A Personal API Key uses its holder's
+      Router Model Template. `vcr-auto` walks that decision shelf.
 
 paths:
   /v1/chat/completions:
@@ -416,6 +426,197 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenAIError"
+
+  /v1/decisions:
+    post:
+      tags: [Decisions]
+      operationId: createDecision
+      summary: Create a decision
+      description: |
+        One Decision Request. The router forwards only `model`, `state`, and
+        `questions`. `provider`, `user`, `trace`, and `sessionId` are ignored.
+        There is no stream.
+
+        `model` is a Decision Model ID (`provider@upstream_model`) or `vcr-auto`.
+        Which ids a Classroom API Key may name follows that sitting's Classroom
+        Model Choice: Picked Models names a checked Decision Model; Automatic
+        Models names only `vcr-auto`; when no choice is stored, either is accepted.
+        A Personal API Key may name `vcr-auto` or a Decision Model on its template.
+        `vcr-auto` walks the decision shelf and the reply is still the upstream body.
+
+        The `model` string on the reply is the upstream model name. It is not a
+        Model ID and does not authorize a later request.
+
+        A provider refusal that was sent upstream (Decision Refusal) is returned
+        as that refusal, with the provider message. A router refusal before any
+        upstream call is `decision_disabled` or `model_not_allowed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionRequest"
+            examples:
+              noul:
+                summary: One named question
+                value:
+                  model: openrouter@typesafe/jev-1.13
+                  state: 付款失敗三天了
+                  questions:
+                    urgent:
+                      type: noul
+                      instructions: 這則訊息急迫嗎？
+              auto:
+                summary: Walk the decision shelf
+                value:
+                  model: vcr-auto
+                  state: {}
+                  questions:
+                    urgent:
+                      type: noul
+                      instructions: 這則訊息急迫嗎？
+      responses:
+        "200":
+          description: Upstream decision body for this call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecisionResponse"
+              example:
+                id: gen-dec-1
+                model: typesafe/jev-1.13-20260917
+                provider: TypeSafe
+                answers:
+                  urgent:
+                    type: noul
+                    noul: 0.91
+                usage:
+                  input_tokens: 275
+                  output_tokens: 20
+                  cost: 0.00003
+        "400":
+          description: |
+            Invalid Model ID, or a Decision Refusal from the provider.
+            A provider refusal keeps the provider message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              examples:
+                invalidModel:
+                  summary: Model ID is not provider@upstream_model
+                  value:
+                    error:
+                      message: Invalid model id
+                      type: invalid_request_error
+                      param: model
+                      code: invalid_model_id
+                refusal:
+                  summary: Provider refused the questions
+                  value:
+                    error:
+                      message: questions must include type
+                      type: server_error
+                      param: null
+                      code: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: Upstream entitlement refusal (for example Extra Usage exhausted). Message is the provider text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: this model uses extra usage only and your extra usage balance is empty
+                  type: server_error
+                  param: null
+                  code: null
+        "403":
+          description: |
+            Decision is off for this key, or the Model ID is not one this key may name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              examples:
+                off:
+                  summary: No Decision Model is checked
+                  value:
+                    error:
+                      message: 此課堂未開放決策
+                      type: api_error
+                      param: null
+                      code: decision_disabled
+                notAllowed:
+                  summary: Model ID is not a Decision Model this key may name
+                  value:
+                    error:
+                      message: 此課堂未開放此模型
+                      type: invalid_request_error
+                      param: model
+                      code: model_not_allowed
+        "502":
+          description: Upstream provider error. Upstream HTTP 401/403 are also returned as 502.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              example:
+                error:
+                  message: upstream failed
+                  type: server_error
+                  param: null
+                  code: null
+        "503":
+          description: Upstream busy or service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+
+  /v1/decisions/models:
+    get:
+      tags: [Decisions]
+      operationId: listDecisionModels
+      summary: List decision models
+      description: |
+        Student decision list. It is not the chat model list.
+
+        A Classroom API Key under Picked Models receives the sitting's Decision
+        Model IDs in document order. Under Automatic Models, and when no choice
+        is stored, the list names only `vcr-auto`. That read still succeeds when
+        the decision shelf is empty. An empty shelf does not turn this read into
+        an error; the Decision call itself stays off until a Decision Model is checked.
+
+        A Personal API Key receives `vcr-auto` first, then the Decision Model IDs
+        on that holder's template, when the shelf has at least one. An empty
+        template shelf returns an empty list.
+      responses:
+        "200":
+          description: OpenAI model list of ids this key may name on a Decision Request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+              examples:
+                picked:
+                  summary: Picked Models
+                  value:
+                    object: list
+                    data:
+                      - id: openrouter@typesafe/jev-1.13
+                        object: model
+                automatic:
+                  summary: Automatic Models, or no choice stored
+                  value:
+                    object: list
+                    data:
+                      - id: vcr-auto
+                        object: model
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
 components:
   securitySchemes:
@@ -849,11 +1050,91 @@ components:
               type: string
             type:
               type: string
-              description: "`invalid_request_error` or `server_error`."
+              description: "`invalid_request_error`, `server_error`, or `api_error`."
             param:
               type: [string, "null"]
             code:
               type: [string, "null"]
+
+    DecisionRequest:
+      type: object
+      description: |
+        Fields other than `model`, `state`, and `questions` are accepted and dropped.
+        `state` and `questions` are forwarded unchanged. The router does not
+        validate their shape.
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: |
+            Decision Model ID (`provider@upstream_model`) or `vcr-auto`.
+          examples:
+            - openrouter@typesafe/jev-1.13
+            - vcr-auto
+        state:
+          description: State for this call only. Not stored on the Class Session.
+        questions:
+          description: |
+            Typed questions for this call only. A typical value is an object
+            keyed by question name; each value carries its own `type`.
+          examples:
+            - urgent:
+                type: noul
+                instructions: 這則訊息急迫嗎？
+
+    DecisionResponse:
+      type: object
+      description: |
+        Upstream decision body, returned as the provider sent it.
+        `model` here is the upstream model string, not a Model ID.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+          description: Upstream model string. Not a Model ID.
+        provider:
+          type: string
+        answers:
+          type: object
+          additionalProperties: true
+          description: Answers keyed the same way as the request questions.
+        usage:
+          $ref: "#/components/schemas/DecisionUsage"
+
+    DecisionUsage:
+      type: object
+      additionalProperties: true
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        cost:
+          type: number
+
+    ModelList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelListEntry"
+
+    ModelListEntry:
+      type: object
+      required: [id, object]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: model
 
     ValidationError:
       type: object
