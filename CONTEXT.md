@@ -157,8 +157,8 @@ A per-student credential the router issues for one Class Session. It expires at 
 _Avoid_: Personal API Key, Portal Session, Sign-in Handoff, class-wide shared key, a secret another service resolves by reading the router's key table, one live key per student, a key that stays live after a newer one is issued past the two-key limit, a second seat, an expiry that follows a later change to the Class Session, a new redeem to restore a key after the sitting is opened
 
 **Revocation List**:
-The set of before-expiry refusals the router publishes. vans-mcp-server and pokemon-world-mcp each keep a copy and refresh it from the router. A student call to those services uses that copy. The router's own calls use its records.
-_Avoid_: a question to the router on each student call, a push from the router, those services reading the router's tables
+The set of before-expiry refusals the router publishes. vans-mcp-server and pokemon-world-mcp each keep a copy and refresh it from the router. A student call to those services uses that copy. A service with no copy refuses student calls. A copy older than 600 seconds is not used, and the service then refuses every student call. That bound is the same during a sitting. The router's own calls use its records.
+_Avoid_: a question to the router on each student call, a push from the router, those services reading the router's tables, a longer bound during a sitting
 
 **Personal API Key** (Portal: 個人 API Key):
 A long-lived key held by one teacher or admin and bound to no Class Session. It has no Classroom Model Choice. A call may name `vcr-auto` or a Model ID on that call's shelf in the holder's Router Model Template. Any other id is refused. An empty shelf refuses that call. When that shelf has at least one Model ID, its list names `vcr-auto` once, first, then those ids in document order. An empty shelf's list names nothing. Only the router checks it. vans-mcp-server and pokemon-world-mcp do not accept it. It is distinct from a Classroom API Key.
