@@ -165,7 +165,7 @@ The notice a student sees when a Classroom API Key is refused before its expiry.
 _Avoid_: 無效的 API 金鑰 for every cause, a notice that names another student, a nickname or email on the Revocation List, 已在其他電腦兌換 while the student, the Class, or the sitting already blocks a new redeem
 
 **Revocation List Credential**:
-The one secret vans-mcp-server and pokemon-world-mcp use to fetch the Revocation List. It is not a Classroom API Key or a Personal API Key.
+The one secret vans-mcp-server and pokemon-world-mcp use to fetch the Revocation List, and to ask the router to check a legacy Classroom API Key. The legacy key is the request body, not the secret. It is not a Classroom API Key or a Personal API Key.
 _Avoid_: a student bearer, a public read, a database connection string
 
 **Personal API Key** (Portal: 個人 API Key):
