@@ -1,6 +1,6 @@
 # A Revocation List entry names one of four subjects
 
-An entry names one Classroom API Key, one student, one Class Session, or one Class. The key names the student, the sitting, and the Class, plus its own identity, its expiry, and the router as issuer. It does not carry a nickname, an email, or a personal name. Opening a sitting removes the sitting's entry. Enabling a student, or a Class being active with its end still ahead, removes that entry. A key ended because a newer one was issued stays named until its own expiry; after that, expiry rejects it and the entry need not stay.
+An entry names one Classroom API Key, one student, one Class Session, or one Class. That kind is the Key Refusal. The list does not carry a separate reason or a nickname, email, or personal name. The key names the student, the sitting, and the Class, plus its own identity, its expiry, and the router as issuer. It does not carry a nickname, an email, or a personal name. Opening a sitting removes the sitting's entry. Enabling a student, or a Class being active with its end still ahead, removes that entry. A key ended because a newer one was issued stays named until its own expiry; after that, expiry rejects it and the entry need not stay.
 
 ## Considered Options
 
