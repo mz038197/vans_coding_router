@@ -81,6 +81,16 @@ def _classroom_key(client, repo) -> tuple[str, dict, dict, dict]:
                         "maxInputTokens": 1,
                         "maxOutputTokens": 1,
                     },
+                    {
+                        "id": "openrouter@openai/text-embedding-3-small",
+                        "name": "embed",
+                        "embeddingsShelf": True,
+                        "thinking": False,
+                        "vision": False,
+                        "toolCalling": False,
+                        "maxInputTokens": 1,
+                        "maxOutputTokens": 1,
+                    },
                 ],
             }
         ],
@@ -108,6 +118,10 @@ def test_classroom_key_model_lists_name_only_vcr_auto(tmp_path):
     images = client.get("/v1/images/models", headers=headers)
     assert images.status_code == 200
     assert images.json()["data"] == [{"id": "vcr-auto", "object": "model"}]
+
+    embeddings = client.get("/v1/embeddings/models", headers=headers)
+    assert embeddings.status_code == 200
+    assert embeddings.json()["data"] == [{"id": "vcr-auto", "object": "model"}]
 
     vscode = client.get("/extension/chat-language-models", headers=headers)
     assert vscode.status_code == 200

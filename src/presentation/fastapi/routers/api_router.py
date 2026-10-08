@@ -251,6 +251,33 @@ def create_api_router(
         data = await api_use_case.images_models(api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
+    @router.post("/v1/embeddings")
+    async def embeddings_create(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        body = await request.json()
+        data = await api_use_case.embeddings_create(body, api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.get("/v1/embeddings/models")
+    async def embeddings_models(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        data = await api_use_case.embeddings_models(api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
     async def _shelf_models(request: Request, loader):
         api_key = _extract_api_key(request)
         client_ip = _client_ip(request)

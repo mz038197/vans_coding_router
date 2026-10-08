@@ -21,6 +21,7 @@ IMAGE_ID = "openrouter@black-forest-labs/flux.2-pro"
 SPEECH_ID = "openrouter@speech-model"
 TRANSCRIPTION_ID = "openrouter@transcribe-model"
 DECISION_ID = "openrouter@typesafe/jev-1.13"
+EMBEDDINGS_ID = "openrouter@openai/text-embedding-3-small"
 
 
 def _client(tmp_path) -> tuple[TestClient, SqliteRouterRepository]:
@@ -71,6 +72,7 @@ def _sitting(client, repo, *, choice: str | None = "automatic"):
                     {"id": SPEECH_ID, "name": "speech", "speechShelf": True},
                     {"id": TRANSCRIPTION_ID, "name": "transcribe", "speechTranscriptionShelf": True},
                     {"id": DECISION_ID, "name": "jev", "decisionShelf": True},
+                    {"id": EMBEDDINGS_ID, "name": "embed", "embeddingsShelf": True},
                 ],
             }
         ],
@@ -230,6 +232,7 @@ def test_image_speech_transcription_and_decision_follow_the_choice(tmp_path):
     assert _ids(client.get("/v1/audio/speech/models", headers=headers).json()) == [SPEECH_ID]
     assert _ids(client.get("/v1/audio/transcriptions/models", headers=headers).json()) == [TRANSCRIPTION_ID]
     assert _ids(client.get("/v1/decisions/models", headers=headers).json()) == [DECISION_ID]
+    assert _ids(client.get("/v1/embeddings/models", headers=headers).json()) == [EMBEDDINGS_ID]
 
     image = client.post("/v1/images", headers=headers, json={"model": "vcr-auto", "prompt": "cat"})
     assert image.status_code == 403
@@ -251,6 +254,7 @@ def test_image_speech_transcription_and_decision_follow_the_choice(tmp_path):
     assert _ids(client.get("/v1/images/models", headers=headers).json()) == ["vcr-auto"]
     assert _ids(client.get("/v1/audio/speech/models", headers=headers).json()) == ["vcr-auto"]
     assert _ids(client.get("/v1/decisions/models", headers=headers).json()) == ["vcr-auto"]
+    assert _ids(client.get("/v1/embeddings/models", headers=headers).json()) == ["vcr-auto"]
     named_image = client.post(
         "/v1/images",
         headers=headers,
@@ -288,6 +292,8 @@ def test_empty_speech_decision_lists_still_succeed(tmp_path):
     assert _ids(decision.json()) == ["vcr-auto"]
     images = client.get("/v1/images/models", headers=headers)
     assert images.status_code == 403
+    embeddings = client.get("/v1/embeddings/models", headers=headers)
+    assert embeddings.status_code == 403
     refused = client.post(
         "/v1/audio/speech",
         headers=headers,

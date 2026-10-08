@@ -375,6 +375,7 @@
                   <option value="text">文字</option>
                   <option value="decisions">決策</option>
                   <option value="image">生圖</option>
+                  <option value="embeddings">嵌入</option>
                   <option value="speech">語音</option>
                   <option value="speech_transcription">語音轉寫</option>
                 </select>
@@ -877,7 +878,7 @@
 
     function sessionTextModels(session) {
       const rows = [];
-      const shelfFlags = ['decisionShelf', 'imageShelf', 'speechShelf', 'speechTranscriptionShelf'];
+      const shelfFlags = ['decisionShelf', 'imageShelf', 'embeddingsShelf', 'speechShelf', 'speechTranscriptionShelf'];
       for (const provider of session.session_chat_language_models || []) {
         for (const model of (provider && provider.models) || []) {
           if (!model || !model.id) continue;
@@ -978,6 +979,7 @@
 
     function sessionCapabilitiesCell(classId, session, allowOwnerActions) {
       const imageOn = sessionHasShelf(session, 'imageShelf');
+      const embeddingsOn = sessionHasShelf(session, 'embeddingsShelf');
       const ttsOn = sessionHasShelf(session, 'speechShelf');
       const speechOn = sessionHasShelf(session, 'speechTranscriptionShelf');
       const promptOn = sessionPromptLoggingEnabled(session);
@@ -987,7 +989,7 @@
         ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
         : chip('Prompt', promptOn, '');
       return `<div class="session-capabilities${allowOwnerActions ? '' : ' session-capabilities-readonly'}">
-        ${chip('生圖', imageOn, '')}${chip('語音', ttsOn, '')}${chip('語音轉寫', speechOn, '上傳音檔／即時語音轉寫')}${chip('決策', decisionOn, '決策模型')}${prompt}
+        ${chip('生圖', imageOn, '')}${chip('嵌入', embeddingsOn, '')}${chip('語音', ttsOn, '')}${chip('語音轉寫', speechOn, '上傳音檔／即時語音轉寫')}${chip('決策', decisionOn, '決策模型')}${prompt}
       </div>`;
     }
 
@@ -1739,6 +1741,7 @@
       '/v1/chat/completions': ['chat-completions', 'tag-endpoint-chat'],
       '/v1/responses': ['responses', 'tag-endpoint-responses'],
       '/v1/images': ['images', 'tag-endpoint-images'],
+      '/v1/embeddings': ['embeddings', 'tag-endpoint-embeddings'],
       '/v1/audio/speech': ['audio-speech', 'tag-endpoint-audio'],
     };
 
@@ -2978,6 +2981,7 @@ snippets:
       { id: 'text', label: '文字' },
       { id: 'decisions', label: '決策' },
       { id: 'image', label: '生圖' },
+      { id: 'embeddings', label: '嵌入' },
       { id: 'speech', label: '語音' },
       { id: 'speech_transcription', label: '語音轉寫' },
     ];
@@ -3195,6 +3199,7 @@ snippets:
     function clearShelfFlags(model) {
       delete model.decisionShelf;
       delete model.imageShelf;
+      delete model.embeddingsShelf;
       delete model.speechShelf;
       delete model.speechTranscriptionShelf;
     }
@@ -3203,6 +3208,7 @@ snippets:
       clearShelfFlags(model);
       if (shelf === 'decisions') model.decisionShelf = true;
       else if (shelf === 'image') model.imageShelf = true;
+      else if (shelf === 'embeddings') model.embeddingsShelf = true;
       else if (shelf === 'speech') model.speechShelf = true;
       else if (shelf === 'speech_transcription') model.speechTranscriptionShelf = true;
     }
@@ -3211,6 +3217,7 @@ snippets:
       if (!model) return 'text';
       if (model.decisionShelf === true) return 'decisions';
       if (model.imageShelf === true) return 'image';
+      if (model.embeddingsShelf === true) return 'embeddings';
       if (model.speechShelf === true) return 'speech';
       if (model.speechTranscriptionShelf === true) return 'speech_transcription';
       return 'text';
@@ -3225,7 +3232,7 @@ snippets:
 
     function shelfChoicesForProvider(provider) {
       const kindSplit = sessionChatProviderGroups.kindSplit || [];
-      if (kindSplit.includes(provider)) return ['text', 'decisions', 'image', 'speech', 'speech_transcription'];
+      if (kindSplit.includes(provider)) return ['text', 'decisions', 'image', 'embeddings', 'speech', 'speech_transcription'];
       return ['all'];
     }
 
@@ -3239,6 +3246,7 @@ snippets:
         text: '文字',
         decisions: '決策',
         image: '生圖',
+        embeddings: '嵌入',
         speech: '語音',
         speech_transcription: '語音轉寫',
         all: '全部',
@@ -3422,7 +3430,7 @@ snippets:
     }
 
     async function loadSessionChatModelsCatalog(outputModalities) {
-      const known = ['text', 'decisions', 'image', 'speech', 'speech_transcription', 'all'];
+      const known = ['text', 'decisions', 'image', 'embeddings', 'speech', 'speech_transcription', 'all'];
       const shelf = known.includes(outputModalities) ? outputModalities : 'text';
       const requestId = ++sessionChatModelsCatalogRequest;
       try {

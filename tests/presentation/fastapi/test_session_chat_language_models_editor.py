@@ -499,6 +499,10 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
             "object": "list",
             "data": [{"id": "openai/whisper-large-v3", "name": "Whisper"}],
         },
+        "embeddings": {
+            "object": "list",
+            "data": [{"id": "openai/text-embedding-3-small", "name": "Embed"}],
+        },
     }
     client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     teacher, _, _ = _owner_session(repo)
@@ -530,6 +534,16 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert transcription.json()["providers"] == ["openrouter"]
     assert [item["id"] for item in transcription.json()["models"]] == [
         "openrouter@openai/whisper-large-v3"
+    ]
+
+    embeddings = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=embeddings",
+        cookies=cookies,
+    )
+    assert embeddings.status_code == 200
+    assert embeddings.json()["providers"] == ["openrouter"]
+    assert [item["id"] for item in embeddings.json()["models"]] == [
+        "openrouter@openai/text-embedding-3-small"
     ]
 
 

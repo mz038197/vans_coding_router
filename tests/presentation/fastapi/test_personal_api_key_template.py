@@ -23,6 +23,8 @@ SPEECH_SECOND = "openai@a-speech"
 TRANSCRIPTION_ID = "openai@gpt-transcribe"
 DECISION_FIRST = "openrouter@z-decision"
 DECISION_SECOND = "openrouter@a-decision"
+EMBEDDINGS_FIRST = "openrouter@z-embed"
+EMBEDDINGS_SECOND = "openrouter@a-embed"
 CATALOG_CHAT = "catalog-chat"
 CATALOG_IMAGE = "catalog-image"
 
@@ -93,6 +95,7 @@ def test_personal_key_lists_follow_each_template_shelf(tmp_path):
                     _model(IMAGE_FIRST, imageShelf=True),
                     _model(SPEECH_FIRST, speechShelf=True),
                     _model(DECISION_FIRST, decisionShelf=True),
+                    _model(EMBEDDINGS_FIRST, embeddingsShelf=True),
                 ],
             },
             {
@@ -103,6 +106,7 @@ def test_personal_key_lists_follow_each_template_shelf(tmp_path):
                     _model(SPEECH_SECOND, speechShelf=True),
                     _model(TRANSCRIPTION_ID, speechTranscriptionShelf=True),
                     _model(DECISION_SECOND, decisionShelf=True),
+                    _model(EMBEDDINGS_SECOND, embeddingsShelf=True),
                 ],
             },
         ],
@@ -133,6 +137,11 @@ def test_personal_key_lists_follow_each_template_shelf(tmp_path):
         DECISION_FIRST,
         DECISION_SECOND,
     ]
+    assert _ids(client.get("/v1/embeddings/models", headers=headers).json()) == [
+        "vcr-auto",
+        EMBEDDINGS_FIRST,
+        EMBEDDINGS_SECOND,
+    ]
     assert CATALOG_CHAT not in client.get("/v1/models", headers=headers).text
     assert CATALOG_IMAGE not in client.get("/v1/images/models", headers=headers).text
     assert gateway.catalog_reads == 0
@@ -159,6 +168,7 @@ def _shelf_document() -> list[dict]:
                 _model(SPEECH_FIRST, speechShelf=True),
                 _model(TRANSCRIPTION_ID, speechTranscriptionShelf=True),
                 _model(DECISION_FIRST, decisionShelf=True),
+                _model(EMBEDDINGS_FIRST, embeddingsShelf=True),
             ],
         }
     ]
@@ -235,6 +245,15 @@ def test_personal_key_accepts_vcr_auto_or_a_model_on_that_shelf(tmp_path):
     assert decision.status_code == 200
     assert gateway.last_decision_body["model"] == DECISION_FIRST
 
+    embeddings = client.post(
+        "/v1/embeddings",
+        headers=headers,
+        json={"model": EMBEDDINGS_FIRST, "input": "embed me"},
+    )
+    assert embeddings.status_code == 200
+    assert gateway.last_embeddings_body["model"] == EMBEDDINGS_FIRST
+    assert gateway.last_embeddings_body["input"] == "embed me"
+
     off_shelf = client.post(
         "/v1/chat/completions",
         headers=headers,
@@ -262,16 +281,19 @@ def test_personal_key_empty_shelf_lists_nothing_and_refuses_the_call(tmp_path):
     speech_list = client.get("/v1/audio/speech/models", headers=headers)
     transcription_list = client.get("/v1/audio/transcriptions/models", headers=headers)
     decision_list = client.get("/v1/decisions/models", headers=headers)
+    embeddings_list = client.get("/v1/embeddings/models", headers=headers)
     assert chat_list.status_code == 200
     assert image_list.status_code == 200
     assert speech_list.status_code == 200
     assert transcription_list.status_code == 200
     assert decision_list.status_code == 200
+    assert embeddings_list.status_code == 200
     assert _ids(chat_list.json()) == []
     assert _ids(image_list.json()) == []
     assert _ids(speech_list.json()) == []
     assert _ids(transcription_list.json()) == []
     assert _ids(decision_list.json()) == []
+    assert _ids(embeddings_list.json()) == []
     assert gateway.catalog_reads == 0
 
     chat = client.post(
@@ -295,6 +317,13 @@ def test_personal_key_empty_shelf_lists_nothing_and_refuses_the_call(tmp_path):
     )
     assert image.status_code == 403
     assert image.json()["error"]["code"] == "image_generation_disabled"
+    embeddings = client.post(
+        "/v1/embeddings",
+        headers=headers,
+        json={"model": "vcr-auto", "input": "cat"},
+    )
+    assert embeddings.status_code == 403
+    assert embeddings.json()["error"]["code"] == "embeddings_disabled"
     speech = client.post(
         "/v1/audio/speech",
         headers=headers,

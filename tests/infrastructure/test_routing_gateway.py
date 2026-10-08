@@ -69,6 +69,18 @@ class FakeGateway:
     async def images_models(self) -> dict[str, Any]:
         return {"object": "list", "data": [{"id": "flux.2-pro"}]}
 
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.last_embeddings_body = body
+        return {
+            "object": "list",
+            "model": "openai/text-embedding-3-small",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.25, -0.5]}],
+            "usage": {"prompt_tokens": 2, "total_tokens": 2},
+        }
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        return {"object": "list", "data": [{"id": "openai/text-embedding-3-small"}]}
+
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         self.requests.append(str(body.get("model")))
         yield b"\x00\x01"

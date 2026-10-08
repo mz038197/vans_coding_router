@@ -214,6 +214,18 @@ class FakeLLMGateway:
             b'event: response.completed\ndata: {"type":"response.completed"}\n\n',
         ]
         self.last_images_body: dict[str, Any] | None = None
+        self.last_embeddings_body: dict[str, Any] | None = None
+        self.embeddings_error: Exception | None = None
+        self.embeddings_response = {
+            "object": "list",
+            "model": "openai/text-embedding-3-small",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.25, -0.5]}],
+            "usage": {"prompt_tokens": 4, "total_tokens": 4},
+        }
+        self.embeddings_models_response = {
+            "object": "list",
+            "data": [{"id": "openai/text-embedding-3-small", "object": "model"}],
+        }
         self.images_response = {
             "created": 123,
             "data": [{"b64_json": "abc123"}],
@@ -293,6 +305,15 @@ class FakeLLMGateway:
 
     async def images_models(self) -> dict[str, Any]:
         return self.images_models_response
+
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.last_embeddings_body = body
+        if self.embeddings_error is not None:
+            raise self.embeddings_error
+        return self.embeddings_response
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        return self.embeddings_models_response
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         self.last_audio_speech_body = body

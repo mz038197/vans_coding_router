@@ -7,6 +7,7 @@ from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
     AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
+    EMBEDDINGS_PATH,
     IMAGES_PATH,
     RESPONSES_PATH,
     build_message_preview,
@@ -20,6 +21,7 @@ from src.infrastructure.logging.message_preview import (
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.decision_model import DECISION_SHELF_KEY
 from src.domain.model_shelf import (
+    EMBEDDINGS_SHELF_KEY,
     IMAGE_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
@@ -33,6 +35,7 @@ from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import allowlist_from_document, is_model_allowed
 from src.domain.errors import (
     DecisionDisabledError,
+    EmbeddingsDisabledError,
     ImageGenerationDisabledError,
     ModelNotAllowedError,
     SpeechTranscriptionDisabledError,
@@ -248,6 +251,68 @@ class ApiUseCase:
             student_list_ids(self._classroom_model_choice(auth_context), ids)
         )
 
+    async def embeddings_create(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        self._assert_embeddings_allowed(auth_context, body.get("model"))
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            return await self._embeddings_vcr_auto(body, api_key, client_ip, auth_context)
+        response = await self.gateway.embeddings_create(body)
+        self._log_embeddings_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(response),
+        )
+        return response
+
+    async def _embeddings_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk()
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.embeddings_create({**body, "model": model_id})
+
+        hit = await walker.run(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY), call)
+        self._log_embeddings_request(
+            {**body, "model": hit.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(hit.value),
+        )
+        return hit.value
+
+    async def embeddings_models(
+        self,
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        del api_key, client_ip
+        if self._held_personal_key(auth_context):
+            return self._openai_model_list(
+                self._personal_list_ids(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY))
+            )
+        if self._is_personal_api_key(auth_context):
+            return await self.gateway.embeddings_models()
+        ids = self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY)
+        if not ids:
+            raise EmbeddingsDisabledError()
+        return self._openai_model_list(
+            student_list_ids(self._classroom_model_choice(auth_context), ids)
+        )
+
     async def speech_models(
         self,
         auth_context: AuthContext | None = None,
@@ -327,6 +392,18 @@ class ApiUseCase:
             IMAGE_SHELF_KEY,
             model_id,
             ImageGenerationDisabledError,
+        )
+
+    def _assert_embeddings_allowed(
+        self,
+        auth_context: AuthContext | None,
+        model_id: Any,
+    ) -> None:
+        self._assert_shelf_allowed(
+            auth_context,
+            EMBEDDINGS_SHELF_KEY,
+            model_id,
+            EmbeddingsDisabledError,
         )
 
     def _assert_tts_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
@@ -1149,6 +1226,38 @@ class ApiUseCase:
             api_endpoint=api_endpoint,
         )
 
+    def _log_embeddings_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        usage: dict[str, int] | None,
+    ) -> None:
+        model = body.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        messages = [{"role": "user", "content": _embeddings_log_input(body.get("input"))}]
+        assistant_messages = [{"role": "assistant", "content": "已產生嵌入"}]
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            usage,
+            assistant_messages=assistant_messages,
+            api_endpoint=EMBEDDINGS_PATH,
+        )
+
     def _log_tts_request(
         self,
         body: dict[str, Any],
@@ -1251,6 +1360,14 @@ def _usage_from_raw_usage(usage: dict[str, Any]) -> dict[str, int]:
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _embeddings_log_input(raw: Any) -> str:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        return "\n".join(raw)
+    return "［非文字嵌入輸入］"
 
 
 def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:

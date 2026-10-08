@@ -19,6 +19,7 @@ KIND_SPLIT_MODALITIES = {
     "text": "text",
     "decisions": "decisions",
     "image": "image",
+    "embeddings": "embeddings",
     "speech": "speech",
     "speech_transcription": "transcription",
 }

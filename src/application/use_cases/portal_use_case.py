@@ -175,7 +175,7 @@ class PortalUseCase:
         self._assert_teacher(user_id)
         if output_modalities not in (None, "all", *KIND_SPLIT_MODALITIES):
             raise ValueError(
-                "output_modalities 必須是 all、text、decisions、image、speech 或 speech_transcription"
+                "output_modalities 必須是 all、text、decisions、image、embeddings、speech 或 speech_transcription"
             )
         requested = output_modalities or "text"
         return self._upstream_catalog.read(requested)

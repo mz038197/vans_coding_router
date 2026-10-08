@@ -333,6 +333,7 @@ class OpenAICompatibleGateway:
             "text",
             "decisions",
             "image",
+            "embeddings",
             "speech",
             "transcription",
         }:
@@ -384,6 +385,13 @@ class OpenAICompatibleGateway:
 
     async def images_models(self) -> dict[str, Any]:
         return await self.models(output_modalities="image")
+
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request("POST", "/embeddings", json=body)
+        return self._json_or_error(response)
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        return await self.models(output_modalities="embeddings")
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         async with aclosing(self._stream("POST", "/audio/speech", json=body)) as stream:

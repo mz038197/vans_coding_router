@@ -173,6 +173,23 @@ class RoutingGateway:
         gateway, payload = self._resolve_decision_body(body)
         return await gateway.decisions_create(payload)
 
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        gateway, payload = self._resolve_images_body(body)
+        return await gateway.embeddings_create(payload)
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        listed = await self.models(output_modalities="embeddings")
+        data = [
+            item
+            for item in listed.get("data") or []
+            if isinstance(item, dict) and item.get("provider") == "openrouter"
+        ]
+        result: dict[str, Any] = {"object": "list", "data": data}
+        errors = listed.get("provider_errors") or {}
+        if "openrouter" in errors:
+            result["provider_errors"] = {"openrouter": errors["openrouter"]}
+        return result
+
     async def images_models(self) -> dict[str, Any]:
         listed = await self.models(output_modalities="image")
         data = [

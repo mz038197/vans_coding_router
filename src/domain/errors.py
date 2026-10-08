@@ -217,6 +217,15 @@ class ImageGenerationDisabledError(AppError):
         )
 
 
+class EmbeddingsDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放嵌入"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="embeddings_disabled",
+        )
+
+
 class TtsNotSupportedError(AppError):
     def __init__(self, message: str = "此 provider 不支援 /v1/audio/speech"):
         super().__init__(

@@ -27,7 +27,7 @@ from test_session_chat_language_models_editor import (
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
-_OPENROUTER_KINDS = ("text", "decisions", "image", "speech", "transcription")
+_OPENROUTER_KINDS = ("text", "decisions", "image", "embeddings", "speech", "transcription")
 
 
 def _record_catalog_fetches(gateway):
@@ -102,7 +102,7 @@ def test_startup_fetches_each_portion_once_together_and_a_read_does_not_fetch_ag
     teacher, _, _ = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
 
-    assert in_flight["peak"] == 7
+    assert in_flight["peak"] == 8
     openrouter_kinds = [kind for name, kind in calls if name == "openrouter"]
     assert openrouter_kinds == list(_OPENROUTER_KINDS)
     assert [kind for name, kind in calls if name == "ollama_cloud"] == [None]

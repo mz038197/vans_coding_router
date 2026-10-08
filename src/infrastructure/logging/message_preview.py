@@ -202,6 +202,7 @@ def build_message_preview(messages: list[dict[str, Any]]) -> str:
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 RESPONSES_PATH = "/v1/responses"
 IMAGES_PATH = "/v1/images"
+EMBEDDINGS_PATH = "/v1/embeddings"
 AUDIO_SPEECH_PATH = "/v1/audio/speech"
 AUDIO_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
 RESPONSE_LOG_MAX_CHARS = 131_072

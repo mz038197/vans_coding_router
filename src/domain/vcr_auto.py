@@ -18,7 +18,7 @@ def classroom_vscode_model_list(shipped: list[Any]) -> list[dict[str, Any]]:
     entry["vision"] = True
     entry["toolCalling"] = True
     entry["thinking"] = True
-    for key in ("decisionShelf", "imageShelf", "speechShelf", "speechTranscriptionShelf"):
+    for key in ("decisionShelf", "imageShelf", "embeddingsShelf", "speechShelf", "speechTranscriptionShelf"):
         entry.pop(key, None)
     return [
         {

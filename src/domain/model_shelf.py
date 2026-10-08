@@ -6,11 +6,13 @@ from typing import Any
 from src.domain.decision_model import is_decision_shelf_model
 
 IMAGE_SHELF_KEY = "imageShelf"
+EMBEDDINGS_SHELF_KEY = "embeddingsShelf"
 SPEECH_SHELF_KEY = "speechShelf"
 SPEECH_TRANSCRIPTION_SHELF_KEY = "speechTranscriptionShelf"
 SHELF_KEYS = (
     "decisionShelf",
     IMAGE_SHELF_KEY,
+    EMBEDDINGS_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
 )
@@ -29,6 +31,10 @@ def is_image_shelf_model(model: Any) -> bool:
     return _is_flagged_model(model, IMAGE_SHELF_KEY)
 
 
+def is_embeddings_shelf_model(model: Any) -> bool:
+    return _is_flagged_model(model, EMBEDDINGS_SHELF_KEY)
+
+
 def is_speech_shelf_model(model: Any) -> bool:
     return _is_flagged_model(model, SPEECH_SHELF_KEY)
 
@@ -41,6 +47,7 @@ def is_non_text_shelf_model(model: Any) -> bool:
     return (
         is_decision_shelf_model(model)
         or is_image_shelf_model(model)
+        or is_embeddings_shelf_model(model)
         or is_speech_shelf_model(model)
         or is_speech_transcription_shelf_model(model)
     )
@@ -50,6 +57,7 @@ def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
     predicate = {
         "decisionShelf": is_decision_shelf_model,
         IMAGE_SHELF_KEY: is_image_shelf_model,
+        EMBEDDINGS_SHELF_KEY: is_embeddings_shelf_model,
         SPEECH_SHELF_KEY: is_speech_shelf_model,
         SPEECH_TRANSCRIPTION_SHELF_KEY: is_speech_transcription_shelf_model,
     }.get(shelf_key)
