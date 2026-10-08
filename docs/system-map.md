@@ -32,7 +32,7 @@ flowchart LR
 
 兩個 MCP 都不連 `neondb`。簽章票在各自的服務驗，並對 router 公布的停用名單；舊格式金鑰送到 router 的 `POST /internal/legacy-key`。`vans-mcp-server` 的工具呼叫紀錄和學生授權改放在 database `vans_mcp_server`，role 是 `vans_mcp_server_app`。`vans-signals` 的 role 是 `vans_signals_app`。router 的 role 是 `vans_coding_router_app`，只能連 `neondb`。`neondb_owner` 只留作管理帳號，不放進執行中的服務。pokemon 的遊戲庫仍是專案 `pokemon_world_db`，那組帳號不動。
 
-順序是：先把 `vans-signals` 換成 `vans_signals_app`，並確認它連 `neondb` 被拒。這一步不撤銷 `neondb_owner` 對 `neondb` 的連線。接著上停用名單、舊金鑰檢查和簽章驗證，授權仍在 `neondb`。pokemon 在這之前仍用它 Fly secret 裡的 `neondb_owner`；驗票切換時拿掉這條連線，不另建暫時 role。MCP 驗得了簽章票之後才開始發。然後複製、短暫停寫、補差額，把 `vans-mcp-server` 切到 `vans_mcp_server_app`。確認新庫已接手、既有授權還能用之後，從 `neondb` 刪掉 `mcp_usage` 和 `mcp_oauth_connections`。router 改用 `vans_coding_router_app` 的那一步還沒定。
+順序是：先把 `vans-signals` 換成 `vans_signals_app`，並確認它連 `neondb` 被拒。這一步不撤銷 `neondb_owner` 對 `neondb` 的連線。接著上停用名單、舊金鑰檢查和簽章驗證，授權仍在 `neondb`。pokemon 在這之前仍用它 Fly secret 裡的 `neondb_owner`；驗票切換時拿掉這條連線，不另建暫時 role。MCP 驗得了簽章票之後才開始發。然後複製、短暫停寫、補差額，把 `vans-mcp-server` 切到 `vans_mcp_server_app`。確認新庫已接手、既有授權還能用之後，從 `neondb` 刪掉 `mcp_usage` 和 `mcp_oauth_connections`。最後才把 router 換成 `vans_coding_router_app`，並確認它連 `vans_signals` 和 `vans_mcp_server` 都被拒。每個服務 role 在自己的 database 裡可以在 `public` 建物件、讀和寫，而且不是 superuser。
 
 ```mermaid
 flowchart LR

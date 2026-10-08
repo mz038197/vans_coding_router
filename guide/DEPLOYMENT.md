@@ -60,7 +60,7 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 
 | 變數 | 說明 |
 |------|------|
-| `DATABASE_URL` | Neon 專案 `VCRouter-db` 的 database `neondb`。執行中的服務用 role `vans_coding_router_app`，不是 `neondb_owner`。這組 role 不能連 `vans_signals` 或 `vans_mcp_server`；驗收是兩邊都連不上。`neondb_owner` 只留作管理帳號 |
+| `DATABASE_URL` | Neon 專案 `VCRouter-db` 的 database `neondb`。執行中的服務用 role `vans_coding_router_app`，不是 `neondb_owner`。這組 role 在 `neondb` 的 `public` 可以建物件、讀和寫；不能連 `vans_signals` 或 `vans_mcp_server`，也不是 superuser。驗收是那兩個庫都連不上。換這組 secret 排在最後：`vans_signals_app` 已上線、驗票已切換、表已搬完、`vans-mcp-server` 已用 `vans_mcp_server_app`。`neondb_owner` 只留作管理帳號 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
 | `SESSION_SECRET` | 強隨機字串 |
 | `OLLAMA_CLOUD_API_KEY` | 必要（Ollama Cloud 帳號 A） |
