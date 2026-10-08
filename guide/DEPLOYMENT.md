@@ -60,7 +60,7 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 
 | 變數 | 說明 |
 |------|------|
-| `DATABASE_URL` | Neon connection string |
+| `DATABASE_URL` | Neon 專案 `VCRouter-db` 的 database `neondb`。執行中的服務用 role `vans_coding_router_app`，不是 `neondb_owner`。這組 role 不能連 `vans_signals` 或 `vans_mcp_server`；驗收是兩邊都連不上。`neondb_owner` 只留作管理帳號 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
 | `SESSION_SECRET` | 強隨機字串 |
 | `OLLAMA_CLOUD_API_KEY` | 必要（Ollama Cloud 帳號 A） |
