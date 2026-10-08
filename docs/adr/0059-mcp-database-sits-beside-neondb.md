@@ -1,6 +1,6 @@
 # vans-mcp-server's database sits beside neondb
 
-vans-mcp-server's tool-call records and student connections move to a new database in the existing Neon project VCRouter-db. That is the same arrangement as `vans_signals`: one project, a different database from the router's `neondb`. The service cannot read `neondb`. pokemon-world-mcp does not use that new database, and it does not open `neondb` either. The move copies both tables, pauses writes, copies the gap, then switches the service to the new database. Students do not authorize again.
+vans-mcp-server's tool-call records and student connections move to a new database named `vans_mcp_server` in the existing Neon project VCRouter-db. That is the same arrangement as `vans_signals`: one project, a different database from the router's `neondb`. The service cannot read `neondb`. pokemon-world-mcp does not use that new database, and it does not open `neondb` either. The move copies both tables, pauses writes, copies the gap, then switches the service to the new database. Students do not authorize again.
 
 ## Considered Options
 
