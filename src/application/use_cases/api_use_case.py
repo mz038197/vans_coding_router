@@ -1321,8 +1321,19 @@ class ApiUseCase:
         )
 
 
+def _logged_text(content: str | list[Any]) -> str:
+    """Log 只留文字區塊；圖片等其他區塊的位元組不進 log。"""
+    if isinstance(content, str):
+        return content
+    return " ".join(
+        part["text"]
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+    )
+
+
 def _message_to_log_dict(m: ChatMessage) -> dict[str, Any]:
-    d: dict[str, Any] = {"role": m.role, "content": m.content}
+    d: dict[str, Any] = {"role": m.role, "content": _logged_text(m.content)}
     if m.tool_calls:
         d["tool_calls"] = m.tool_calls
     if m.tool_call_id:

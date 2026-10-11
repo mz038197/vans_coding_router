@@ -714,6 +714,7 @@ components:
             Required and non-empty for `system` and `user`.
             `assistant` may omit it when `tool_calls` is present.
             `tool` may be an empty string. String or content-part array.
+            A content-part array is forwarded upstream unchanged.
           oneOf:
             - type: string
             - type: array
@@ -722,7 +723,9 @@ components:
             - type: "null"
         images:
           type: array
-          description: Alternate image payload accepted from older clients. Base64 or URL strings.
+          description: |
+            Alternate image payload accepted from older clients. Base64, data URL, or URL strings.
+            Each one is appended to this message's content as an `image_url` part.
           items:
             type: string
         tool_calls:
@@ -741,6 +744,7 @@ components:
     ContentPart:
       type: object
       required: [type]
+      additionalProperties: true
       properties:
         type:
           type: string

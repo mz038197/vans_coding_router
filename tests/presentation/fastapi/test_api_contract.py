@@ -221,8 +221,27 @@ def test_chat_completion_with_openai_text_format(fake_repo, fake_gateway, fake_l
     assert payload["choices"][0]["message"]["role"] == "assistant"
 
 
-def test_chat_completion_with_openai_image_format(fake_repo, fake_gateway, fake_logger):
-    """驗證支援 OpenAI 相容格式 - content 包含文字和影像"""
+def test_chat_completion_forwards_image_content_parts_unchanged(fake_repo, fake_gateway, fake_logger):
+    """content 區塊陣列（文字、圖片、順序、detail）原樣交給上游"""
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    content = [
+        {"type": "text", "text": "What's in"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg==", "detail": "high"}},
+        {"type": "text", "text": "this image?"},
+    ]
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "fake-model", "messages": [{"role": "user", "content": content}], "stream": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["object"] == "chat.completion"
+    assert fake_gateway.last_nonstream_req is not None
+    assert fake_gateway.last_nonstream_req.messages[0].content == content
+
+
+def test_chat_completion_turns_older_images_field_into_image_parts(fake_repo, fake_gateway, fake_logger):
+    """舊客戶端的頂層 images（純 base64、data URL、網址）變成該訊息的 image_url 區塊"""
     client = build_test_client(fake_repo, fake_gateway, fake_logger)
     response = client.post(
         "/v1/chat/completions",
@@ -232,23 +251,56 @@ def test_chat_completion_with_openai_image_format(fake_repo, fake_gateway, fake_
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": "What's in this image?"},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="},
-                        },
+                    "content": "What's in these images?",
+                    "images": [
+                        "/9j/4AAQSkZJRg==",
+                        "iVBORw0KGgoAAAANSUhEUg==",
+                        "data:image/webp;base64,UklGRiIAAABXRUJQ",
+                        "https://example.com/cat.gif",
+                        "AAAAunknown",
                     ],
-                }
+                },
+                {"role": "user", "content": [{"type": "text", "text": "and this"}], "images": ["R0lGODlhAQABAAAAACw="]},
             ],
             "stream": False,
         },
     )
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["object"] == "chat.completion"
-    assert fake_gateway.last_nonstream_req is not None
-    assert fake_gateway.last_nonstream_req.messages[0].images == ["/9j/4AAQSkZJRg=="]
+    first, second = fake_gateway.last_nonstream_req.messages
+    assert first.content == [
+        {"type": "text", "text": "What's in these images?"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="}},
+        {"type": "image_url", "image_url": {"url": "data:image/webp;base64,UklGRiIAAABXRUJQ"}},
+        {"type": "image_url", "image_url": {"url": "https://example.com/cat.gif"}},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAAunknown"}},
+    ]
+    assert second.content == [
+        {"type": "text", "text": "and this"},
+        {"type": "image_url", "image_url": {"url": "data:image/gif;base64,R0lGODlhAQABAAAAACw="}},
+    ]
+
+
+def test_chat_completion_logs_image_message_text_without_image_bytes(fake_repo, fake_gateway, fake_logger):
+    """有圖片的訊息只記錄文字，圖片位元組不進 log"""
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    image = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}}
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "fake-model",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "What's in"}, image, {"type": "text", "text": "this image?"}]},
+                {"role": "user", "content": [image]},
+            ],
+            "stream": False,
+        },
+    )
+    assert response.status_code == 200
+    logged = fake_logger.entries[-1]["messages"]
+    assert [message["content"] for message in logged] == ["What's in this image?", ""]
+    assert "/9j/4AAQSkZJRg==" not in repr(fake_logger.entries)
 
 
 def test_chat_completion_with_simple_text_format(fake_repo, fake_gateway, fake_logger):

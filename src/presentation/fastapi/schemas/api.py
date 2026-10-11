@@ -3,17 +3,11 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class ContentPart(BaseModel):
-    """表示 content 陣列中的單個部分"""
-    type: str
-    text: str | None = None
-    image_url: dict[str, str] | None = None
-
-
 class ChatMessageSchema(BaseModel):
     """支援 OpenAI 相容格式的聊天訊息"""
     role: str
-    content: str | list[ContentPart | dict[str, Any]] | None = Field(
+    # 區塊陣列不解析成模型：上游要拿到客戶端送的原樣區塊。
+    content: str | list[Any] | None = Field(
         default=None,
         description="訊息內容；assistant 可僅有 tool_calls；tool 角色可為空字串",
     )

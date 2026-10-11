@@ -149,6 +149,35 @@ async def test_chat_completions_omits_max_tokens_when_unset(ollama_gateway):
 
 
 @pytest.mark.asyncio
+async def test_chat_completions_forwards_image_content_parts_to_upstream(ollama_gateway):
+    gateway, mock_client = ollama_gateway
+
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+    }
+    mock_client.request = AsyncMock(return_value=response)
+    content = [
+        {"type": "text", "text": "What's in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg==", "detail": "high"}},
+    ]
+
+    with patch.dict("os.environ", {"OLLAMA_CLOUD_API_KEY": "test-key"}):
+        req = ChatCompletionRequest(
+            model="minimax-m3:cloud",
+            messages=[ChatMessage(role="user", content=content)],
+            stream=False,
+        )
+        await gateway.chat_completions_nonstream(req)
+
+    forwarded = mock_client.request.call_args.kwargs["json"]
+    assert forwarded["messages"] == [{"role": "user", "content": content}]
+
+
+@pytest.mark.asyncio
 async def test_chat_completions_forwards_resolved_max_tokens(ollama_gateway):
     gateway, mock_client = ollama_gateway
 

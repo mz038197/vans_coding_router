@@ -5,8 +5,7 @@ from typing import Any
 @dataclass
 class ChatMessage:
     role: str
-    content: str = ""
-    images: list[str] | None = None
+    content: str | list[Any] = ""
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
