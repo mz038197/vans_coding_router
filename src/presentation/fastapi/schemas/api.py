@@ -17,6 +17,8 @@ class ChatMessageSchema(BaseModel):
     name: str | None = None
     tool_name: str | None = Field(default=None, description="相容舊客戶端的 tool 結果函數名")
 
+    model_config = {"extra": "allow"}
+
     @field_validator("content", mode="before")
     @classmethod
     def validate_content_shape(cls, v: Any) -> Any:
@@ -34,7 +36,9 @@ class ChatMessageSchema(BaseModel):
         c = self.content
         tc = self.tool_calls
 
-        if role in ("user", "system"):
+        # 舊客戶端只貼圖不打字：圖片就是 user 訊息的內容。
+        image_only_user = role == "user" and any(self.images or [])
+        if role in ("user", "system") and not image_only_user:
             if c is None:
                 raise ValueError("訊息內容不能為空")
             if isinstance(c, str) and not c.strip():
@@ -59,15 +63,11 @@ class ChatMessageSchema(BaseModel):
 
 class ChatCompletionsRequestSchema(BaseModel):
     model: str
-    messages: list[ChatMessageSchema]
+    messages: list[ChatMessageSchema] = Field(min_length=1)
     stream: bool = False
-    temperature: float | None = 0.7
-    max_tokens: int | None = None
-    max_completion_tokens: int | None = None
-    user: str | None = None
-    stop: Any | None = None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: Any | None = None
+
+    # 其他欄位不驗證，原樣轉發給上游。
+    model_config = {"extra": "allow"}
 
 
 class ImageGenerationRequestSchema(BaseModel):

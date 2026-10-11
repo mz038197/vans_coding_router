@@ -299,7 +299,8 @@ def test_chat_completion_logs_image_message_text_without_image_bytes(fake_repo, 
     )
     assert response.status_code == 200
     logged = fake_logger.entries[-1]["messages"]
-    assert [message["content"] for message in logged] == ["What's in this image?", ""]
+    assert [message["content"] for message in logged] == ["What's in this image?", "[圖片]"]
+    assert fake_logger.entries[-1]["message_preview"] == "[圖片]"
     assert "/9j/4AAQSkZJRg==" not in repr(fake_logger.entries)
 
 
@@ -346,8 +347,8 @@ def test_chat_completion_forwards_tools_to_gateway(fake_repo, fake_gateway, fake
     )
     assert response.status_code == 200
     assert fake_gateway.last_nonstream_req is not None
-    assert fake_gateway.last_nonstream_req.tools == tools
-    assert fake_gateway.last_nonstream_req.tool_choice == "auto"
+    assert fake_gateway.last_nonstream_req.extra["tools"] == tools
+    assert fake_gateway.last_nonstream_req.extra["tool_choice"] == "auto"
 
 
 def test_chat_completion_accepts_assistant_with_tool_calls_only(fake_repo, fake_gateway, fake_logger):
@@ -382,3 +383,96 @@ def test_chat_completion_accepts_assistant_with_tool_calls_only(fake_repo, fake_
     assert msgs[1].tool_calls is not None
     assert msgs[2].role == "tool"
     assert msgs[2].tool_call_id == "call_1"
+
+
+def test_chat_completion_forwards_fields_the_router_does_not_read(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "fake-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "reasoning_effort": "high",
+            "response_format": {"type": "json_object"},
+            "parallel_tool_calls": False,
+        },
+    )
+    assert response.status_code == 200
+    assert fake_gateway.last_nonstream_req.extra == {
+        "reasoning_effort": "high",
+        "response_format": {"type": "json_object"},
+        "parallel_tool_calls": False,
+    }
+
+
+def test_chat_completion_forwards_message_fields_the_router_does_not_read(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "fake-model",
+            "messages": [
+                {"role": "assistant", "content": "thinking done", "reasoning_details": [{"type": "x"}]},
+                {"role": "user", "content": "go on"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    first, second = fake_gateway.last_nonstream_req.messages
+    assert first.extra == {"reasoning_details": [{"type": "x"}]}
+    assert second.extra == {}
+
+
+def test_chat_completion_rejects_an_empty_messages_array(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "fake-model", "messages": []},
+    )
+    assert response.status_code == 422
+
+
+def test_chat_completion_accepts_a_user_message_that_has_only_older_images(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "fake-model",
+            "messages": [
+                {"role": "user", "content": "", "images": ["/9j/4AAQSkZJRg=="]},
+                {"role": "user", "images": ["https://example.com/cat.gif"]},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert [message.content for message in fake_gateway.last_nonstream_req.messages] == [
+        [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}}],
+        [{"type": "image_url", "image_url": {"url": "https://example.com/cat.gif"}}],
+    ]
+    assert fake_logger.entries[-1]["message_preview"] == "[圖片]"
+
+
+def test_chat_completion_rejects_a_user_message_with_no_text_and_an_empty_images_array(
+    fake_repo, fake_gateway, fake_logger
+):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "fake-model", "messages": [{"role": "user", "content": "", "images": []}]},
+    )
+    assert response.status_code == 422
+
+
+def test_chat_completion_rejects_a_system_message_that_has_only_older_images(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "fake-model", "messages": [{"role": "system", "content": "", "images": ["/9j/4AAQSkZJRg=="]}]},
+    )
+    assert response.status_code == 422

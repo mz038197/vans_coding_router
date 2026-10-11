@@ -19,6 +19,11 @@ from src.infrastructure.routing.model_id import format_model_id, parse_model_id
 _OLLAMA_CLOUD_PROVIDER = "ollama_cloud"
 
 
+def _without_models_field(fields: dict[str, Any]) -> dict[str, Any]:
+    """`models` 讓上游改用別的模型回答，會繞過 router 對 `model` 的權限檢查，所以不轉發。"""
+    return {key: value for key, value in fields.items() if key != "models"}
+
+
 class RoutingGateway:
     def __init__(self, gateways: dict[str, LLMGatewayPort]):
         self.gateways = gateways
@@ -282,11 +287,11 @@ class RoutingGateway:
         provider_name, upstream_model = parse_model_id(req.model, self._known_providers())
         gateway = self.gateways[provider_name]
         upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
-        return gateway, replace(req, model=upstream_model)
+        return gateway, replace(req, model=upstream_model, extra=_without_models_field(req.extra))
 
     def _resolve_responses_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        payload = dict(body)
+        payload = _without_models_field(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
 

@@ -52,6 +52,7 @@ class FakeGateway:
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
         self.requests.append(str(body.get("model")))
+        self.last_responses_body = body
         return {"provider": self.name}
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:

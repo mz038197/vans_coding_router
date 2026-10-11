@@ -208,6 +208,7 @@ AUDIO_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
 RESPONSE_LOG_MAX_CHARS = 131_072
 LOG_TRUNCATED_SUFFIX = "...[log truncated]"
 TOOL_CALLS_ONLY_LABEL = "[僅 tool_calls]"
+IMAGE_ONLY_LABEL = "[圖片]"
 
 
 def truncate_log_text(text: str) -> tuple[str, bool]:

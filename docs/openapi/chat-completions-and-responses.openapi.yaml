@@ -662,7 +662,13 @@ components:
   schemas:
     ChatCompletionRequest:
       type: object
-      additionalProperties: false
+      description: |
+        The body is forwarded upstream as sent, including fields not listed here
+        (for example `reasoning_effort`, `response_format`, `parallel_tool_calls`).
+        The router validates only `model`, `messages`, and `stream`. A field the
+        upstream does not accept comes back as that upstream's own error.
+        `models` is not forwarded.
+      additionalProperties: true
       required: [model, messages]
       properties:
         model:
@@ -677,15 +683,29 @@ components:
         stream:
           type: boolean
           default: false
+        stream_options:
+          type: object
+          additionalProperties: true
+          description: |
+            Forwarded as sent, except `include_usage`, which is always `true` on a stream.
         temperature:
           type: number
-          default: 0.7
+          description: Forwarded only when sent. The router adds no default.
         max_tokens:
           type: integer
-          description: Output token limit. Ignored when `max_completion_tokens` is also set.
+          description: Output token limit. Forwarded as sent.
         max_completion_tokens:
           type: integer
-          description: Preferred output token limit. Forwarded upstream as `max_tokens`.
+          description: |
+            Output token limit. Forwarded as sent. An Ollama upstream reads only
+            `max_tokens`, so when this is the only limit sent, the router also
+            sends `max_tokens` with the same value to that upstream.
+        reasoning_effort:
+          type: string
+          description: |
+            Forwarded as sent. For an Ollama upstream it is removed when the model
+            cannot think or the value is not one of `none`, `minimal`, `low`,
+            `medium`, `high`, `xhigh`.
         user:
           type: string
         stop:
@@ -704,6 +724,8 @@ components:
 
     ChatMessage:
       type: object
+      description: Fields not listed here are forwarded upstream as sent.
+      additionalProperties: true
       required: [role]
       properties:
         role:
@@ -711,7 +733,8 @@ components:
           enum: [system, user, assistant, tool]
         content:
           description: |
-            Required and non-empty for `system` and `user`.
+            Required and non-empty for `system` and `user`. A `user` message
+            with at least one `images` entry may omit it.
             `assistant` may omit it when `tool_calls` is present.
             `tool` may be an empty string. String or content-part array.
             A content-part array is forwarded upstream unchanged.
@@ -896,6 +919,7 @@ components:
 
     ResponsesRequest:
       type: object
+      description: The body is forwarded upstream as sent, except `models`, which is not forwarded.
       additionalProperties: true
       required: [model]
       properties:

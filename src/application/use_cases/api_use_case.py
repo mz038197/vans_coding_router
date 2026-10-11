@@ -8,6 +8,7 @@ from src.infrastructure.logging.message_preview import (
     AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
     EMBEDDINGS_PATH,
+    IMAGE_ONLY_LABEL,
     IMAGES_PATH,
     RESPONSES_PATH,
     build_message_preview,
@@ -1325,11 +1326,13 @@ def _logged_text(content: str | list[Any]) -> str:
     """Log 只留文字區塊；圖片等其他區塊的位元組不進 log。"""
     if isinstance(content, str):
         return content
-    return " ".join(
-        part["text"]
-        for part in content
-        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+    parts = [part for part in content if isinstance(part, dict)]
+    text = " ".join(
+        part["text"] for part in parts if part.get("type") == "text" and isinstance(part.get("text"), str)
     )
+    if not text.strip() and any(part.get("type") == "image_url" for part in parts):
+        return IMAGE_ONLY_LABEL
+    return text
 
 
 def _message_to_log_dict(m: ChatMessage) -> dict[str, Any]:

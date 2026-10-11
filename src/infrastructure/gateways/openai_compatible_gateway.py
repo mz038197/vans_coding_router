@@ -27,6 +27,7 @@ from src.infrastructure.config import (
     resolve_provider_api_keys,
 )
 from src.infrastructure.gateways.copilot_compat import (
+    VALID_REASONING_EFFORTS,
     OllamaThinkingCache,
     derive_ollama_native_base,
     is_ollama_provider,
@@ -342,12 +343,12 @@ class OpenAICompatibleGateway:
         return self._json_or_error(response)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
-        response = await self._request("POST", "/chat/completions", json=_chat_payload(req, stream=False))
+        payload = await self._prepare_chat_payload(req, stream=False)
+        response = await self._request("POST", "/chat/completions", json=payload)
         return normalize_chat_completions_response(self._json_or_error(response))
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
-        payload = _chat_payload(req, stream=True)
-        payload.setdefault("stream_options", {"include_usage": True})
+        payload = await self._prepare_chat_payload(req, stream=True)
         upstream = self._stream("POST", "/chat/completions", json=payload)
         async with aclosing(normalize_chat_completions_sse(upstream)) as stream:
             async for chunk in stream:
@@ -627,6 +628,23 @@ class OpenAICompatibleGateway:
             headers["Authorization"] = f"Bearer {key}"
         return headers
 
+    async def _prepare_chat_payload(self, req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:
+        payload = _chat_payload(req, stream)
+        if not is_ollama_provider(self.provider.name, self.provider.base_url):
+            return payload
+
+        # Ollama 只讀 max_tokens，不補的話 max_completion_tokens 的上限會被忽略。
+        limit = payload.get("max_completion_tokens")
+        if limit is not None and payload.get("max_tokens") is None:
+            payload["max_tokens"] = limit
+
+        if "reasoning_effort" in payload:
+            effort = payload["reasoning_effort"]
+            valid = isinstance(effort, str) and effort in VALID_REASONING_EFFORTS
+            if not valid or await self._ollama_supports_thinking(req.model) is False:
+                del payload["reasoning_effort"]
+        return payload
+
     async def _prepare_responses_body(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = dict(body)
         if not is_ollama_provider(self.provider.name, self.provider.base_url):
@@ -636,21 +654,27 @@ class OpenAICompatibleGateway:
         if not isinstance(model, str) or not model.strip():
             return payload
 
+        supports_thinking = await self._ollama_supports_thinking(model)
+        if supports_thinking is None:
+            return payload
+        return sanitize_responses_request(payload, supports_thinking)
+
+    async def _ollama_supports_thinking(self, model: str) -> bool | None:
+        """None when this provider has no native Ollama address to ask."""
         native_base = derive_ollama_native_base(self.provider.base_url)
         if native_base is None:
-            return payload
+            return None
 
         await self.startup()
         assert self._client is not None
         show_model = strip_ollama_cloud_inference_suffix(model)
         # Probe uses first key without taking a concurrency slot (cached).
-        supports_thinking = await _ollama_thinking_cache.supports_thinking(
+        return await _ollama_thinking_cache.supports_thinking(
             self._client,
             native_base,
             show_model,
             self._headers(),
         )
-        return sanitize_responses_request(payload, supports_thinking)
 
 
 def _multipart_form_data(fields: dict[str, Any]) -> dict[str, str]:
@@ -672,24 +696,20 @@ def _multipart_file(file: tuple[str, bytes, str | None]) -> dict[str, tuple[str,
 
 def _chat_payload(req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        **req.extra,
         "model": req.model,
         "messages": [_message_payload(message) for message in req.messages],
         "stream": stream,
     }
-    optional = {
-        "temperature": req.temperature,
-        "max_tokens": req.max_tokens,
-        "user": req.user,
-        "stop": req.stop,
-        "tools": req.tools,
-        "tool_choice": req.tool_choice,
-    }
-    payload.update({key: value for key, value in optional.items() if value is not None})
+    if stream:
+        # Usage 是用量紀錄的來源，客戶端不能關掉。
+        sent = payload.get("stream_options")
+        payload["stream_options"] = {**(sent if isinstance(sent, dict) else {}), "include_usage": True}
     return payload
 
 
 def _message_payload(message: ChatMessage) -> dict[str, Any]:
-    payload: dict[str, Any] = {"role": message.role, "content": message.content}
+    payload: dict[str, Any] = {**message.extra, "role": message.role, "content": message.content}
     for key in ("tool_calls", "tool_call_id", "name"):
         value = getattr(message, key)
         if value is not None:

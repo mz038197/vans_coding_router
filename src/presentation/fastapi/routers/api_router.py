@@ -31,7 +31,6 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_responses_error_bytes,
 )
 from src.infrastructure.gateways.realtime_proxy import UpstreamConnect, proxy_realtime_session
-from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
 from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
 from src.presentation.fastapi.streaming import AclosingStreamingResponse
 
@@ -155,12 +154,7 @@ def create_api_router(
             model=req.model,
             messages=[m.model_dump() for m in req.messages],
             stream=req.stream,
-            temperature=req.temperature,
-            max_tokens=resolve_chat_output_token_limit(req.max_tokens, req.max_completion_tokens),
-            user=req.user,
-            stop=req.stop,
-            tools=req.tools,
-            tool_choice=req.tool_choice,
+            extra=dict(req.model_extra or {}),
         )
         domain_req = input_dto.to_domain()
         api_use_case.validate_model_allowed(domain_req.model, auth_context)

@@ -178,7 +178,7 @@ async def test_chat_completions_forwards_image_content_parts_to_upstream(ollama_
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_forwards_resolved_max_tokens(ollama_gateway):
+async def test_chat_completions_forwards_max_tokens(ollama_gateway):
     gateway, mock_client = ollama_gateway
 
     response = MagicMock()
@@ -195,7 +195,7 @@ async def test_chat_completions_forwards_resolved_max_tokens(ollama_gateway):
             model="minimax-m3:cloud",
             messages=[ChatMessage(role="user", content="hi")],
             stream=False,
-            max_tokens=256,
+            extra={"max_tokens": 256},
         )
         await gateway.chat_completions_nonstream(req)
 
@@ -275,3 +275,177 @@ async def test_responses_stream_rewrites_reasoning_text_events(openrouter_gatewa
     assert "event: response.reasoning_summary_text.delta" in text
     assert "response.reasoning_text.delta" not in text.replace("reasoning_summary_text", "")
     assert "Thinking" in text
+
+
+_CHAT_OK = {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+}
+
+
+async def _forwarded_chat_json(gateway_fixture, env_key: str, req: ChatCompletionRequest, capabilities=None):
+    """Send one non-stream Chat call and return the JSON body the upstream received."""
+    gateway, mock_client = gateway_fixture
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = _CHAT_OK
+    mock_client.request = AsyncMock(return_value=response)
+    show_response = MagicMock()
+    show_response.status_code = 200
+    show_response.json.return_value = {"capabilities": capabilities or ["completion"]}
+    mock_client.post = AsyncMock(return_value=show_response)
+
+    with patch.dict("os.environ", {env_key: "test-key"}):
+        await gateway.chat_completions_nonstream(req)
+
+    return mock_client.request.call_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_forwards_the_client_fields_and_adds_no_temperature(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="minimax-m3:cloud",
+        messages=[ChatMessage(role="assistant", content="hi", extra={"reasoning_details": [{"type": "x"}]})],
+        extra={"response_format": {"type": "json_object"}, "parallel_tool_calls": False, "stop": ["END"]},
+    )
+
+    forwarded = await _forwarded_chat_json(ollama_gateway, "OLLAMA_CLOUD_API_KEY", req)
+
+    assert forwarded == {
+        "model": "minimax-m3:cloud",
+        "messages": [{"role": "assistant", "content": "hi", "reasoning_details": [{"type": "x"}]}],
+        "stream": False,
+        "response_format": {"type": "json_object"},
+        "parallel_tool_calls": False,
+        "stop": ["END"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_gives_ollama_max_tokens_when_only_max_completion_tokens_is_sent(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="minimax-m3:cloud",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"max_completion_tokens": 256},
+    )
+
+    forwarded = await _forwarded_chat_json(ollama_gateway, "OLLAMA_CLOUD_API_KEY", req)
+
+    assert forwarded["max_completion_tokens"] == 256
+    assert forwarded["max_tokens"] == 256
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_keeps_the_max_tokens_the_client_sent_to_ollama(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="minimax-m3:cloud",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"max_completion_tokens": 256, "max_tokens": 64},
+    )
+
+    forwarded = await _forwarded_chat_json(ollama_gateway, "OLLAMA_CLOUD_API_KEY", req)
+
+    assert forwarded["max_tokens"] == 64
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_sends_openrouter_only_the_token_limit_the_client_sent(openrouter_gateway):
+    req = ChatCompletionRequest(
+        model="openai/o9",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"max_completion_tokens": 256},
+    )
+
+    forwarded = await _forwarded_chat_json(openrouter_gateway, "OPENROUTER_API_KEY", req)
+
+    assert forwarded["max_completion_tokens"] == 256
+    assert "max_tokens" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_drops_reasoning_effort_for_an_ollama_model_that_cannot_think(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="chat-no-think:cloud",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"reasoning_effort": "high"},
+    )
+
+    forwarded = await _forwarded_chat_json(ollama_gateway, "OLLAMA_CLOUD_API_KEY", req, ["completion"])
+
+    assert "reasoning_effort" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_keeps_reasoning_effort_for_an_ollama_model_that_thinks(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="chat-thinker:cloud",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"reasoning_effort": "high"},
+    )
+
+    forwarded = await _forwarded_chat_json(
+        ollama_gateway, "OLLAMA_CLOUD_API_KEY", req, ["completion", "thinking"]
+    )
+
+    assert forwarded["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_drops_an_unknown_reasoning_effort_for_ollama(ollama_gateway):
+    req = ChatCompletionRequest(
+        model="chat-thinker-two:cloud",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"reasoning_effort": "extreme"},
+    )
+
+    forwarded = await _forwarded_chat_json(
+        ollama_gateway, "OLLAMA_CLOUD_API_KEY", req, ["completion", "thinking"]
+    )
+
+    assert "reasoning_effort" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_sends_openrouter_the_reasoning_effort_as_sent(openrouter_gateway):
+    req = ChatCompletionRequest(
+        model="openai/o9",
+        messages=[ChatMessage(role="user", content="hi")],
+        extra={"reasoning_effort": "extreme"},
+    )
+
+    forwarded = await _forwarded_chat_json(openrouter_gateway, "OPENROUTER_API_KEY", req)
+
+    assert forwarded["reasoning_effort"] == "extreme"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_always_asks_the_upstream_for_usage(openrouter_gateway):
+    gateway, mock_client = openrouter_gateway
+
+    class FakeStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aiter_bytes(self):
+            yield b"data: [DONE]\n\n"
+
+    mock_client.stream = MagicMock(return_value=FakeStream())
+    req = ChatCompletionRequest(
+        model="openai/o9",
+        messages=[ChatMessage(role="user", content="hi")],
+        stream=True,
+        extra={"stream_options": {"include_usage": False, "include_obfuscation": False}},
+    )
+
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
+        async for _ in gateway.chat_completions_stream(req):
+            pass
+
+    forwarded = mock_client.stream.call_args.kwargs["json"]
+    assert forwarded["stream_options"] == {"include_usage": True, "include_obfuscation": False}

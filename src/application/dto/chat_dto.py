@@ -30,17 +30,15 @@ def _upstream_content(content: Any, older_images: Any = None) -> str | list[Any]
     return [*content, *image_parts]
 
 
+_MESSAGE_FIELDS = frozenset({"role", "content", "images", "tool_calls", "tool_call_id", "tool_name", "name"})
+
+
 @dataclass
 class ChatCompletionInputDto:
     model: str
     messages: list[dict[str, Any]]
     stream: bool
-    temperature: float | None
-    max_tokens: int | None
-    user: str | None
-    stop: object | None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: Any | None = None
+    extra: dict[str, Any]
 
     def to_domain(self) -> ChatCompletionRequest:
         domain_messages: list[ChatMessage] = []
@@ -53,6 +51,7 @@ class ChatCompletionInputDto:
                     tool_call_id=m.get("tool_call_id"),
                     tool_name=m.get("tool_name"),
                     name=m.get("name"),
+                    extra={key: value for key, value in m.items() if key not in _MESSAGE_FIELDS},
                 )
             )
 
@@ -60,10 +59,5 @@ class ChatCompletionInputDto:
             model=self.model,
             messages=domain_messages,
             stream=self.stream,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            user=self.user,
-            stop=self.stop,
-            tools=self.tools,
-            tool_choice=self.tool_choice,
+            extra=self.extra,
         )
