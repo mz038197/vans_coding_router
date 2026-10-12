@@ -26,7 +26,7 @@ Boot copies `config/router.example.yaml` to `~/.vans_coding_router/router.yaml` 
 
 Dev login in the example config accepts only loopback. Open `http://127.0.0.1:8000/portal`. Portal writes require `Origin: http://127.0.0.1:8000`. The example admin email `mz038197@gmail.com` receives admin, teacher, and student.
 
-`uv run pytest -q` is the test command. Day-to-day development uses the SQLite file in `~/.vans_coding_router/` and does not start Docker. A change that touches database or Postgres code must set `TEST_DATABASE_URL` and run the five Postgres repository tests in `tests/infrastructure/test_postgres_router_repository.py`. Count that change as passing only when those five tests execute and pass. A skipped test is not a pass.
+`uv run pytest -q` is the test command. Day-to-day development uses the SQLite file in `~/.vans_coding_router/` and does not start Docker. A change that touches database or Postgres code must set `TEST_DATABASE_URL` and run every test in `tests/infrastructure/test_postgres_router_repository.py`. Count that change as passing only when every test in that file executes and passes. A skipped test is not a pass.
 
 This image has no Postgres installed. From a clean session:
 

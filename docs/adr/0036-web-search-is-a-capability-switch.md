@@ -1,6 +1,6 @@
 # Web Search is a capability switch, not a shelf
 
-Status: proposed. Design settled with the owner on 2026-10-12. Not yet built.
+Status: built, not deployed. Design settled with the owner on 2026-10-12. The endpoint, the switch, and the brake are built on the `issue-21-web-search` branch. The comparison against Exa and the provider sign-off are still pending under mz038197/VansPod#26.
 
 A class had no way to search the web. Codex's built-in search was refused, and the model fell back to fetching sites one by one from the student's shell: 27 tool calls and about a million input tokens in four minutes. The router gains Web Search: it runs the search for the key holder against a search API and answers with titles, links, and text excerpts.
 
