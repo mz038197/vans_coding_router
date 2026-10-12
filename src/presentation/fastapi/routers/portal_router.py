@@ -132,6 +132,7 @@ class SessionPatchRequest(BaseModel):
     tts_enabled: bool | None = None
     speech_transcription_enabled: bool | None = None
     prompt_logging_enabled: bool | None = None
+    web_search_enabled: bool | None = None
     decision_enabled: bool | None = None
     decision_model_allowlist: list[str] | None = None
     decision_model: str | None = None
@@ -649,6 +650,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 tts_enabled=data.tts_enabled,
                 speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
+                web_search_enabled=data.web_search_enabled,
                 decision_model=decision_model,
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,

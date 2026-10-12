@@ -31,7 +31,12 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_responses_error_bytes,
 )
 from src.infrastructure.gateways.realtime_proxy import UpstreamConnect, proxy_realtime_session
-from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
+from src.presentation.fastapi.schemas.api import (
+    AudioSpeechRequestSchema,
+    ChatCompletionsRequestSchema,
+    ImageGenerationRequestSchema,
+    WebSearchRequestSchema,
+)
 from src.presentation.fastapi.streaming import AclosingStreamingResponse
 
 
@@ -270,6 +275,31 @@ def create_api_router(
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         data = await api_use_case.embeddings_models(api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.post("/v1/search")
+    async def web_search(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        # 不交給 FastAPI 驗證：它的 422 不是 OpenAI 相容的錯誤格式。
+        try:
+            req = WebSearchRequestSchema.model_validate(await request.json())
+        except ValueError:
+            return openai_error_response(
+                400,
+                "queries 必須是 1 到 3 個查詢，每個查詢 1 到 1000 個字元",
+                error_type="invalid_request_error",
+                code="invalid_queries",
+                param="queries",
+            )
+
+        data = await api_use_case.web_search(req.queries, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
     async def _shelf_models(request: Request, loader):

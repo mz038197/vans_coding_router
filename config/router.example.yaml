@@ -57,3 +57,7 @@ providers:
     base_url: "https://api.openai.com/v1"
     api_key_env: "OPENAI_API_KEY"
     enabled: true
+
+# Web Search (Tavily). One key, held as a secret. Without it POST /v1/search answers 503.
+web_search:
+  api_key_env: "TAVILY_API_KEY"

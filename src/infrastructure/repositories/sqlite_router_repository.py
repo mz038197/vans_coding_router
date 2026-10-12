@@ -225,6 +225,12 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(
                 conn,
                 "class_sessions",
+                "web_search_enabled",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                conn,
+                "class_sessions",
                 "course_catalog_yaml",
                 "TEXT NOT NULL DEFAULT 'actions: []\n'",
             )

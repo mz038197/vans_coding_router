@@ -5,6 +5,7 @@ from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.config import (
     apply_runtime_settings,
     load_router_settings,
+    resolve_web_search_api_key,
     validate_portal_auth_settings,
 )
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
@@ -13,6 +14,7 @@ from src.infrastructure.lobby.paths import resolve_lobby_workspace
 from src.infrastructure.lobby.registry import ConnectionHub, RoomRegistry
 from src.infrastructure.logging.file_request_logger import FileRequestLogger
 from src.infrastructure.repositories.factory import build_router_repository
+from src.infrastructure.search.tavily_web_search import TavilyWebSearch
 from src.presentation.fastapi.dependencies import AppContainer
 
 
@@ -32,12 +34,15 @@ def build_container(
         if provider.enabled and provider.type == "openai_compatible" and provider.base_url
     }
     llm_gateway = RoutingGateway(provider_gateways)
+    web_search_key = resolve_web_search_api_key(settings.web_search)
+    web_search = TavilyWebSearch(web_search_key) if web_search_key else None
 
     auth_use_case = AuthUseCase(api_key_repo=api_key_repo)
     api_use_case = ApiUseCase(
         gateway=llm_gateway,
         api_key_repo=api_key_repo,
         logger=request_logger,
+        web_search=web_search,
     )
     portal_use_case = PortalUseCase(api_key_repo, settings, llm_gateway=llm_gateway)
 

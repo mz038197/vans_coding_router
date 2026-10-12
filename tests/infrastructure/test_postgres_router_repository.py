@@ -149,3 +149,17 @@ def test_postgres_session_seat_limit_blocks_new_identities(postgres_repo):
     student = repo.upsert_google_user("student@gmail.com", "Student")
     with pytest.raises(ValueError, match="無法領取"):
         repo.redeem_invite(session["invite_code"], student["id"])
+
+
+def test_postgres_web_search_switch_is_off_until_turned_on(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    assert session["web_search_enabled"] is False
+    assert repo.is_web_search_enabled(session["id"]) is False
+    updated = repo.update_class_session(klass["id"], session["id"], web_search_enabled=True)
+    assert updated["web_search_enabled"] is True
+    assert repo.is_web_search_enabled(session["id"]) is True
+    repo.update_class_session(klass["id"], session["id"], web_search_enabled=False)
+    assert repo.is_web_search_enabled(session["id"]) is False

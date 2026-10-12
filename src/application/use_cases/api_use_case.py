@@ -43,12 +43,15 @@ from src.domain.errors import (
     SpeechTranscriptionNotSupportedError,
     StatefulResponsesNotSupportedError,
     TtsDisabledError,
+    WebSearchDisabledError,
+    WebSearchUnavailableError,
 )
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
+from src.domain.ports.web_search import WebSearchPort
 
 
 class ApiUseCase:
@@ -57,10 +60,12 @@ class ApiUseCase:
         gateway: LLMGatewayPort,
         api_key_repo: ApiKeyRepositoryPort,
         logger: RequestLogPort,
+        web_search: WebSearchPort | None = None,
     ):
         self.gateway = gateway
         self.api_key_repo = api_key_repo
         self.logger = logger
+        self.web_search_backend = web_search
 
     async def health(self) -> dict[str, Any]:
         return await self.gateway.health()
@@ -314,6 +319,30 @@ class ApiUseCase:
             student_list_ids(self._classroom_model_choice(auth_context), ids)
         )
 
+    async def web_search(
+        self,
+        queries: list[str],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        del api_key, client_ip
+        self._assert_web_search_allowed(auth_context)
+        if self.web_search_backend is None:
+            raise WebSearchUnavailableError()
+        results = await self.web_search_backend.search(queries)
+        return {
+            "results": [
+                {
+                    "query": result.query,
+                    "title": result.title,
+                    "url": result.url,
+                    "text": result.text,
+                }
+                for result in results
+            ]
+        }
+
     async def speech_models(
         self,
         auth_context: AuthContext | None = None,
@@ -406,6 +435,14 @@ class ApiUseCase:
             model_id,
             EmbeddingsDisabledError,
         )
+
+    def _assert_web_search_allowed(self, auth_context: AuthContext | None) -> None:
+        # A switch on the sitting, not a shelf: there is no Model ID to check.
+        if self._is_personal_api_key(auth_context):
+            return
+        checker = getattr(self.api_key_repo, "is_web_search_enabled", None)
+        if auth_context is None or not callable(checker) or not checker(auth_context.session_id):
+            raise WebSearchDisabledError()
 
     def _assert_tts_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
         self._assert_shelf_allowed(

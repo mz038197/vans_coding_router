@@ -96,6 +96,18 @@ class ImageGenerationRequestSchema(BaseModel):
         return v
 
 
+class WebSearchRequestSchema(BaseModel):
+    queries: list[str] = Field(min_length=1, max_length=3)
+
+    @field_validator("queries")
+    @classmethod
+    def validate_queries(cls, v: list[str]) -> list[str]:
+        for query in v:
+            if not query.strip() or len(query) > 1000:
+                raise ValueError("每個查詢必須是 1 到 1000 個字元")
+        return v
+
+
 class AudioSpeechRequestSchema(BaseModel):
     model: str
     input: str

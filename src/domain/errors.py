@@ -226,6 +226,24 @@ class EmbeddingsDisabledError(AppError):
         )
 
 
+class WebSearchDisabledError(AppError):
+    def __init__(self, message: str = "此課堂未開放網路搜尋"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="web_search_disabled",
+        )
+
+
+class WebSearchUnavailableError(AppError):
+    def __init__(self, message: str = "網路搜尋目前無法使用"):
+        super().__init__(
+            message=message,
+            status_code=503,
+            code="web_search_unavailable",
+        )
+
+
 class TtsNotSupportedError(AppError):
     def __init__(self, message: str = "此 provider 不支援 /v1/audio/speech"):
         super().__init__(

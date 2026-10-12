@@ -1120,6 +1120,7 @@ class RouterRepositoryBase(ABC):
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -1136,6 +1137,7 @@ class RouterRepositoryBase(ABC):
             and tts_enabled is None
             and speech_transcription_enabled is None
             and prompt_logging_enabled is None
+            and web_search_enabled is None
             and status is None
             and course_catalog_yaml is None
             and seat_limit is None
@@ -1198,6 +1200,11 @@ class RouterRepositoryBase(ABC):
                 conn.execute(
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(prompt_logging_enabled), session_id),
+                )
+            if web_search_enabled is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET web_search_enabled = ? WHERE id = ?"),
+                    (self._bool_storage_value(web_search_enabled), session_id),
                 )
             if course_catalog_yaml is not None:
                 from src.domain.course_catalog import normalize_course_catalog_yaml
@@ -1446,6 +1453,21 @@ class RouterRepositoryBase(ABC):
             value = row["prompt_logging_enabled"]
             if value is None:
                 return True
+            if isinstance(value, bool):
+                return value
+            return bool(int(value or 0))
+
+    def is_web_search_enabled(self, session_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql("SELECT web_search_enabled FROM class_sessions WHERE id = ?"),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            value = row["web_search_enabled"]
+            if value is None:
+                return False
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))

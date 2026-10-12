@@ -255,6 +255,20 @@ test("prompt logging toggle does not start personal API Key", () => {
   assert.doesNotMatch(source, /\breloadSessionViews\s*\(/);
 });
 
+test("課堂設定 has a 網路搜尋 switch that patches web_search_enabled", () => {
+  const cell = extractNamedFunction(portalHtml, "sessionCapabilitiesCell");
+  assert.match(cell, /網路搜尋/);
+  assert.match(cell, /toggleSessionWebSearch\(/);
+  const source = extractNamedFunction(portalHtml, "toggleSessionWebSearch");
+  assert.match(source, /method:\s*'PATCH'/);
+  assert.match(source, /web_search_enabled:\s*enabled/);
+  assert.doesNotMatch(source, /showTab\s*\(/);
+  assert.doesNotMatch(source, /\brefresh\s*\(/);
+  assert.doesNotMatch(source, /\breloadSessionViews\s*\(/);
+  const state = extractNamedFunction(portalHtml, "sessionWebSearchEnabled");
+  assert.match(state, /return value === true/);
+});
+
 test("我的課程 mutations do not hard-switch to personal API Key", () => {
   for (const name of ["createClass", "createSession", "disableClass", "disableClassMember"]) {
     const source = extractNamedFunction(portalHtml, name);

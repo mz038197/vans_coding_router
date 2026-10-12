@@ -175,6 +175,7 @@ class RouterRepositoryPort(Protocol):
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -222,6 +223,9 @@ class RouterRepositoryPort(Protocol):
         ...
 
     def is_prompt_logging_enabled(self, session_id: int) -> bool:
+        ...
+
+    def is_web_search_enabled(self, session_id: int) -> bool:
         ...
 
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:

@@ -988,8 +988,12 @@
       const prompt = allowOwnerActions
         ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
         : chip('Prompt', promptOn, '');
+      const searchOn = sessionWebSearchEnabled(session);
+      const search = allowOwnerActions
+        ? capabilityToggleHtml('session-web-search-toggle', '開啟後，這堂課的 Coding Agent 可以搜尋公開網路', searchOn, `toggleSessionWebSearch(${classId}, ${session.id}, this.checked, this)`, `網路搜尋 ${searchOn ? '開' : '關'}`)
+        : chip('網路搜尋', searchOn, '');
       return `<div class="session-capabilities${allowOwnerActions ? '' : ' session-capabilities-readonly'}">
-        ${chip('生圖', imageOn, '')}${chip('嵌入', embeddingsOn, '')}${chip('語音', ttsOn, '')}${chip('語音轉寫', speechOn, '上傳音檔／即時語音轉寫')}${chip('決策', decisionOn, '決策模型')}${prompt}
+        ${chip('生圖', imageOn, '')}${chip('嵌入', embeddingsOn, '')}${chip('語音', ttsOn, '')}${chip('語音轉寫', speechOn, '上傳音檔／即時語音轉寫')}${chip('決策', decisionOn, '決策模型')}${prompt}${search}
       </div>`;
     }
 
@@ -2763,6 +2767,26 @@ snippets:
           body: JSON.stringify({ prompt_logging_enabled: enabled }),
         });
         if (label) label.textContent = enabled ? 'Prompt 開' : 'Prompt 關';
+      } catch (err) {
+        if (inputEl) inputEl.checked = previous;
+        throw err;
+      }
+    }
+
+    function sessionWebSearchEnabled(session) {
+      const value = session.web_search_enabled;
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function toggleSessionWebSearch(classId, sessionId, enabled, inputEl) {
+      const label = inputEl?.closest('.session-web-search-toggle')?.querySelector('span');
+      const previous = !enabled;
+      try {
+        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ web_search_enabled: enabled }),
+        });
+        if (label) label.textContent = enabled ? '網路搜尋 開' : '網路搜尋 關';
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;

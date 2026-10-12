@@ -22,6 +22,8 @@ from src.domain.errors import (
     UpstreamBusyError,
     UpstreamServiceError,
     UnresolvedApiKeyPlaceholderError,
+    WebSearchDisabledError,
+    WebSearchUnavailableError,
     WrongCredentialTypeError,
 )
 from src.domain.extra_usage import is_key_failover_exhaustion
@@ -212,6 +214,28 @@ def register_error_handlers(app: FastAPI) -> None:
                 exc.status_code,
                 exc.message,
                 error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchDisabledError)
+    async def handle_web_search_disabled(request: Request, exc: WebSearchDisabledError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchUnavailableError)
+    async def handle_web_search_unavailable(request: Request, exc: WebSearchUnavailableError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="server_error",
                 code=exc.code,
             )
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})

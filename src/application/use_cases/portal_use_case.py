@@ -43,6 +43,7 @@ _SESSION_CAPABILITY_FIELDS = frozenset(
         "tts_enabled",
         "speech_transcription_enabled",
         "prompt_logging_enabled",
+        "web_search_enabled",
     }
 )
 
@@ -412,6 +413,7 @@ class PortalUseCase:
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         decision_model: Any = DECISION_MODEL_UNCHANGED,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
@@ -448,6 +450,7 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            web_search_enabled=web_search_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
@@ -470,6 +473,7 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            web_search_enabled=web_search_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,

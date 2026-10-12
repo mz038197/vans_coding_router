@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 from src.domain.entities.chat import ChatCompletionRequest
+from src.domain.ports.web_search import WebSearchResult
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.logging.message_preview import build_message_preview
 
@@ -353,3 +354,23 @@ class FakeLLMGateway:
             ws_url=f"ws://upstream.test/v1/realtime?model={upstream}",
             api_key="sk-test",
         )
+
+
+class FakeWebSearch:
+    def __init__(self):
+        self.calls: list[list[str]] = []
+        self.error: Exception | None = None
+
+    async def search(self, queries: list[str]) -> list[WebSearchResult]:
+        self.calls.append(list(queries))
+        if self.error is not None:
+            raise self.error
+        return [
+            WebSearchResult(
+                query=query,
+                title=f"{query} 的結果",
+                url="https://example.com/page",
+                text=f"關於 {query} 的內文片段",
+            )
+            for query in queries
+        ]
