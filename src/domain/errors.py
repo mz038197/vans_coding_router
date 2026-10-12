@@ -235,6 +235,15 @@ class WebSearchDisabledError(AppError):
         )
 
 
+class WebSearchRateLimitedError(AppError):
+    def __init__(self, message: str = "搜尋太頻繁，請稍後再試"):
+        super().__init__(
+            message=message,
+            status_code=429,
+            code="web_search_rate_limited",
+        )
+
+
 class WebSearchUnavailableError(AppError):
     def __init__(self, message: str = "網路搜尋目前無法使用"):
         super().__init__(

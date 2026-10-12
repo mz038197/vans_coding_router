@@ -23,6 +23,7 @@ from src.domain.errors import (
     UpstreamServiceError,
     UnresolvedApiKeyPlaceholderError,
     WebSearchDisabledError,
+    WebSearchRateLimitedError,
     WebSearchUnavailableError,
     WrongCredentialTypeError,
 )
@@ -225,6 +226,17 @@ def register_error_handlers(app: FastAPI) -> None:
                 exc.status_code,
                 exc.message,
                 error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchRateLimitedError)
+    async def handle_web_search_rate_limited(request: Request, exc: WebSearchRateLimitedError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="rate_limit_error",
                 code=exc.code,
             )
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})

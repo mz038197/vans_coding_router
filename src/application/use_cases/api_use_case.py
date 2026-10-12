@@ -44,8 +44,10 @@ from src.domain.errors import (
     StatefulResponsesNotSupportedError,
     TtsDisabledError,
     WebSearchDisabledError,
+    WebSearchRateLimitedError,
     WebSearchUnavailableError,
 )
+from src.application.web_search_rate_limit import WebSearchRateLimiter
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
@@ -61,11 +63,13 @@ class ApiUseCase:
         api_key_repo: ApiKeyRepositoryPort,
         logger: RequestLogPort,
         web_search: WebSearchPort | None = None,
+        web_search_limiter: WebSearchRateLimiter | None = None,
     ):
         self.gateway = gateway
         self.api_key_repo = api_key_repo
         self.logger = logger
         self.web_search_backend = web_search
+        self.web_search_limiter = web_search_limiter or WebSearchRateLimiter()
 
     async def health(self) -> dict[str, Any]:
         return await self.gateway.health()
@@ -326,8 +330,11 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        del api_key, client_ip
+        del client_ip
         self._assert_web_search_allowed(auth_context)
+        # After the switch: a refused search does not spend the key's minute.
+        if not self.web_search_limiter.allow(api_key or ""):
+            raise WebSearchRateLimitedError()
         if self.web_search_backend is None:
             raise WebSearchUnavailableError()
         results = await self.web_search_backend.search(queries)

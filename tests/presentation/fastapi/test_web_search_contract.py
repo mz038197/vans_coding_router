@@ -8,6 +8,7 @@ from fakes import FakeLLMGateway, FakeRequestLogger, FakeWebSearch
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.application.web_search_rate_limit import WebSearchRateLimiter
 from src.domain.errors import UpstreamServiceError
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
@@ -29,7 +30,20 @@ def _settings(tmp_path) -> RouterSettings:
     )
 
 
-def _app_client(tmp_path, web_search=None):
+class FakeClock:
+    """Seconds that pass only when a test says so."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _app_client(tmp_path, web_search=None, clock=None):
     """The API and the Portal on one app, with the search backend swapped for a fake."""
     settings = _settings(tmp_path)
     repo = SqliteRouterRepository(settings.database.path, settings)
@@ -39,6 +53,7 @@ def _app_client(tmp_path, web_search=None):
         api_key_repo=repo,
         logger=FakeRequestLogger(),
         web_search=search,
+        web_search_limiter=WebSearchRateLimiter(clock=clock or FakeClock()),
     )
     app = FastAPI()
     register_error_handlers(app)
@@ -253,3 +268,79 @@ def test_a_search_writes_no_prompt_log(tmp_path):
     assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
 
     assert repo.list_prompt_logs(teacher["id"], klass["id"]) == []
+
+
+def test_the_eleventh_search_in_a_minute_is_rate_limited(tmp_path):
+    client, repo, search = _app_client(tmp_path)
+    headers = _personal_headers(repo)
+
+    for _ in range(10):
+        assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
+    limited = client.post("/v1/search", headers=headers, json=QUERY)
+
+    assert limited.status_code == 429
+    assert limited.json() == {
+        "error": {
+            "message": "搜尋太頻繁，請稍後再試",
+            "type": "rate_limit_error",
+            "param": None,
+            "code": "web_search_rate_limited",
+        }
+    }
+    assert len(search.calls) == 10
+
+
+def test_a_key_may_search_again_once_a_minute_has_passed(tmp_path):
+    clock = FakeClock()
+    client, repo, search = _app_client(tmp_path, clock=clock)
+    headers = _personal_headers(repo)
+
+    for _ in range(10):
+        assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
+    clock.advance(59)
+    assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 429
+
+    clock.advance(1)
+    assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
+    assert len(search.calls) == 11
+
+
+def test_each_key_has_its_own_count(tmp_path):
+    client, repo, _search = _app_client(tmp_path)
+    first = _personal_headers(repo)
+    other = repo.upsert_google_user("other@school.edu", "Other")
+    second = {"Authorization": f"Bearer {repo.issue_long_lived_key(other['id'])}"}
+
+    for _ in range(10):
+        assert client.post("/v1/search", headers=first, json=QUERY).status_code == 200
+    assert client.post("/v1/search", headers=first, json=QUERY).status_code == 429
+
+    assert client.post("/v1/search", headers=second, json=QUERY).status_code == 200
+
+
+def test_a_classroom_api_key_has_the_same_limit(tmp_path):
+    client, repo, search = _app_client(tmp_path)
+    _teacher_row, klass, session, cookies, headers = _sitting(client, repo)
+    _set_web_search(client, klass, session, cookies, True)
+
+    for _ in range(10):
+        assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
+    limited = client.post("/v1/search", headers=headers, json=QUERY)
+
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "web_search_rate_limited"
+    assert len(search.calls) == 10
+
+
+def test_searches_refused_by_the_switch_do_not_count(tmp_path):
+    client, repo, search = _app_client(tmp_path)
+    _teacher_row, klass, session, cookies, headers = _sitting(client, repo)
+
+    for _ in range(11):
+        blocked = client.post("/v1/search", headers=headers, json=QUERY)
+        assert blocked.status_code == 403
+        assert blocked.json()["error"]["code"] == "web_search_disabled"
+    assert search.calls == []
+
+    _set_web_search(client, klass, session, cookies, True)
+    assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
