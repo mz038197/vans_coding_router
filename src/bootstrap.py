@@ -35,14 +35,14 @@ def build_container(
     }
     llm_gateway = RoutingGateway(provider_gateways)
     web_search_key = resolve_web_search_api_key(settings.web_search)
-    web_search = TavilyWebSearch(web_search_key) if web_search_key else None
+    web_search_backend = TavilyWebSearch(web_search_key) if web_search_key else None
 
     auth_use_case = AuthUseCase(api_key_repo=api_key_repo)
     api_use_case = ApiUseCase(
         gateway=llm_gateway,
         api_key_repo=api_key_repo,
         logger=request_logger,
-        web_search=web_search,
+        web_search_backend=web_search_backend,
     )
     portal_use_case = PortalUseCase(api_key_repo, settings, llm_gateway=llm_gateway)
 

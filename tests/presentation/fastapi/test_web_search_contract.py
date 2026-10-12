@@ -1,5 +1,9 @@
 """Web Search follows the Class Session's switch, not a shelf."""
 
+import asyncio
+import json
+
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,9 +13,10 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.application.web_search_rate_limit import WebSearchRateLimiter
-from src.domain.errors import UpstreamServiceError
+from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.infrastructure.search.tavily_web_search import TavilyWebSearch
 from src.presentation.fastapi.error_handlers import register_error_handlers
 from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddleware
 from src.presentation.fastapi.routers.api_router import create_api_router
@@ -52,7 +57,7 @@ def _app_client(tmp_path, web_search=None, clock=None):
         gateway=FakeLLMGateway(),
         api_key_repo=repo,
         logger=FakeRequestLogger(),
-        web_search=search,
+        web_search_backend=search,
         web_search_limiter=WebSearchRateLimiter(clock=clock or FakeClock()),
     )
     app = FastAPI()
@@ -344,3 +349,100 @@ def test_searches_refused_by_the_switch_do_not_count(tmp_path):
 
     _set_web_search(client, klass, session, cookies, True)
     assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
+
+
+def test_searches_refused_for_want_of_a_search_key_do_not_count(tmp_path):
+    client, repo, _search = _app_client(tmp_path, web_search=NO_SEARCH_KEY)
+    headers = _personal_headers(repo)
+
+    for _ in range(11):
+        unavailable = client.post("/v1/search", headers=headers, json=QUERY)
+        assert unavailable.status_code == 503
+        assert unavailable.json()["error"]["code"] == "web_search_unavailable"
+
+
+def test_an_unreachable_search_backend_is_told_apart_from_a_missing_search_key(tmp_path):
+    search = FakeWebSearch()
+    client, repo, _search = _app_client(tmp_path, web_search=search)
+
+    search.error = ServiceUnavailableError("tavily unavailable: request timed out")
+    response = client.post("/v1/search", headers=_personal_headers(repo), json=QUERY)
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "message": "tavily unavailable: request timed out",
+            "type": "server_error",
+            "param": None,
+            "code": None,
+        }
+    }
+    assert response.json()["error"]["code"] != "web_search_unavailable"
+
+
+def _tavily(handler) -> TavilyWebSearch:
+    """The Tavily adapter over a transport that never leaves this process."""
+    return TavilyWebSearch("tvly-test", transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("results", [None, 7, "oops", {"title": "not a list"}])
+def test_a_tavily_reply_without_a_result_list_uses_the_upstream_failure_shape(tmp_path, results):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": results})
+
+    client, repo, _search = _app_client(tmp_path, web_search=_tavily(handler))
+
+    response = client.post("/v1/search", headers=_personal_headers(repo), json=QUERY)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": {
+            "message": "Tavily returned an unreadable search reply",
+            "type": "server_error",
+            "param": None,
+            "code": None,
+        }
+    }
+
+
+def test_a_tavily_timeout_says_that_the_search_timed_out(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("", request=request)
+
+    client, repo, _search = _app_client(tmp_path, web_search=_tavily(handler))
+
+    response = client.post("/v1/search", headers=_personal_headers(repo), json=QUERY)
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "message": "tavily unavailable: request timed out",
+            "type": "server_error",
+            "param": None,
+            "code": None,
+        }
+    }
+
+
+def test_one_failed_tavily_query_cancels_the_queries_sent_with_it(tmp_path):
+    finished: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        query = json.loads(request.content)["query"]
+        if query == "broken":
+            return httpx.Response(500, json={"detail": {"error": "search backend exploded"}})
+        await asyncio.sleep(0.05 if query == "slow" else 0.3)
+        finished.append(query)
+        return httpx.Response(200, json={"results": []})
+
+    client, repo, _search = _app_client(tmp_path, web_search=_tavily(handler))
+    headers = _personal_headers(repo)
+
+    # One event loop for both calls, so a query left running would finish during the second.
+    with client:
+        failed = client.post("/v1/search", headers=headers, json={"queries": ["slow", "broken"]})
+        assert failed.status_code == 500
+        assert failed.json()["error"]["message"] == "search backend exploded"
+        assert client.post("/v1/search", headers=headers, json={"queries": ["later"]}).status_code == 200
+
+    assert finished == ["later"]

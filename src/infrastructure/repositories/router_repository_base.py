@@ -1443,31 +1443,22 @@ class RouterRepositoryBase(ABC):
             return bool(int(value or 0))
 
     def is_prompt_logging_enabled(self, session_id: int) -> bool:
-        with self._connect() as conn:
-            row = conn.execute(
-                self._sql("SELECT prompt_logging_enabled FROM class_sessions WHERE id = ?"),
-                (session_id,),
-            ).fetchone()
-            if not row:
-                return True
-            value = row["prompt_logging_enabled"]
-            if value is None:
-                return True
-            if isinstance(value, bool):
-                return value
-            return bool(int(value or 0))
+        return self._session_switch(session_id, "prompt_logging_enabled", default=True)
 
     def is_web_search_enabled(self, session_id: int) -> bool:
+        return self._session_switch(session_id, "web_search_enabled", default=False)
+
+    def _session_switch(self, session_id: int, column: str, *, default: bool) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT web_search_enabled FROM class_sessions WHERE id = ?"),
+                self._sql(f"SELECT {column} FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
             if not row:
-                return False
-            value = row["web_search_enabled"]
+                return default
+            value = row[column]
             if value is None:
-                return False
+                return default
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))

@@ -62,13 +62,13 @@ class ApiUseCase:
         gateway: LLMGatewayPort,
         api_key_repo: ApiKeyRepositoryPort,
         logger: RequestLogPort,
-        web_search: WebSearchPort | None = None,
+        web_search_backend: WebSearchPort | None = None,
         web_search_limiter: WebSearchRateLimiter | None = None,
     ):
         self.gateway = gateway
         self.api_key_repo = api_key_repo
         self.logger = logger
-        self.web_search_backend = web_search
+        self.web_search_backend = web_search_backend
         self.web_search_limiter = web_search_limiter or WebSearchRateLimiter()
 
     async def health(self) -> dict[str, Any]:
@@ -332,11 +332,11 @@ class ApiUseCase:
     ) -> dict[str, Any]:
         del client_ip
         self._assert_web_search_allowed(auth_context)
-        # After the switch: a refused search does not spend the key's minute.
-        if not self.web_search_limiter.allow(api_key or ""):
-            raise WebSearchRateLimitedError()
         if self.web_search_backend is None:
             raise WebSearchUnavailableError()
+        # After both refusals: a search that cannot run does not spend the key's minute.
+        if not self.web_search_limiter.allow(api_key or ""):
+            raise WebSearchRateLimitedError()
         results = await self.web_search_backend.search(queries)
         return {
             "results": [
