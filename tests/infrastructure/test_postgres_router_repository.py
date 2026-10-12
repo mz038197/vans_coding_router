@@ -85,9 +85,9 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     repo.set_class_status(ended["id"], "ended")
     repo.set_class_status(ended["id"], "active")
     ended_key = repo.redeem_invite(ended_session["invite_code"], student["id"])["api_key"]
-    repo.set_class_status(ended["id"], "ended")
     context = repo.verify_api_key_context(ended_key)
     assert context is not None
+    repo.set_class_status(ended["id"], "ended")
     repo.log_prompt(context, "ended log", "ended log", "fake-model", "ok", None)
     with repo._connect() as conn:
         conn.execute(
