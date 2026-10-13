@@ -1,6 +1,6 @@
 # Web Search is a capability switch, not a shelf
 
-Status: built, not deployed. Design settled with the owner on 2026-10-12. The endpoint, the switch, and the brake are built on the `issue-21-web-search` branch. The comparison against Exa and the provider sign-off are still pending under mz038197/VansPod#26.
+Status: accepted and deployed on 2026-10-13. Design settled with the owner on 2026-10-12. Tavily is the search provider: the owner signed it off on 2026-10-13 after five real Traditional Chinese queries against Tavily, and chose not to run the comparison against Exa (mz038197/VansPod#26).
 
 A class had no way to search the web. Codex's built-in search was refused, and the model fell back to fetching sites one by one from the student's shell: 27 tool calls and about a million input tokens in four minutes. The router gains Web Search: it runs the search for the key holder against a search API and answers with titles, links, and text excerpts.
 
@@ -16,7 +16,7 @@ Each key may send ten searches a minute. The count is held in this process's mem
 
 A search writes no Prompt Log.
 
-The search API is Tavily behind a port, with one key named in the config and held as a secret. The choice is confirmed against Exa with real Traditional Chinese queries before the build is finished.
+The search API is Tavily behind a port, with one key named in the config and held as a secret. The comparison against Exa that was planned before the build finished was not run; the port keeps the provider replaceable if the results disappoint.
 
 ## Considered Options
 
