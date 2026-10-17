@@ -302,3 +302,58 @@ test("Prompt Log model cell shows the tier name and confidence only when stored"
   assert.equal(sandbox.renderLogModel({ model: "x", tier_name: "<b>", tier_confidence: 1 }).includes("<b>"), false);
   assert.match(extractNamedFunction(portalHtml, "renderPromptLogs"), /renderLogModel\(item\)/);
 });
+
+function modelEditorSandbox(extra = {}) {
+  const stencil = portalHtml.match(/const VCROUTER_STENCIL = \{[\s\S]*?\n {4}\};/)[0];
+  const code = [
+    stencil,
+    ...["modelsFromDocument", "draftFromDocument", "documentFromDraft", "stencilDraftModel",
+      "uploadedSessionChatModelsDraft"].map((name) => extractNamedFunction(portalHtml, name)),
+  ].join("\n");
+  const sandbox = { ...extra };
+  vm.runInNewContext(
+    `${code}\nthis.draftFromDocument = draftFromDocument;\nthis.documentFromDraft = documentFromDraft;\n` +
+      "this.uploadedSessionChatModelsDraft = uploadedSessionChatModelsDraft;",
+    sandbox,
+  );
+  return sandbox;
+}
+
+const TIERED_DOCUMENT = [{
+  name: "VCRouter",
+  vendor: "customendpoint",
+  autoTiers: [{ id: "t-light", name: "輕量", description: "小問題" }, { id: "t-hard", name: "困難", description: "大問題" }],
+  selectorShelf: ["openrouter@typesafe/jev-1.14"],
+  models: [{ id: "ollama_cloud@light:cloud", name: "light", autoTier: "t-light" }],
+}];
+
+test("下載目前清單 carries the draft's tiers, selector shelf, and model tiers", () => {
+  const sandbox = modelEditorSandbox();
+  const out = JSON.parse(JSON.stringify(sandbox.documentFromDraft(sandbox.draftFromDocument(TIERED_DOCUMENT))));
+  assert.deepEqual(out[0].autoTiers, TIERED_DOCUMENT[0].autoTiers);
+  assert.deepEqual(out[0].selectorShelf, TIERED_DOCUMENT[0].selectorShelf);
+  assert.equal(out[0].models[0].autoTier, "t-light");
+  assert.match(extractNamedFunction(portalHtml, "downloadCurrentSessionChatModels"), /documentFromDraft\(sessionChatModelsDraft\)/);
+});
+
+test("upload asks the Portal to merge the file into the open draft", async () => {
+  const calls = [];
+  const sandbox = modelEditorSandbox({
+    api: async (path, options) => {
+      calls.push({ path, options });
+      return TIERED_DOCUMENT;
+    },
+  });
+  const draft = sandbox.draftFromDocument([]);
+  const next = await sandbox.uploadedSessionChatModelsDraft(JSON.stringify(TIERED_DOCUMENT), draft);
+  assert.equal(calls[0].path, "/teacher/session-chat-language-models/upload");
+  assert.equal(calls[0].options.method, "POST");
+  const body = JSON.parse(calls[0].options.body);
+  assert.deepEqual(body.uploaded, TIERED_DOCUMENT);
+  assert.equal(body.current[0].models.length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(next.autoTiers)), TIERED_DOCUMENT[0].autoTiers);
+  assert.equal(next.models[0].autoTier, "t-light");
+
+  await assert.rejects(sandbox.uploadedSessionChatModelsDraft("{", draft), /JSON 無法解析/);
+  assert.equal(calls.length, 1);
+});

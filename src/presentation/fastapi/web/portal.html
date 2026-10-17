@@ -3047,14 +3047,26 @@ snippets:
       return models;
     }
 
+    // The editor draft: models plus the document-level Auto Tiers and selector shelf (ADR-0037).
+    function draftFromDocument(document) {
+      const provider = (document || []).find((item) => item && typeof item === 'object') || {};
+      const draft = { models: modelsFromDocument(document), removed: {} };
+      if (Array.isArray(provider.autoTiers)) draft.autoTiers = provider.autoTiers.map((tier) => ({ ...tier }));
+      if (Array.isArray(provider.selectorShelf)) draft.selectorShelf = [...provider.selectorShelf];
+      return draft;
+    }
+
     function documentFromDraft(draft) {
-      return [{
+      const provider = {
         name: VCROUTER_STENCIL.name,
         vendor: VCROUTER_STENCIL.vendor,
         apiKey: VCROUTER_STENCIL.apiKey,
         apiType: VCROUTER_STENCIL.apiType,
-        models: (draft.models || []).map(stencilDraftModel),
-      }];
+      };
+      if (Array.isArray(draft.autoTiers)) provider.autoTiers = draft.autoTiers.map((tier) => ({ ...tier }));
+      if (Array.isArray(draft.selectorShelf)) provider.selectorShelf = [...draft.selectorShelf];
+      provider.models = (draft.models || []).map(stencilDraftModel);
+      return [provider];
     }
 
     function stencilDraftModel(model) {
@@ -3065,34 +3077,26 @@ snippets:
       };
     }
 
-    function parseSessionChatModelsUpload(raw) {
+    // Upload (#70): the Portal merges the file into the open draft. Every Model ID lands on
+    // the text shelf, legal file tiers are taken with each model's tier, and the file's
+    // selector shelf is ignored. Nothing is stored until 儲存.
+    async function uploadedSessionChatModelsDraft(raw, draft) {
       let parsed;
       try {
         parsed = JSON.parse(raw);
       } catch {
         throw new Error('JSON 無法解析，編輯器內容未變更。');
       }
-      if (!Array.isArray(parsed)) {
-        throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
+      let merged;
+      try {
+        merged = await api('/teacher/session-chat-language-models/upload', {
+          method: 'POST',
+          body: JSON.stringify({ current: documentFromDraft(draft), uploaded: parsed }),
+        });
+      } catch (err) {
+        throw new Error(`${err.message || err}，編輯器內容未變更。`);
       }
-      if (parsed.some((item) => !item || typeof item !== 'object')) {
-        throw new Error('必須是一個 VCRouter customendpoint 提供者陣列，編輯器內容未變更。');
-      }
-      if (parsed.some((provider) => provider.models != null && !Array.isArray(provider.models))) {
-        throw new Error('Session Chat Language Models 格式錯誤，編輯器內容未變更。');
-      }
-      for (const provider of parsed) {
-        for (const model of provider.models || []) {
-          if (!model || typeof model !== 'object' || !model.id) {
-            throw new Error('模型缺少 id，編輯器內容未變更。');
-          }
-        }
-      }
-      return modelsFromDocument(parsed).map((model) => {
-        const next = stencilDraftModel(model);
-        clearShelfFlags(next);
-        return next;
-      });
+      return { ...draftFromDocument(merged), removed: { ...(draft.removed || {}) } };
     }
 
     function setSessionChatModelsMsg(id, text, isError) {
@@ -3135,13 +3139,12 @@ snippets:
         return;
       }
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
         try {
-          const models = parseSessionChatModelsUpload(String(reader.result || ''));
-          sessionChatModelsDraft = {
-            models,
-            removed: { ...sessionChatModelsDraft.removed },
-          };
+          sessionChatModelsDraft = await uploadedSessionChatModelsDraft(
+            String(reader.result || ''),
+            sessionChatModelsDraft,
+          );
           sessionChatModelsCollapsed.text = false;
           setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
           renderSessionChatModelsList();
@@ -3509,10 +3512,7 @@ snippets:
       sessionChatModelsContext = { mode: 'template' };
       sessionChatModelsLocked = false;
       sessionChatModelsCollapsed = {};
-      sessionChatModelsDraft = {
-        models: modelsFromDocument(routerModelTemplate),
-        removed: {},
-      };
+      sessionChatModelsDraft = draftFromDocument(routerModelTemplate);
       const shelf = document.getElementById('sessionDecisionShelf');
       if (shelf) shelf.value = 'text';
       if (title) title.textContent = '編輯模型範本';
@@ -3535,10 +3535,7 @@ snippets:
       sessionChatModelsContext = { classId, sessionId };
       sessionChatModelsLocked = false;
       sessionChatModelsCollapsed = {};
-      sessionChatModelsDraft = {
-        models: modelsFromDocument(session && session.session_chat_language_models),
-        removed: {},
-      };
+      sessionChatModelsDraft = draftFromDocument(session && session.session_chat_language_models);
       const shelf = document.getElementById('sessionDecisionShelf');
       if (shelf) shelf.value = 'text';
       if (title) {

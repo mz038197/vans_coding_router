@@ -37,7 +37,7 @@ def check_auto_tier_document(
     ``decision_list_ids`` is what the OpenRouter decisions list shows now.
     """
     for provider in _providers(document):
-        _check_tiers(provider.get(AUTO_TIERS_KEY))
+        check_auto_tiers(provider.get(AUTO_TIERS_KEY))
         _check_selector_shelf_shape(provider.get(SELECTOR_SHELF_KEY))
 
     tier_ids = {tier.id for tier in auto_tiers(document)}
@@ -66,7 +66,7 @@ def check_auto_tier_document(
                 )
 
 
-def _check_tiers(raw: Any) -> None:
+def check_auto_tiers(raw: Any) -> None:
     if raw is None:
         return
     if not isinstance(raw, list):

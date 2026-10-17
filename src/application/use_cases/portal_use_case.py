@@ -23,6 +23,7 @@ from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscod
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
 from src.domain.auto_tier_save_check import check_auto_tier_document
+from src.domain.model_document_upload import uploaded_model_document
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -591,6 +592,13 @@ class PortalUseCase:
             previous=self.repo.get_router_model_template(user_id),
         )
         return self.repo.save_router_model_template(user_id, normalized)
+
+    def uploaded_model_document(
+        self, user_id: int, current: Any, uploaded: Any
+    ) -> list[dict[str, Any]]:
+        """The editor draft after an upload; nothing is stored until the teacher saves it."""
+        self._assert_teacher(user_id)
+        return uploaded_model_document(current, uploaded)
 
     def _checked_document(self, document: Any, *, previous: Any) -> list[dict[str, Any]]:
         """The save-time form of a sitting document or template; ValueError refuses the save."""

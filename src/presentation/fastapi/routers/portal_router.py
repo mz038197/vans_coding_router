@@ -109,6 +109,11 @@ class RouterModelTemplateRequest(BaseModel):
     router_model_template: Any
 
 
+class ModelDocumentUploadRequest(BaseModel):
+    current: Any = None
+    uploaded: Any
+
+
 class ClassRequest(BaseModel):
     name: str
     ends_at: str | None = None
@@ -527,6 +532,19 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.save_router_model_template(
                 current_user_id(session_user_id),
                 data.router_model_template,
+            )
+        )
+
+    @router.post("/teacher/session-chat-language-models/upload")
+    async def post_model_document_upload(
+        data: ModelDocumentUploadRequest,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.uploaded_model_document(
+                current_user_id(session_user_id),
+                data.current,
+                data.uploaded,
             )
         )
 
