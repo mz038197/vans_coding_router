@@ -48,6 +48,13 @@ def _upstream_failure_reaches_the_operator(exc: UpstreamServiceError) -> bool:
     return is_key_failover_exhaustion(exc.status_code, body)
 
 
+def _upstream_error_type(status_code: int) -> str:
+    # 上游說請求內容本身有問題時，錯在呼叫端；其餘（含 402 額度用完）仍是伺服器端的事。
+    if status_code in (400, 413, 415, 422):
+        return "invalid_request_error"
+    return "server_error"
+
+
 def log_operational_failure(method: str, path: str, exc: BaseException) -> None:
     exc_info = (type(exc), exc, exc.__traceback__)
     if isinstance(exc, UpstreamServiceError):
@@ -136,7 +143,7 @@ def register_error_handlers(app: FastAPI) -> None:
             return openai_error_response(
                 502 if exc.status_code in (401, 403) else exc.status_code,
                 exc.user_facing_message(),
-                error_type="server_error",
+                error_type=_upstream_error_type(exc.status_code),
                 code="upstream_authentication_error" if exc.status_code in (401, 403) else None,
             )
         details = exc.details or {}

@@ -497,7 +497,9 @@ paths:
         "400":
           description: |
             Invalid Model ID, or a Decision Refusal from the provider.
-            A provider refusal keeps the provider message.
+            A provider refusal keeps the provider message. An upstream 400, 413,
+            415, or 422 has type `invalid_request_error`; other upstream errors
+            have type `server_error`.
           content:
             application/json:
               schema:
@@ -516,7 +518,7 @@ paths:
                   value:
                     error:
                       message: questions must include type
-                      type: server_error
+                      type: invalid_request_error
                       param: null
                       code: null
         "401":
