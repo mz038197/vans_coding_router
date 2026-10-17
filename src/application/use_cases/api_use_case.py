@@ -26,7 +26,7 @@ from src.domain.model_shelf import (
     IMAGE_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
-    omit_non_text_shelf_models,
+    student_side_document,
     shelf_model_ids,
 )
 from src.domain.classroom_model_choice import choice_accepts_model, student_list_ids
@@ -643,7 +643,7 @@ class ApiUseCase:
 
     def _text_model_ids(self, auth_context: AuthContext | None) -> list[str]:
         if self._is_personal_api_key(auth_context):
-            ids = allowlist_from_document(omit_non_text_shelf_models(self._holder_template(auth_context))) or []
+            ids = allowlist_from_document(student_side_document(self._holder_template(auth_context))) or []
             return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
         if auth_context is None or auth_context.session_id is None:
             return []

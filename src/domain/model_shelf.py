@@ -82,7 +82,20 @@ def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
     return ids
 
 
-def omit_non_text_shelf_models(document: list[Any] | None) -> list[Any] | None:
+# Fields only the router reads. No list written for students or VS Code may carry them.
+ROUTER_ONLY_MODEL_KEYS = SHELF_KEYS
+
+
+def student_side_model(model: dict[str, Any]) -> dict[str, Any]:
+    """A copy of one model with every router-only field removed."""
+    entry = copy.deepcopy(model)
+    for key in ROUTER_ONLY_MODEL_KEYS:
+        entry.pop(key, None)
+    return entry
+
+
+def student_side_document(document: list[Any] | None) -> list[Any] | None:
+    """The one outlet for Copilot lists: text-shelf models only, router-only fields removed."""
     if document is None:
         return None
     result = copy.deepcopy(document)
@@ -93,7 +106,9 @@ def omit_non_text_shelf_models(document: list[Any] | None) -> list[Any] | None:
         if not isinstance(models, list):
             continue
         provider["models"] = [
-            model for model in models if not is_non_text_shelf_model(model)
+            student_side_model(model) if isinstance(model, dict) else model
+            for model in models
+            if not is_non_text_shelf_model(model)
         ]
     return result
 
