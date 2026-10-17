@@ -19,7 +19,16 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.application.vcr_auto_selector import VcrAutoSelector
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
+from src.domain.auto_tier import (
+    TierSelection,
+    last_user_text_from_chat,
+    last_user_text_from_responses,
+    selectable_tiers,
+    selector_shelf_ids,
+    tier_ordered_walk,
+)
 from src.domain.decision_model import DECISION_SHELF_KEY
 from src.domain.model_shelf import (
     EMBEDDINGS_SHELF_KEY,
@@ -29,7 +38,7 @@ from src.domain.model_shelf import (
     student_side_document,
     shelf_model_ids,
 )
-from src.domain.classroom_model_choice import choice_accepts_model, student_list_ids
+from src.domain.classroom_model_choice import AUTOMATIC_MODELS, choice_accepts_model, student_list_ids
 from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
@@ -64,8 +73,10 @@ class ApiUseCase:
         logger: RequestLogPort,
         web_search_backend: WebSearchPort | None = None,
         web_search_limiter: WebSearchRateLimiter | None = None,
+        vcr_auto_selector: VcrAutoSelector | None = None,
     ):
         self.gateway = gateway
+        self.vcr_auto_selector = vcr_auto_selector or VcrAutoSelector(gateway)
         self.api_key_repo = api_key_repo
         self.logger = logger
         self.web_search_backend = web_search_backend
@@ -653,6 +664,37 @@ class ApiUseCase:
         ids = getter(auth_context.session_id) or []
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
+    async def _vcr_auto_text_walk(
+        self,
+        auth_context: AuthContext | None,
+        last_user_text: str,
+    ) -> tuple[list[str], TierSelection | None]:
+        """The text-shelf walk for a vcr-auto chat or Responses call, and the tier chosen.
+
+        The selection is None whenever selection did not run or failed; the walk then
+        keeps document order.
+        """
+        model_ids = self._text_model_ids(auth_context)
+        document = self._selection_document(auth_context)
+        tiers = selectable_tiers(document, model_ids)
+        if not tiers:
+            return model_ids, None
+        selection = await self.vcr_auto_selector.select(
+            selector_shelf_ids(document), tiers, last_user_text
+        )
+        if selection is None:
+            return model_ids, None
+        return tier_ordered_walk(document, model_ids, selection.tier_id), selection
+
+    def _selection_document(self, auth_context: AuthContext | None) -> list[Any] | None:
+        """The document whose Auto Tiers order the walk: only a sitting on Automatic Models."""
+        if self._classroom_model_choice(auth_context) != AUTOMATIC_MODELS:
+            return None
+        getter = getattr(self.api_key_repo, "get_session_chat_language_models", None)
+        if not callable(getter):
+            return None
+        return getter(auth_context.session_id)
+
     async def _chat_nonstream_vcr_auto(
         self,
         req: ChatCompletionRequest,
@@ -665,7 +707,10 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.chat_completions_nonstream(replace(req, model=model_id))
 
-        hit = await walker.run(self._text_model_ids(auth_context), call)
+        model_ids, _selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_chat(req.messages)
+        )
+        hit = await walker.run(model_ids, call)
         self._log_request(
             replace(req, model=hit.model_id),
             api_key,
@@ -690,7 +735,10 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.chat_completions_stream(replace(req, model=model_id))
 
-        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+        model_ids, _selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_chat(req.messages)
+        )
+        async for chunk in walker.stream(model_ids, open_stream):
             tracker.feed(chunk)
             yield chunk
         if walker.model_id is None:
@@ -717,7 +765,10 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.responses_create({**body, "model": model_id})
 
-        hit = await walker.run(self._text_model_ids(auth_context), call)
+        model_ids, _selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_responses(body)
+        )
+        hit = await walker.run(model_ids, call)
         logged = {**body, "model": hit.model_id}
         self._log_responses_request(
             logged,
@@ -743,7 +794,10 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.responses_create_stream({**body, "model": model_id})
 
-        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+        model_ids, _selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_responses(body)
+        )
+        async for chunk in walker.stream(model_ids, open_stream):
             tracker.feed(chunk)
             yield chunk
         if walker.model_id is None:

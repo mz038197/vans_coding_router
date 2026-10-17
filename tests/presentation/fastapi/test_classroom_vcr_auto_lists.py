@@ -252,3 +252,57 @@ def test_router_only_fields_never_reach_a_copilot_list(tmp_path):
         assert response.status_code == 200
         assert "imageShelf" not in response.text
         assert "decisionShelf" not in response.text
+
+
+def test_auto_tiers_and_the_selector_shelf_never_reach_a_copilot_list(tmp_path):
+    client, repo = _client(tmp_path)
+    api_key, teacher, klass, session = _classroom_key(client, repo)
+    selector = "openrouter@typesafe/jev-1.14"
+    stored = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "apiType": "responses",
+            "autoTiers": [
+                {"id": "t-light", "name": "輕量級別", "description": "語法小問題"},
+                {"id": "t-strong", "name": "困難級別", "description": "跨檔案除錯"},
+            ],
+            "selectorShelf": [selector],
+            "models": [
+                {"id": "ollama_cloud@light:cloud", "name": "light", "autoTier": "t-light"},
+                {"id": "ollama_cloud@strong:cloud", "name": "strong", "autoTier": "t-strong"},
+            ],
+        }
+    ]
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"),
+            (json.dumps(stored), session["id"]),
+        )
+        conn.execute(
+            repo._sql("UPDATE router_model_templates SET document_json = ? WHERE user_id = ?"),
+            (json.dumps(stored), teacher["id"]),
+        )
+    headers = {"Authorization": f"Bearer {api_key}"}
+    student = repo.get_user_by_email("student@gmail.com")
+    personal = repo.issue_long_lived_key(teacher["id"])
+
+    responses = []
+    for choice in ("picked", "automatic"):
+        repo.update_class_session(klass["id"], session["id"], classroom_model_choice=choice)
+        responses.append(client.get("/extension/chat-language-models", headers=headers))
+        responses.append(client.get("/v1/models", headers=headers))
+        responses.append(
+            client.get(
+                "/portal/download/install-vscode-models.ps1",
+                cookies=_portal_cookie(repo, student["id"]),
+                headers=headers,
+            )
+        )
+    responses.append(client.get("/v1/models", headers={"Authorization": f"Bearer {personal}"}))
+
+    assert "ollama_cloud@light:cloud" in responses[0].text
+    for response in responses:
+        assert response.status_code == 200
+        for hidden in ("autoTiers", "autoTier", "selectorShelf", selector, "輕量級別", "語法小問題"):
+            assert hidden not in response.text

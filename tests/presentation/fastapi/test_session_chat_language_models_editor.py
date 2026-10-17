@@ -234,6 +234,49 @@ def test_owner_and_admin_can_save_session_document_other_teacher_cannot(tmp_path
     assert by_admin.json()["session_chat_language_models"][0]["models"] == []
 
 
+def test_auto_tiers_tier_fields_and_selector_shelf_are_saved_as_given(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher, klass, session = _owner_session(repo)
+    cookies = _portal_cookie(repo, teacher["id"])
+    tiers = [
+        {"id": "t-light", "name": "輕量", "description": "語法小問題"},
+        {"id": "t-strong", "name": "困難", "description": "跨檔案除錯"},
+    ]
+    jev = "openrouter@typesafe/jev-1.14"
+    document = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "autoTiers": tiers,
+            "selectorShelf": [jev],
+            "models": [
+                {"id": "ollama_cloud@light:cloud", "name": "light", "autoTier": "t-light"},
+                {"id": "ollama_cloud@strong:cloud", "name": "strong", "autoTier": "t-strong"},
+                {"id": jev, "name": "jev", "decisionShelf": True},
+            ],
+        }
+    ]
+    url = f"/teacher/classes/{klass['id']}/sessions/{session['id']}"
+
+    saved = client.patch(url, cookies=cookies, json={"session_chat_language_models": document})
+    template = client.put(
+        "/teacher/router-model-template",
+        cookies=cookies,
+        json={"router_model_template": document},
+    )
+
+    assert saved.status_code == 200
+    assert template.status_code == 200
+    for stored in (
+        client.get(url, cookies=cookies).json()["session_chat_language_models"],
+        client.get("/teacher/router-model-template", cookies=cookies).json(),
+    ):
+        assert stored[0]["autoTiers"] == tiers
+        assert stored[0]["selectorShelf"] == [jev]
+        assert [m.get("autoTier") for m in stored[0]["models"]] == ["t-light", "t-strong", None]
+        assert stored[0]["models"][2]["decisionShelf"] is True
+
+
 def test_invalid_upload_is_rejected_and_stored_document_is_unchanged(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher, klass, session = _owner_session(repo)

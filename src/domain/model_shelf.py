@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from src.domain.auto_tier import AUTO_TIER_KEY, AUTO_TIERS_KEY, SELECTOR_SHELF_KEY
 from src.domain.decision_model import is_decision_shelf_model
 
 IMAGE_SHELF_KEY = "imageShelf"
@@ -83,7 +84,9 @@ def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
 
 
 # Fields only the router reads. No list written for students or VS Code may carry them.
-ROUTER_ONLY_MODEL_KEYS = SHELF_KEYS
+ROUTER_ONLY_MODEL_KEYS = (*SHELF_KEYS, AUTO_TIER_KEY)
+# Document-level (provider entry) fields only the router reads.
+ROUTER_ONLY_DOCUMENT_KEYS = (AUTO_TIERS_KEY, SELECTOR_SHELF_KEY)
 
 
 def student_side_model(model: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +105,8 @@ def student_side_document(document: list[Any] | None) -> list[Any] | None:
     for provider in result:
         if not isinstance(provider, dict):
             continue
+        for key in ROUTER_ONLY_DOCUMENT_KEYS:
+            provider.pop(key, None)
         models = provider.get("models")
         if not isinstance(models, list):
             continue

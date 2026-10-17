@@ -1412,6 +1412,21 @@ class RouterRepositoryBase(ABC):
             )
             return decision_model_ids(document)
 
+    def get_session_chat_language_models(self, session_id: int) -> list[Any] | None:
+        """The stored Session Chat Language Models document, as saved (router-only fields kept)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql(
+                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                ),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return parse_session_chat_language_models_json(
+                row["session_chat_language_models_json"]
+            )
+
     def get_shelf_model_ids(self, session_id: int, shelf_key: str) -> list[str]:
         with self._connect() as conn:
             row = conn.execute(
