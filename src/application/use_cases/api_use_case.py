@@ -712,7 +712,13 @@ class ApiUseCase:
         return selection
 
     def _selection_document(self, auth_context: AuthContext | None) -> list[Any] | None:
-        """The document whose Auto Tiers order the walk: only a sitting on Automatic Models."""
+        """The document whose Auto Tiers order the walk.
+
+        A Personal API Key uses its holder's Router Model Template; a Classroom API Key
+        uses its sitting's document, only on Automatic Models.
+        """
+        if self._is_personal_api_key(auth_context):
+            return self._holder_template(auth_context)
         if self._classroom_model_choice(auth_context) != AUTOMATIC_MODELS:
             return None
         getter = getattr(self.api_key_repo, "get_session_chat_language_models", None)
