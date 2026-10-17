@@ -6,6 +6,7 @@ import json
 import zipfile
 from typing import Any
 
+from src.domain.model_shelf import student_side_document
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.infrastructure.vscode.model_defaults import MODEL_PATCH_KEYS
 
@@ -14,7 +15,9 @@ _CMD_PAYLOAD_SPLIT = "(?m)^:VANS_PAYLOAD\\r?\\n"
 
 
 def _resolved_template(template: list[Any] | None) -> list[Any]:
-    return template if template is not None else load_vans_template()
+    if template is not None:
+        return template
+    return student_side_document(load_vans_template()) or []
 
 
 def render_install_vscode_models_command(template: list[Any] | None = None) -> str:
