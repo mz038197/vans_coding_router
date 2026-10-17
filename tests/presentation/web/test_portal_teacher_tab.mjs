@@ -289,3 +289,16 @@ test("failed class-settings saves do not switch tab", () => {
     assert.doesNotMatch(source, /showTab\s*\(/);
   }
 });
+
+test("Prompt Log model cell shows the tier name and confidence only when stored", () => {
+  const code = ["escapeHtml", "renderLogModel"].map((name) => extractNamedFunction(portalHtml, name)).join("\n");
+  const sandbox = {};
+  vm.runInNewContext(`${code}\nthis.renderLogModel = renderLogModel;`, sandbox);
+  const tiered = sandbox.renderLogModel({ model: "openrouter@vendor/strong", tier_name: "進階", tier_confidence: 0.92 });
+  assert.match(tiered, /openrouter@vendor\/strong/);
+  assert.match(tiered, /進階 · 0\.92/);
+  const untiered = sandbox.renderLogModel({ model: "openrouter@vendor/light", tier_name: null, tier_confidence: null });
+  assert.equal(untiered, "openrouter@vendor/light");
+  assert.equal(sandbox.renderLogModel({ model: "x", tier_name: "<b>", tier_confidence: 1 }).includes("<b>"), false);
+  assert.match(extractNamedFunction(portalHtml, "renderPromptLogs"), /renderLogModel\(item\)/);
+});

@@ -882,6 +882,32 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     assert "raw_prompt" not in payload["items"][0]
 
 
+def test_teacher_prompt_logs_carry_the_tier_name_and_confidence(tmp_path):
+    from src.domain.entities.auth import AuthContext
+
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    auth_context = AuthContext(user_id=teacher["id"], email=teacher["email"], name=teacher["name"], class_id=klass["id"])
+    repo.log_prompt(
+        auth=auth_context,
+        raw_prompt="hi",
+        final_prompt="hi",
+        model="openrouter@vendor/strong",
+        status="ok",
+        client_ip="127.0.0.1",
+        tier_name="進階",
+        tier_confidence=0.92,
+    )
+
+    response = client.get(f"/teacher/classes/{klass['id']}/prompt-logs", cookies=_portal_cookie(repo, teacher))
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert (item["model"], item["tier_name"], item["tier_confidence"]) == ("openrouter@vendor/strong", "進階", 0.92)
+
+
 def test_prompt_logs_can_filter_by_session_id(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")

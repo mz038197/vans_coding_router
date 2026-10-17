@@ -1704,6 +1704,8 @@ class RouterRepositoryBase(ABC):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
+        tier_name: str | None = None,
+        tier_confidence: float | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -1712,9 +1714,10 @@ class RouterRepositoryBase(ABC):
                     INSERT INTO prompt_logs(
                         user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                         prompt_tokens, completion_tokens, total_tokens, client_ip, created_at,
-                        message_preview, messages_json, api_endpoint, response_preview
+                        message_preview, messages_json, api_endpoint, response_preview,
+                        tier_name, tier_confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -1734,6 +1737,8 @@ class RouterRepositoryBase(ABC):
                     messages_json,
                     api_endpoint,
                     response_preview,
+                    tier_name,
+                    tier_confidence,
                 ),
             )
 
@@ -1808,6 +1813,8 @@ class RouterRepositoryBase(ABC):
                 l.message_preview,
                 l.response_preview,
                 l.api_endpoint,
+                l.tier_name,
+                l.tier_confidence,
                 u.name AS user_name,
                 u.email AS user_email
             FROM prompt_logs l
