@@ -549,7 +549,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
     ):
         return portal_call(
-            lambda: portal_use_case.uploaded_model_document(
+            lambda: portal_use_case.draft_after_upload(
                 current_user_id(session_user_id),
                 data.current,
                 data.uploaded,

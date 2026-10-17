@@ -23,9 +23,8 @@ from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
-from src.domain.auto_tier import auto_tiers, selectable_tiers
-from src.domain.classroom_model_choice import AUTOMATIC_MODELS
-from src.domain.model_shelf import is_non_text_shelf_model
+from src.domain.auto_tier import auto_tiers, would_select
+from src.domain.model_shelf import student_side_document
 from src.domain.auto_tier_save_check import check_auto_tier_document
 from src.domain.model_document_upload import uploaded_model_document
 from src.domain.session_model_allowlist import (
@@ -565,14 +564,14 @@ class PortalUseCase:
         return {"course_catalog_yaml": yaml_text}
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
-        return self.repo.redeem_invite(invite_code, user_id)
+        return _student_redemption(self.repo.redeem_invite(invite_code, user_id))
 
     def issue_extension_handoff(self, user_id: int) -> str:
         return self._handoff_service().create_token(user_id)
 
     def redeem_with_handoff(self, handoff_token: str, invite_code: str) -> dict[str, Any]:
         user_id = self._handoff_service().consume_token(handoff_token)
-        return self.repo.redeem_invite(invite_code, user_id)
+        return _student_redemption(self.repo.redeem_invite(invite_code, user_id))
 
     def redeem_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
         cleaned = (nickname or "").strip()
@@ -580,7 +579,7 @@ class PortalUseCase:
             raise ValueError("classroom nickname is required")
         if len(cleaned) > _NICKNAME_MAX_LEN:
             raise ValueError("classroom nickname is too long")
-        return self.repo.redeem_invite_with_nickname(invite_code, cleaned)
+        return _student_redemption(self.repo.redeem_invite_with_nickname(invite_code, cleaned))
 
     def router_model_template(self, user_id: int) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)
@@ -602,7 +601,7 @@ class PortalUseCase:
         )
         return self.repo.save_router_model_template(user_id, normalized)
 
-    def uploaded_model_document(
+    def draft_after_upload(
         self, user_id: int, current: Any, uploaded: Any
     ) -> list[dict[str, Any]]:
         """The editor draft after an upload; nothing is stored until the teacher saves it."""
@@ -639,7 +638,7 @@ class PortalUseCase:
                     load_vans_template(),
                 )
         if portal_user_id is not None:
-            return self.router_model_template(portal_user_id)
+            return student_side_document(self.router_model_template(portal_user_id)) or []
         raise PermissionError("需要 Portal 登入或 Classroom API Key")
 
     def vscode_install_models(self, api_key: str | None = None) -> list[dict[str, Any]]:
@@ -833,19 +832,23 @@ class PortalUseCase:
         return role in set(user.get("roles") or [user.get("role")])
 
 
+def _student_redemption(result: dict[str, Any]) -> dict[str, Any]:
+    """A redemption as the student sees it: the sitting's stored document stays with the teacher.
+
+    The student's model list comes from ``GET /extension/chat-language-models``.
+    """
+    session = {
+        key: value
+        for key, value in (result.get("session") or {}).items()
+        if key != "session_chat_language_models_json"
+    }
+    return {**result, "session": session}
+
+
 def _with_auto_selection(session: dict[str, Any]) -> dict[str, Any]:
     """Add the class-list 「自動選模」 badge condition (#73): the router would run selection."""
-    document = session.get("session_chat_language_models")
-    text_ids = [
-        model["id"]
-        for provider in document or []
-        if isinstance(provider, dict) and isinstance(provider.get("models"), list)
-        for model in provider["models"]
-        if isinstance(model, dict)
-        and isinstance(model.get("id"), str)
-        and not is_non_text_shelf_model(model)
-    ]
-    active = session.get("classroom_model_choice") == AUTOMATIC_MODELS and bool(
-        selectable_tiers(document, text_ids)
+    active = would_select(
+        session.get("session_chat_language_models"),
+        session.get("classroom_model_choice"),
     )
     return {**session, "auto_selection_active": active}

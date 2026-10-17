@@ -20,8 +20,9 @@ SELECTION_MEMORY_SECONDS = 30 * 60.0
 class VcrAutoSelectionMemory:
     """Selections keyed by API key, last user message, and the document's tier fingerprint.
 
-    The fingerprint covers the tiers' ids, names, descriptions, and order, so a teacher's
-    edit to any of them asks the selector again. The memory lives in this process and
+    ``tiers`` is every Auto Tier of the document, including tiers that hold no Model ID.
+    The fingerprint covers their ids, names, descriptions, and order, so a teacher's edit
+    to any of them asks the selector again. The memory lives in this process and
     resets on restart.
     """
 

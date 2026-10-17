@@ -16,6 +16,7 @@ from src.domain.decision_model import (
     decision_model_ids,
     normalize_decision_model,
 )
+from src.domain.auto_tier import TierSelection, without_auto_tiers
 from src.domain.model_shelf import student_side_document, shelf_model_ids
 from src.domain.classroom_model_choice import (
     AUTOMATIC_MODELS,
@@ -526,9 +527,7 @@ class RouterRepositoryBase(ABC):
             )
 
     def _backfill_session_chat_language_models(self, conn: Any) -> None:
-        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
-
-        document_json = dump_session_chat_language_models_json(load_vans_template())
+        document_json = self._starter_sitting_json()
         conn.execute(
             self._sql(
                 """
@@ -545,6 +544,12 @@ class RouterRepositoryBase(ABC):
         from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
         return dump_session_chat_language_models_json(load_vans_template()) or "[]"
+
+    def _starter_sitting_json(self) -> str:
+        """The starter as a sitting receives it: only a new Router Model Template gets its Auto Tiers."""
+        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+        return dump_session_chat_language_models_json(without_auto_tiers(load_vans_template())) or "[]"
 
     def _ensure_router_model_template(self, conn: Any, user_id: int, roles: tuple[str, ...] | list[str]) -> None:
         if "teacher" not in roles and "admin" not in roles:
@@ -1005,7 +1010,7 @@ class RouterRepositoryBase(ABC):
 
         owner_template = self.get_router_model_template(int(klass["teacher_id"]))
         document_json = dump_session_chat_language_models_json(
-            owner_template if owner_template is not None else json.loads(self._starter_template_json())
+            owner_template if owner_template is not None else json.loads(self._starter_sitting_json())
         )
 
         with self._connect() as conn:
@@ -1704,8 +1709,7 @@ class RouterRepositoryBase(ABC):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
-        tier_name: str | None = None,
-        tier_confidence: float | None = None,
+        tier: TierSelection | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -1737,8 +1741,8 @@ class RouterRepositoryBase(ABC):
                     messages_json,
                     api_endpoint,
                     response_preview,
-                    tier_name,
-                    tier_confidence,
+                    tier.name if tier else None,
+                    tier.confidence if tier else None,
                 ),
             )
 

@@ -119,7 +119,7 @@ def test_illegal_uploaded_tiers_are_refused_like_a_save(tmp_path):
     response = _upload(saves, saves.stored("sitting"), _document(tiers=tiers, models=[]))
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Tier 名稱「同名」重複"
+    assert response.json()["detail"] == "難度名稱「同名」重複"
 
 
 def test_upload_is_for_teachers(tmp_path):

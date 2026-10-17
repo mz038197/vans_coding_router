@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.domain.auto_tier import TierSelection
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
@@ -897,8 +898,7 @@ def test_teacher_prompt_logs_carry_the_tier_name_and_confidence(tmp_path):
         model="openrouter@vendor/strong",
         status="ok",
         client_ip="127.0.0.1",
-        tier_name="進階",
-        tier_confidence=0.92,
+        tier=TierSelection("t-strong", "進階", 0.92),
     )
 
     response = client.get(f"/teacher/classes/{klass['id']}/prompt-logs", cookies=_portal_cookie(repo, teacher))

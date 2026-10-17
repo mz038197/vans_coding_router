@@ -365,7 +365,7 @@
         <p id="sessionChatModelsUploadMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsCatalogMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsSaveMsg" class="model-editor-msg" aria-live="polite"></p>
-        <section id="sessionAutoTiers" class="model-editor-tiers hidden" aria-label="自動選模 Tier"></section>
+        <section id="sessionAutoTiers" class="model-editor-tiers hidden" aria-label="自動選模難度"></section>
         <div class="model-editor-columns">
           <section class="model-editor-col model-editor-col-candidates">
             <h3>候選清單</h3>
@@ -3086,10 +3086,11 @@ snippets:
     let autoTierDefaults = null;
     let sessionChatModelsAutoBaseline = '';
 
-    // Picked Models hides the tier settings but keeps them in the draft; templates always show them.
+    // A sitting shows the tier settings only on Automatic Models; other choices keep them in the
+    // draft. Templates always show them.
     function autoSelectionVisible(context, session) {
       if (context && context.mode === 'template') return true;
-      return !(session && session.classroom_model_choice === 'picked');
+      return Boolean(session && session.classroom_model_choice === 'automatic');
     }
 
     function sessionAutoSelectionShown() {
@@ -3126,8 +3127,8 @@ snippets:
       const names = new Set(tiers.map((tier) => tier.name));
       let n = tiers.length + 1;
       while (ids.has(`tier-${n}`)) n += 1;
-      let name = '新 Tier';
-      for (let k = 2; names.has(name); k += 1) name = `新 Tier ${k}`;
+      let name = '新難度';
+      for (let k = 2; names.has(name); k += 1) name = `新難度 ${k}`;
       const tier = { id: `tier-${n}`, name, description: '' };
       tiers.push(tier);
       return tier;
@@ -3182,7 +3183,7 @@ snippets:
       const rows = tiers.map((tier) => {
         const inUse = autoTierInUse(draft, tier.id);
         const canRemove = !inUse && tiers.length > AUTO_TIER_COUNT_MIN;
-        const removeTitle = inUse ? '還有模型使用這個 Tier' : canRemove ? '刪除 Tier' : `至少要有 ${AUTO_TIER_COUNT_MIN} 個 Tier`;
+        const removeTitle = inUse ? '還有模型使用這個難度' : canRemove ? '刪除難度' : `至少要有 ${AUTO_TIER_COUNT_MIN} 個難度`;
         const id = escapeHtml(tier.id);
         const description = String(tier.description || '');
         const hasDefault = Boolean(defaultForTier(draft, tier.id, defaults));
@@ -3190,22 +3191,22 @@ snippets:
           <span class="auto-tier-handle" title="拖曳排序" aria-hidden="true">⋮⋮</span>
           <div class="auto-tier-fields">
             <div class="auto-tier-head">
-              <input class="catalog-field-input auto-tier-name" aria-label="Tier 名稱" maxlength="${AUTO_TIER_NAME_LIMIT}" data-tier-id="${id}" data-tier-field="name" value="${escapeHtml(tier.name || '')}" />
+              <input class="catalog-field-input auto-tier-name" aria-label="難度名稱" maxlength="${AUTO_TIER_NAME_LIMIT}" data-tier-id="${id}" data-tier-field="name" value="${escapeHtml(tier.name || '')}" />
               <button type="button" class="btn-secondary auto-tier-btn" ${hasDefault ? '' : 'disabled'} onclick="onFillDefaultTierDescription('${id}')">填入預設</button>
-              <button type="button" class="btn-secondary auto-tier-btn" title="${removeTitle}" aria-label="刪除 Tier" ${canRemove ? '' : 'disabled'} onclick="onRemoveAutoTier('${id}')">刪除</button>
+              <button type="button" class="btn-secondary auto-tier-btn" title="${removeTitle}" aria-label="刪除難度" ${canRemove ? '' : 'disabled'} onclick="onRemoveAutoTier('${id}')">刪除</button>
             </div>
-            <textarea class="auto-tier-description" aria-label="Tier 說明" rows="2" maxlength="${AUTO_TIER_DESCRIPTION_LIMIT}" data-tier-id="${id}" data-tier-field="description">${escapeHtml(description)}</textarea>
+            <textarea class="auto-tier-description" aria-label="難度說明" rows="2" maxlength="${AUTO_TIER_DESCRIPTION_LIMIT}" data-tier-id="${id}" data-tier-field="description">${escapeHtml(description)}</textarea>
             <span class="auto-tier-count" data-tier-count="${id}">${description.length}/${AUTO_TIER_DESCRIPTION_LIMIT}</span>
           </div>
         </div>`;
       }).join('');
       const canAdd = tiers.length < AUTO_TIER_COUNT_MAX;
       return `<div class="auto-tier-title">
-          <h3>自動選模 Tier</h3>
-          <button type="button" class="btn-secondary auto-tier-btn" ${canAdd ? '' : 'disabled'} onclick="onAddAutoTier()">新增 Tier</button>
+          <h3>自動選模難度</h3>
+          <button type="button" class="btn-secondary auto-tier-btn" ${canAdd ? '' : 'disabled'} onclick="onAddAutoTier()">新增難度</button>
         </div>
         <p class="hint">由上到下排序，越下面越強。修改說明可能影響自動選模的準確度。</p>
-        ${rows || '<p class="hint">還沒有 Tier。</p>'}`;
+        ${rows || '<p class="hint">還沒有難度。</p>'}`;
     }
 
     function draftModelTierField(model, tiers) {
@@ -3216,9 +3217,9 @@ snippets:
       const options = [
         `<option value=""${current ? '' : ' selected'}>未指定</option>`,
         ...list.map((tier) => `<option value="${escapeHtml(tier.id)}"${tier.id === current ? ' selected' : ''}>${escapeHtml(tier.name)}</option>`),
-        current && !known ? `<option value="${escapeHtml(current)}" selected>（不存在的 Tier）</option>` : '',
+        current && !known ? `<option value="${escapeHtml(current)}" selected>（不存在的難度）</option>` : '',
       ].join('');
-      return `<label class="catalog-field">Tier
+      return `<label class="catalog-field">難度
             <select class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-field="autoTier">${options}</select>
           </label>`;
     }
@@ -3237,7 +3238,7 @@ snippets:
 
     function sessionAutoSelectionBadge(session) {
       if (!session || session.auto_selection_active !== true) return '';
-      return '<span class="session-auto-badge" title="自動、自動選模架有模型、至少用到兩個 Tier">自動選模</span>';
+      return '<span class="session-auto-badge" title="自動、自動選模架有模型、至少用到兩個難度">自動選模</span>';
     }
 
     function renderAutoTierBlock() {

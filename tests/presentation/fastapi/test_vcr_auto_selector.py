@@ -576,6 +576,21 @@ def test_a_teacher_edit_to_the_tiers_asks_the_selector_again(
     assert len(upstream.selector_bodies) == 2
 
 
+def test_an_edit_to_a_tier_without_models_also_asks_the_selector_again(
+    harness: _Harness, clock: _FakeClock
+):
+    empty = {"id": "t-empty", "name": "專家", "description": "還沒放模型"}
+    _set_document(harness, _selector_document(tiers=[*TIERS, empty]))
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+    _chat(harness)
+
+    _set_document(harness, _selector_document(tiers=[*TIERS, {**empty, "description": "改過的說明"}]))
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert len(upstream.selector_bodies) == 2
+
+
 def test_a_selection_older_than_thirty_minutes_is_asked_again(harness: _Harness, clock: _FakeClock):
     _set_document(harness, _selector_document())
     upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))

@@ -64,6 +64,12 @@ function sandbox() {
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+// What a teacher reads: text between tags plus title and aria-label values.
+function userFacingText(html) {
+  const labels = [...html.matchAll(/(?:title|aria-label)="([^"]*)"/g)].map((m) => m[1]);
+  return [html.replace(/<[^>]*>/g, " "), ...labels].join(" ");
+}
+
 const DEFAULTS = [
   { id: "light", name: "輕量", description: "預設輕量" },
   { id: "standard", name: "一般", description: "預設一般" },
@@ -87,12 +93,14 @@ function tieredDraft(box) {
   }]);
 }
 
-test("tier settings show in the template editor and on Automatic Models, not on Picked Models", () => {
+test("tier settings show in the template editor and only on Automatic Models in a sitting", () => {
   const box = sandbox();
   assert.equal(box.autoSelectionVisible({ mode: "template" }, null), true);
   assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "automatic" }), true);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: null }), true);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: null }), false);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, {}), false);
   assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "picked" }), false);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, null), false);
 });
 
 test("a document without tiers opens with the default tiers; one with tiers keeps its own", () => {
@@ -148,7 +156,10 @@ test("the tier block lists tiers weakest first with limits, defaults, and the ac
   assert.match(html, /越下面越強/);
   assert.match(html, /修改說明可能影響自動選模的準確度/);
   assert.match(html, /填入預設/);
-  assert.match(html, /新增 Tier/);
+  assert.match(html, /新增難度/);
+  assert.match(html, /aria-label="難度名稱"/);
+  assert.match(html, /aria-label="難度說明"/);
+  assert.doesNotMatch(userFacingText(html), /Tier/);
   assert.match(html, /maxlength="300"/);
   assert.match(html, /maxlength="20"/);
   assert.match(html, /3\/300/);
@@ -164,6 +175,10 @@ test("each text-shelf model picks one of the document's tiers", () => {
   assert.match(field, /<option value="t-light" selected>輕量<\/option>/);
   assert.match(field, /<option value="t-hard">困難<\/option>/);
   assert.equal(box.draftModelTierField(draft.models[2], draft.autoTiers), "");
+  assert.match(field, /<label class="catalog-field">難度/);
+  assert.doesNotMatch(userFacingText(field), /Tier/);
+  const orphan = box.draftModelTierField({ id: "x", autoTier: "gone" }, draft.autoTiers);
+  assert.match(orphan, /（不存在的難度）/);
 });
 
 test("an OpenRouter decisions row offers 決策 and 自動選模, either or both", () => {
@@ -203,6 +218,7 @@ test("unsaved-changes check covers tiers, model tiers, and the selector shelf", 
 test("class list shows 「自動選模」 only when the row says selection runs", () => {
   const box = sandbox();
   assert.match(box.sessionAutoSelectionBadge({ auto_selection_active: true }), /自動選模/);
+  assert.doesNotMatch(userFacingText(box.sessionAutoSelectionBadge({ auto_selection_active: true })), /Tier/);
   assert.equal(box.sessionAutoSelectionBadge({ auto_selection_active: false }), "");
   assert.equal(box.sessionAutoSelectionBadge({}), "");
   assert.match(extractNamedFunction(portalHtml, "sessionModelAllowlistCell"), /sessionAutoSelectionBadge\(session\)/);

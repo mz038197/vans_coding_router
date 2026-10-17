@@ -25,9 +25,10 @@ from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.auto_tier import (
     AutoTier,
     TierSelection,
+    auto_tiers,
     last_user_text_from_chat,
     last_user_text_from_responses,
-    selectable_tiers,
+    selection_tiers,
     selector_shelf_ids,
     tier_ordered_walk,
 )
@@ -679,8 +680,8 @@ class ApiUseCase:
         keeps document order.
         """
         model_ids = self._text_model_ids(auth_context)
-        document = self._selection_document(auth_context)
-        tiers = selectable_tiers(document, model_ids)
+        document, choice = self._selection_document(auth_context)
+        tiers = selection_tiers(document, choice)
         if not tiers:
             return model_ids, None
         selection = await self._remembered_selection(auth_context, document, tiers, last_user_text)
@@ -702,29 +703,31 @@ class ApiUseCase:
         memory_key = None
         if auth_context is not None and auth_context.api_key_id is not None:
             memory_key = str(auth_context.api_key_id)
+        all_tiers = auto_tiers(document)
         if memory_key is not None:
-            remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, tiers)
+            remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, all_tiers)
             if remembered is not None:
                 return remembered
         selection = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
         if selection is not None and memory_key is not None:
-            self.vcr_auto_selection_memory.remember(memory_key, last_user_text, tiers, selection)
+            self.vcr_auto_selection_memory.remember(memory_key, last_user_text, all_tiers, selection)
         return selection
 
-    def _selection_document(self, auth_context: AuthContext | None) -> list[Any] | None:
-        """The document whose Auto Tiers order the walk.
+    def _selection_document(
+        self, auth_context: AuthContext | None
+    ) -> tuple[list[Any] | None, str | None]:
+        """The document whose Auto Tiers order the walk, and its Classroom Model Choice.
 
-        A Personal API Key uses its holder's Router Model Template; a Classroom API Key
-        uses its sitting's document, only on Automatic Models.
+        A Personal API Key uses its holder's Router Model Template, which always walks as
+        Automatic Models; a Classroom API Key uses its sitting's document and choice.
         """
         if self._is_personal_api_key(auth_context):
-            return self._holder_template(auth_context)
-        if self._classroom_model_choice(auth_context) != AUTOMATIC_MODELS:
-            return None
+            return self._holder_template(auth_context), AUTOMATIC_MODELS
+        choice = self._classroom_model_choice(auth_context)
         getter = getattr(self.api_key_repo, "get_session_chat_language_models", None)
-        if not callable(getter):
-            return None
-        return getter(auth_context.session_id)
+        if choice != AUTOMATIC_MODELS or not callable(getter):
+            return None, choice
+        return getter(auth_context.session_id), choice
 
     async def _chat_nonstream_vcr_auto(
         self,
@@ -1323,8 +1326,7 @@ class ApiUseCase:
             response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
             api_endpoint=api_endpoint,
-            tier_name=selection.name if selection else None,
-            tier_confidence=selection.confidence if selection else None,
+            tier=selection,
         )
 
     def _log_images_request(

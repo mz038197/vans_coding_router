@@ -3,8 +3,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from src.domain.auto_tier import TierSelection
+from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.factory import build_router_repository
+from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
 
 def _settings() -> RouterSettings:
@@ -126,7 +129,7 @@ def _student_context(repo):
 def test_postgres_prompt_log_keeps_tier_name_and_confidence(postgres_repo):
     repo = postgres_repo
     teacher, klass, context = _student_context(repo)
-    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier_name="進階", tier_confidence=0.92)
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier=TierSelection("t-strong", "進階", 0.92))
     repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
 
     logs = repo.list_prompt_logs(teacher["id"], klass["id"])
@@ -140,7 +143,7 @@ def test_postgres_prompt_log_keeps_tier_name_and_confidence(postgres_repo):
 def test_postgres_archive_keeps_tier_name_and_confidence(postgres_repo):
     repo = postgres_repo
     _, _, context = _student_context(repo)
-    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier_name="進階", tier_confidence=0.92)
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier=TierSelection("t-strong", "進階", 0.92))
     repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
     with repo._connect() as conn:
         conn.execute("UPDATE prompt_logs SET created_at = %s", ("2026-05-01T00:00:00+00:00",))
@@ -208,3 +211,32 @@ def test_postgres_web_search_switch_is_off_until_turned_on(postgres_repo):
     assert repo.is_web_search_enabled(session["id"]) is True
     repo.update_class_session(klass["id"], session["id"], web_search_enabled=False)
     assert repo.is_web_search_enabled(session["id"]) is False
+
+
+def _carries_auto_tiers(document) -> bool:
+    return any(
+        "autoTiers" in provider or any("autoTier" in model for model in provider.get("models", []))
+        for provider in document
+    )
+
+
+def test_postgres_sitting_filled_from_the_starter_gets_no_auto_tiers(postgres_repo):
+    assert _carries_auto_tiers(load_vans_template()), "the starter ships default Auto Tiers"
+    repo = postgres_repo
+    owner = repo.upsert_google_user("owner@gmail.com", "Owner")
+    klass = repo.create_class(owner["id"], "No template", None, 2)
+    created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
+    backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = %s",
+            (backfilled["id"],),
+        )
+    reopened = build_router_repository(_settings())
+
+    sittings = {s["id"]: s for s in reopened.list_class_sessions(klass["id"])}
+
+    for session_id in (created["id"], backfilled["id"]):
+        document = sittings[session_id]["session_chat_language_models"]
+        assert template_model_ids(document) == template_model_ids(load_vans_template())
+        assert not _carries_auto_tiers(document)

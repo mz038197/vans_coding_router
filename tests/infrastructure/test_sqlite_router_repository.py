@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from src.domain.auto_tier import TierSelection, without_auto_tiers
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
@@ -301,7 +302,7 @@ def test_archive_keeps_the_tier_name_and_confidence_in_an_older_archive_file(tmp
     klass = repo.create_class(teacher["id"], "Active", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
-    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier_name="進階", tier_confidence=0.92)
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier=TierSelection("t-strong", "進階", 0.92))
     repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
     with repo._connect() as conn:
         conn.execute("UPDATE prompt_logs SET created_at = ?", ("2025-01-01T00:00:00+00:00",))
@@ -551,7 +552,7 @@ def test_session_model_allowlist_round_trip(tmp_path):
     klass = repo.create_class(teacher["id"], "AI", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     template = load_vans_template()
-    assert session["session_chat_language_models"] == template
+    assert session["session_chat_language_models"] == without_auto_tiers(template)
     assert session["model_allowlist"] == template_model_ids(template)
     assert repo.get_session_model_allowlist(session["id"]) == template_model_ids(template)
 
@@ -786,3 +787,32 @@ def test_update_session_expires_at_syncs_api_keys(tmp_path):
 
 def parse_dt_iso(value: str):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _carries_auto_tiers(document) -> bool:
+    return any(
+        "autoTiers" in provider or any("autoTier" in model for model in provider.get("models", []))
+        for provider in document
+    )
+
+
+def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
+    assert _carries_auto_tiers(load_vans_template()), "the starter ships default Auto Tiers"
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    owner = repo.upsert_google_user("owner@gmail.com", "Owner")
+    klass = repo.create_class(owner["id"], "No template", None, 2)
+    created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
+    backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = ?",
+            (backfilled["id"],),
+        )
+    reopened = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+
+    sittings = {s["id"]: s for s in reopened.list_class_sessions(klass["id"])}
+
+    for session_id in (created["id"], backfilled["id"]):
+        document = sittings[session_id]["session_chat_language_models"]
+        assert template_model_ids(document) == template_model_ids(load_vans_template())
+        assert not _carries_auto_tiers(document)

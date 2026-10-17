@@ -11,12 +11,18 @@ Document shape, all on the VCRouter provider entry:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 
-AUTO_TIERS_KEY = "autoTiers"
-SELECTOR_SHELF_KEY = "selectorShelf"
-AUTO_TIER_KEY = "autoTier"
+from src.domain.classroom_model_choice import AUTOMATIC_MODELS
+from src.domain.model_shelf import (
+    AUTO_TIER_KEY,
+    AUTO_TIERS_KEY,
+    SELECTOR_SHELF_KEY,
+    document_providers,
+    text_shelf_models,
+)
 
 SELECTOR_STATE_LIMIT = 2000
 PLAUSIBLE_PROBABILITY = 0.2
@@ -46,7 +52,7 @@ class TierSelection:
 
 def auto_tiers(document: list[Any] | None) -> list[AutoTier]:
     tiers: list[AutoTier] = []
-    for provider in _providers(document):
+    for provider in document_providers(document):
         raw = provider.get(AUTO_TIERS_KEY)
         if not isinstance(raw, list):
             continue
@@ -63,7 +69,7 @@ def auto_tiers(document: list[Any] | None) -> list[AutoTier]:
 
 def selector_shelf_ids(document: list[Any] | None) -> list[str]:
     ids: list[str] = []
-    for provider in _providers(document):
+    for provider in document_providers(document):
         raw = provider.get(SELECTOR_SHELF_KEY)
         if not isinstance(raw, list):
             continue
@@ -73,37 +79,46 @@ def selector_shelf_ids(document: list[Any] | None) -> list[str]:
     return ids
 
 
-def text_model_tiers(document: list[Any] | None, text_ids: list[str]) -> dict[str, str]:
-    """Model ID -> tier id, for the given text-shelf Model IDs that carry a known tier."""
+def text_model_tiers(document: list[Any] | None) -> dict[str, str]:
+    """Model ID -> tier id, for the document's text-shelf Model IDs that carry a known tier."""
     known = {tier.id for tier in auto_tiers(document)}
-    wanted = set(text_ids)
-    found: dict[str, str] = {}
-    for provider in _providers(document):
-        models = provider.get("models")
-        if not isinstance(models, list):
-            continue
-        for model in models:
-            if not isinstance(model, dict):
-                continue
-            model_id, tier_id = model.get("id"), model.get(AUTO_TIER_KEY)
-            if model_id in wanted and tier_id in known and model_id not in found:
-                found[model_id] = tier_id
-    return found
+    return {
+        model["id"]: model[AUTO_TIER_KEY]
+        for model in text_shelf_models(document)
+        if model.get(AUTO_TIER_KEY) in known
+    }
 
 
-def selectable_tiers(document: list[Any] | None, text_ids: list[str]) -> list[AutoTier]:
-    """The tiers the selector may choose: those holding a text-shelf Model ID, weakest first.
+def selection_tiers(document: list[Any] | None, choice: str | None) -> list[AutoTier]:
+    """The tiers vcr-auto selection chooses among, weakest first; empty when it would not run.
 
-    Empty when selection must not run: no selector shelf, fewer than two tiers used,
-    or a used tier without a Tier Description.
+    It runs only on Automatic Models (``choice``; a Personal API Key's template counts as
+    Automatic Models) with a non-empty selector shelf, at least two tiers holding a
+    text-shelf Model ID, and a Tier Description on each of them.
     """
-    if not selector_shelf_ids(document):
+    if choice != AUTOMATIC_MODELS or not selector_shelf_ids(document):
         return []
-    used = set(text_model_tiers(document, text_ids).values())
+    used = set(text_model_tiers(document).values())
     tiers = [tier for tier in auto_tiers(document) if tier.id in used]
     if len(tiers) < 2 or any(not tier.description.strip() for tier in tiers):
         return []
     return tiers
+
+
+def would_select(document: list[Any] | None, choice: str | None) -> bool:
+    """Whether a vcr-auto call on this document and Classroom Model Choice runs selection."""
+    return bool(selection_tiers(document, choice))
+
+
+def without_auto_tiers(document: list[Any] | None) -> list[Any]:
+    """A copy with every Auto Tier field removed: the starter as a sitting receives it (US 55)."""
+    result = copy.deepcopy(document or [])
+    for provider in document_providers(result):
+        provider.pop(AUTO_TIERS_KEY, None)
+        for model in provider.get("models") or []:
+            if isinstance(model, dict):
+                model.pop(AUTO_TIER_KEY, None)
+    return result
 
 
 def selector_decision_body(model_id: str, state: str, tiers: list[AutoTier]) -> dict[str, Any]:
@@ -158,7 +173,7 @@ def tier_ordered_walk(
         return list(text_ids)
     chosen = tier_ids.index(chosen_tier_id)
     order = [tier_ids[chosen], *tier_ids[chosen + 1 :], *reversed(tier_ids[:chosen])]
-    by_model = text_model_tiers(document, text_ids)
+    by_model = text_model_tiers(document)
     walk = [
         model_id
         for tier_id in order
@@ -205,6 +220,3 @@ def _text_of(content: Any) -> str:
             parts.append(part["text"])
     return "\n".join(parts)
 
-
-def _providers(document: list[Any] | None) -> list[dict[str, Any]]:
-    return [provider for provider in document or [] if isinstance(provider, dict)]

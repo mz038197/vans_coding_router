@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from src.domain.auto_tier import TierSelection
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.session_model_allowlist import (
@@ -263,12 +264,11 @@ class RouterRepositoryPort(Protocol):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
-        tier_name: str | None = None,
-        tier_confidence: float | None = None,
+        tier: TierSelection | None = None,
     ) -> None:
-        """tier_name/tier_confidence: the Auto Tier a vcr-auto selector chose, as it was then.
+        """tier: the Auto Tier a vcr-auto selector chose, its name as it was then.
 
-        Both stay None when selection did not run or failed.
+        None when selection did not run or failed; the log's tier stays empty.
         """
         ...
 

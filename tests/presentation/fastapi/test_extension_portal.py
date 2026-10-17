@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.domain.model_shelf import student_side_document
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.presentation.fastapi.error_handlers import register_error_handlers
@@ -76,6 +78,15 @@ def _end_session(client, repo, teacher_id: int, class_id: int, session_id: int) 
     assert ended.status_code == 200
 
 
+def _router_only_fields(document) -> set[str]:
+    found = set()
+    for provider in document:
+        found |= {"autoTiers", "selectorShelf"} & provider.keys()
+        for model in provider.get("models", []):
+            found |= {"autoTier"} & model.keys()
+    return found
+
+
 def _portal_cookie(repo, user_id: int) -> dict[str, str]:
     token, _ = repo.create_portal_session(user_id, "Test browser")
     return {"vcr_portal_session": token}
@@ -92,7 +103,27 @@ def test_chat_language_models_template_requires_a_teacher_session(tmp_path):
         cookies=_portal_cookie(repo, teacher["id"]),
     )
     assert loaded.status_code == 200
-    assert loaded.json() == load_vans_template()
+    assert loaded.json() == student_side_document(load_vans_template())
+
+
+def test_teacher_chat_language_models_carry_no_router_only_fields(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    cookies = _portal_cookie(repo, teacher["id"])
+    template = client.get("/teacher/router-model-template", cookies=cookies).json()
+    assert template[0]["autoTiers"], "the starter ships default Auto Tiers"
+    template[0]["models"][0]["autoTier"] = template[0]["autoTiers"][0]["id"]
+    saved = client.put(
+        "/teacher/router-model-template",
+        cookies=cookies,
+        json={"router_model_template": template},
+    )
+    assert saved.status_code == 200, saved.text
+
+    loaded = client.get("/extension/chat-language-models", cookies=cookies)
+
+    assert loaded.status_code == 200
+    assert _router_only_fields(loaded.json()) == set()
 
 
 def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
@@ -322,6 +353,8 @@ def test_extension_redeem_with_handoff(tmp_path):
     data = redeem.json()
     assert data["api_key"].startswith("vcr_sk_")
     assert data["session"]["invite_code"] == session["invite_code"]
+    assert "autoTiers" in json.dumps(session["session_chat_language_models"])
+    assert not any(word in redeem.text for word in ("autoTiers", "selectorShelf", "autoTier"))
 
     reuse = client.post(
         "/extension/sessions/redeem",

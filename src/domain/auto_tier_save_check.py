@@ -16,7 +16,7 @@ from src.domain.auto_tier import (
     auto_tiers,
     selector_shelf_ids,
 )
-from src.domain.model_shelf import is_non_text_shelf_model
+from src.domain.model_shelf import document_providers, text_shelf_models
 
 TIER_COUNT_MIN = 2
 TIER_COUNT_MAX = 6
@@ -36,21 +36,21 @@ def check_auto_tier_document(
     its selector-shelf ids stay accepted when the decisions list no longer shows them.
     ``decision_list_ids`` is what the OpenRouter decisions list shows now.
     """
-    for provider in _providers(document):
+    for provider in document_providers(document):
         check_auto_tiers(provider.get(AUTO_TIERS_KEY))
         _check_selector_shelf_shape(provider.get(SELECTOR_SHELF_KEY))
 
     tier_ids = {tier.id for tier in auto_tiers(document)}
     previous_names = {tier.id: tier.name for tier in auto_tiers(previous)}
-    for model in _models(document):
+    for model in text_shelf_models(document):
         if AUTO_TIER_KEY not in model or model[AUTO_TIER_KEY] in tier_ids:
             continue
         tier_id = model[AUTO_TIER_KEY]
         if isinstance(tier_id, str) and tier_id in previous_names:
             raise ValueError(
-                f"Tier「{previous_names[tier_id]}」還有 Model ID，不能刪除：{model['id']}"
+                f"難度「{previous_names[tier_id]}」還有 Model ID，不能刪除：{model['id']}"
             )
-        raise ValueError(f"Model ID {model['id']} 的 Tier 不存在")
+        raise ValueError(f"Model ID {model['id']} 的難度不存在")
 
     selector = selector_shelf_ids(document)
     already_stored = set(selector_shelf_ids(previous))
@@ -59,10 +59,10 @@ def check_auto_tier_document(
             raise ValueError(f"自動選模架只接受 OpenRouter 決策清單的 Model ID：{model_id}")
 
     if selector:
-        for model in _models(document):
-            if not is_non_text_shelf_model(model) and AUTO_TIER_KEY not in model:
+        for model in text_shelf_models(document):
+            if AUTO_TIER_KEY not in model:
                 raise ValueError(
-                    f"自動選模架有 Model ID 時，每個對話模型都要有 Tier：{model['id']}"
+                    f"自動選模架有 Model ID 時，每個對話模型都要有難度：{model['id']}"
                 )
 
 
@@ -70,31 +70,31 @@ def check_auto_tiers(raw: Any) -> None:
     if raw is None:
         return
     if not isinstance(raw, list):
-        raise ValueError("Tier 格式錯誤")
+        raise ValueError("難度格式錯誤")
     if raw and not TIER_COUNT_MIN <= len(raw) <= TIER_COUNT_MAX:
-        raise ValueError(f"Tier 數量必須是 {TIER_COUNT_MIN} 到 {TIER_COUNT_MAX} 個")
+        raise ValueError(f"難度數量必須是 {TIER_COUNT_MIN} 到 {TIER_COUNT_MAX} 個")
     ids: set[str] = set()
     names: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
-            raise ValueError("Tier 格式錯誤")
+            raise ValueError("難度格式錯誤")
         tier_id, name, description = item.get("id"), item.get("name"), item.get("description")
         if not isinstance(tier_id, str) or not tier_id.strip():
-            raise ValueError("Tier 缺少 id")
+            raise ValueError("難度缺少 id")
         if tier_id in ids:
-            raise ValueError(f"Tier id「{tier_id}」重複")
+            raise ValueError(f"難度 id「{tier_id}」重複")
         ids.add(tier_id)
         if not isinstance(name, str) or not name.strip():
-            raise ValueError("Tier 名稱不可空白")
+            raise ValueError("難度名稱不可空白")
         if len(name) > TIER_NAME_LIMIT:
-            raise ValueError(f"Tier 名稱不可超過 {TIER_NAME_LIMIT} 字：{name}")
+            raise ValueError(f"難度名稱不可超過 {TIER_NAME_LIMIT} 字：{name}")
         if name in names:
-            raise ValueError(f"Tier 名稱「{name}」重複")
+            raise ValueError(f"難度名稱「{name}」重複")
         names.add(name)
         if not isinstance(description, str) or not description.strip():
-            raise ValueError(f"Tier「{name}」的說明不可空白")
+            raise ValueError(f"難度「{name}」的難度說明不可空白")
         if len(description) > TIER_DESCRIPTION_LIMIT:
-            raise ValueError(f"Tier「{name}」的說明不可超過 {TIER_DESCRIPTION_LIMIT} 字")
+            raise ValueError(f"難度「{name}」的難度說明不可超過 {TIER_DESCRIPTION_LIMIT} 字")
 
 
 def _check_selector_shelf_shape(raw: Any) -> None:
@@ -104,17 +104,3 @@ def _check_selector_shelf_shape(raw: Any) -> None:
         isinstance(model_id, str) and model_id.strip() for model_id in raw
     ):
         raise ValueError("自動選模架格式錯誤")
-
-
-def _providers(document: list[Any] | None) -> list[dict[str, Any]]:
-    return [provider for provider in document or [] if isinstance(provider, dict)]
-
-
-def _models(document: list[Any] | None) -> list[dict[str, Any]]:
-    return [
-        model
-        for provider in _providers(document)
-        if isinstance(provider.get("models"), list)
-        for model in provider["models"]
-        if isinstance(model, dict)
-    ]

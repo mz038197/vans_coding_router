@@ -98,7 +98,7 @@ def test_tier_count_outside_two_to_six_is_refused(tmp_path, target, count):
     tiers = [_tier(f"t{i}", f"層{i}") for i in range(count)]
 
     saves.assert_refused(
-        target, _document(tiers=tiers, models=[]), "Tier 數量必須是 2 到 6 個"
+        target, _document(tiers=tiers, models=[]), "難度數量必須是 2 到 6 個"
     )
 
 
@@ -106,11 +106,11 @@ def test_tier_count_outside_two_to_six_is_refused(tmp_path, target, count):
 @pytest.mark.parametrize(
     ("tiers", "reason"),
     [
-        ([_tier("a", "同名"), _tier("b", "同名")], "Tier 名稱「同名」重複"),
-        ([_tier("a", "字" * 21), _tier("b", "短")], "Tier 名稱不可超過 20 字"),
-        ([_tier("a", "   "), _tier("b", "短")], "Tier 名稱不可空白"),
-        ([_tier("a", "空", "  "), _tier("b", "短")], "Tier「空」的說明不可空白"),
-        ([_tier("a", "長", "字" * 301), _tier("b", "短")], "Tier「長」的說明不可超過 300 字"),
+        ([_tier("a", "同名"), _tier("b", "同名")], "難度名稱「同名」重複"),
+        ([_tier("a", "字" * 21), _tier("b", "短")], "難度名稱不可超過 20 字"),
+        ([_tier("a", "   "), _tier("b", "短")], "難度名稱不可空白"),
+        ([_tier("a", "空", "  "), _tier("b", "短")], "難度「空」的難度說明不可空白"),
+        ([_tier("a", "長", "字" * 301), _tier("b", "短")], "難度「長」的難度說明不可超過 300 字"),
     ],
 )
 def test_tier_names_and_descriptions_are_checked(tmp_path, target, tiers, reason):
@@ -135,7 +135,7 @@ def test_a_model_tier_must_be_a_tier_of_this_document(tmp_path, target):
     models = [{"id": LIGHT, "name": "light", "autoTier": "t-elsewhere"}]
 
     saves.assert_refused(
-        target, _document(tiers=TWO_TIERS, models=models), f"Model ID {LIGHT} 的 Tier 不存在"
+        target, _document(tiers=TWO_TIERS, models=models), f"Model ID {LIGHT} 的難度不存在"
     )
 
 
@@ -162,7 +162,7 @@ def test_deleting_a_tier_that_still_holds_a_model_id_is_refused(tmp_path, target
     saves.assert_refused(
         target,
         _document(tiers=[TWO_TIERS[0], three[2]]),
-        f"Tier「困難」還有 Model ID，不能刪除：{STRONG}",
+        f"難度「困難」還有 Model ID，不能刪除：{STRONG}",
     )
     moved = [
         {"id": LIGHT, "name": "light", "autoTier": "t-light"},
@@ -183,7 +183,7 @@ def test_with_a_selector_every_text_shelf_model_id_needs_a_tier(tmp_path, target
     saves.assert_refused(
         target,
         _document(tiers=TWO_TIERS, selector=[JEV], models=models),
-        f"自動選模架有 Model ID 時，每個對話模型都要有 Tier：{STRONG}",
+        f"自動選模架有 Model ID 時，每個對話模型都要有難度：{STRONG}",
     )
     assert saves.save(target, _document(tiers=TWO_TIERS, models=models)).status_code == 200
 

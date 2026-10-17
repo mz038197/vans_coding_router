@@ -3,8 +3,12 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from src.domain.auto_tier import AUTO_TIER_KEY, AUTO_TIERS_KEY, SELECTOR_SHELF_KEY
 from src.domain.decision_model import is_decision_shelf_model
+
+# Auto Tier fields (ADR-0037); src.domain.auto_tier owns their meaning.
+AUTO_TIERS_KEY = "autoTiers"
+SELECTOR_SHELF_KEY = "selectorShelf"
+AUTO_TIER_KEY = "autoTier"
 
 IMAGE_SHELF_KEY = "imageShelf"
 EMBEDDINGS_SHELF_KEY = "embeddingsShelf"
@@ -52,6 +56,30 @@ def is_non_text_shelf_model(model: Any) -> bool:
         or is_speech_shelf_model(model)
         or is_speech_transcription_shelf_model(model)
     )
+
+
+def document_providers(document: list[Any] | None) -> list[dict[str, Any]]:
+    """The provider entries of a document, skipping anything that is not one."""
+    return [provider for provider in document or [] if isinstance(provider, dict)]
+
+
+def text_shelf_models(document: list[Any] | None) -> list[dict[str, Any]]:
+    """The text-shelf models of a document, in document order, first entry per Model ID."""
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for provider in document_providers(document):
+        models = provider.get("models")
+        if not isinstance(models, list):
+            continue
+        for model in models:
+            if not isinstance(model, dict) or is_non_text_shelf_model(model):
+                continue
+            model_id = model.get("id")
+            if not isinstance(model_id, str) or not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            found.append(model)
+    return found
 
 
 def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
