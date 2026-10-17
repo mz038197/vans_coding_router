@@ -4,7 +4,7 @@ Run on 2026-10-17 against OpenRouter, to validate and finalise the default Tier 
 
 ## Result
 
-The final descriptions are **v2** below. Across two runs each, the three selector models put 97–100% of 64 labelled questions on the labelled tier. Every remaining miss went one tier stronger than the label, never weaker. All 10 lure questions landed on the task's real tier on every model and every run. Every model and run had a mean latency of 0.43–0.55 s. The mean cost per call was USD 0.000008–0.000038.
+The final descriptions are **v2** below. Across two runs each, the three selector models put 97–100% of 64 labelled questions on the labelled tier. Every remaining miss went one tier stronger than the label, never weaker. All 10 lure questions landed on the task's real tier on every model and every run. Every model and run had a mean latency of 0.43–0.57 s. Each call cost about USD 0.000008–0.000038.
 
 | Tier | Final Tier Description |
 |---|---|
