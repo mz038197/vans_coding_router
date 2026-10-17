@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 _UPSTREAM_AUTH_MESSAGE = (
     "Upstream provider authentication failed. Contact your teacher or administrator."
 )
 _MAX_UPSTREAM_ERROR_CHARS = 2000
+_HTTP_STATUS_PREFIX = re.compile(r"HTTP \d{3}: ")
 
 
 def extract_upstream_error_text(body: Any) -> str | None:
@@ -15,6 +17,8 @@ def extract_upstream_error_text(body: Any) -> str | None:
 
     Providers differ: OpenAI-style ``{"error": {"message": "..."}}``,
     Ollama-style ``{"error": "..."}``, raw JSON strings, or plain text.
+    OpenRouter also wraps a provider's own body as ``"HTTP 400: {...}"``,
+    and validation failures arrive as a list of located messages.
     """
     if body is None:
         return None
@@ -26,23 +30,34 @@ def extract_upstream_error_text(body: Any) -> str | None:
         text = body.strip()
         if not text:
             return None
+        wrapped = _HTTP_STATUS_PREFIX.match(text)
+        candidate = text[wrapped.end():] if wrapped else text
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(candidate)
         except json.JSONDecodeError:
             return text[:_MAX_UPSTREAM_ERROR_CHARS]
-        return extract_upstream_error_text(parsed)
+        if not isinstance(parsed, (dict, list)):
+            return text[:_MAX_UPSTREAM_ERROR_CHARS]
+        return extract_upstream_error_text(parsed) or text[:_MAX_UPSTREAM_ERROR_CHARS]
+
+    if isinstance(body, list):
+        lines = [line for line in (_located_message(item) for item in body) if line]
+        return "; ".join(lines)[:_MAX_UPSTREAM_ERROR_CHARS] if lines else None
 
     if isinstance(body, dict):
         error_obj = body.get("error")
         if isinstance(error_obj, str) and error_obj.strip():
-            return error_obj.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+            return extract_upstream_error_text(error_obj)
         if isinstance(error_obj, dict):
             message = error_obj.get("message")
             if isinstance(message, str) and message.strip():
-                return message.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+                return extract_upstream_error_text(message)
             nested = error_obj.get("error")
             if isinstance(nested, str) and nested.strip():
-                return nested.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
+                return extract_upstream_error_text(nested)
+        detail = body.get("detail")
+        if isinstance(detail, (str, dict, list)) and detail:
+            return extract_upstream_error_text(detail)
         message = body.get("message")
         if isinstance(message, str) and message.strip():
             return message.strip()[:_MAX_UPSTREAM_ERROR_CHARS]
@@ -50,6 +65,18 @@ def extract_upstream_error_text(body: Any) -> str | None:
 
     text = str(body).strip()
     return text[:_MAX_UPSTREAM_ERROR_CHARS] if text else None
+
+
+def _located_message(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return extract_upstream_error_text(item)
+    message = item.get("msg") or item.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return None
+    location = item.get("loc") or item.get("path")
+    if isinstance(location, list) and location:
+        return f"{'.'.join(str(part) for part in location)}: {message.strip()}"
+    return message.strip()
 
 
 class AppError(Exception):
