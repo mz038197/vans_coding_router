@@ -483,3 +483,123 @@ def test_no_selection_leaves_the_prompt_log_tier_empty(harness: _Harness):
     assert _chat(harness).status_code == 200
 
     assert _tier_fields(harness) == [(LIGHT, None, None)]
+
+
+# --- Selection memory (#66): one question, one selection ---
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(harness: _Harness) -> _FakeClock:
+    from src.application.vcr_auto_selection_memory import VcrAutoSelectionMemory
+
+    fake = _FakeClock()
+    harness.api.vcr_auto_selection_memory = VcrAutoSelectionMemory(clock=fake)
+    return fake
+
+
+STRONG_DECISION = {"輕量": 0.0, "一般": 0.0, "困難": 1.0}
+
+
+def test_the_same_last_user_message_asks_the_selector_once(harness: _Harness, clock: _FakeClock):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    first = _chat(harness)
+    second = TestClient(harness.app).post(
+        "/v1/chat/completions",
+        headers=harness.headers,
+        json={
+            "model": VCR_AUTO_MODEL_ID,
+            "messages": [
+                {"role": "user", "content": "幫我修這個 bug"},
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
+                ]},
+                {"role": "tool", "tool_call_id": "c1", "content": "工具結果"},
+            ],
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(upstream.selector_bodies) == 1
+    assert upstream.chat == ["vendor/strong", "vendor/strong"]
+
+
+@pytest.mark.parametrize(
+    "edited_tiers",
+    [
+        [TIERS[0], {**TIERS[1], "description": "單一檔案的功能與測試"}, TIERS[2]],
+        [TIERS[0], {**TIERS[1], "name": "中等"}, TIERS[2]],
+        [TIERS[1], TIERS[0], TIERS[2]],
+    ],
+    ids=["description", "name", "order"],
+)
+def test_a_teacher_edit_to_the_tiers_asks_the_selector_again(
+    harness: _Harness, clock: _FakeClock, edited_tiers: list[dict]
+):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+    _chat(harness)
+
+    _set_document(harness, _selector_document(tiers=edited_tiers))
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert len(upstream.selector_bodies) == 2
+
+
+def test_a_selection_older_than_thirty_minutes_is_asked_again(harness: _Harness, clock: _FakeClock):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+    _chat(harness)
+
+    clock.advance(29 * 60)
+    _chat(harness)
+    assert len(upstream.selector_bodies) == 1
+
+    clock.advance(2 * 60)
+    _chat(harness)
+    assert len(upstream.selector_bodies) == 2
+
+
+def test_each_api_key_asks_the_selector_for_itself(harness: _Harness, clock: _FakeClock):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+    classmate = harness.repo.upsert_google_user("classmate@school.edu", "Classmate")
+    classmate_key = harness.repo.redeem_invite(harness.session["invite_code"], classmate["id"])["api_key"]
+
+    _chat(harness)
+    response = TestClient(harness.app).post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {classmate_key}"},
+        json={"model": VCR_AUTO_MODEL_ID, "messages": [{"role": "user", "content": "幫我修這個 bug"}]},
+    )
+
+    assert response.status_code == 200
+    assert len(upstream.selector_bodies) == 2
+    assert upstream.chat == ["vendor/strong", "vendor/strong"]
+
+
+def test_a_failed_selection_is_not_remembered(harness: _Harness, clock: _FakeClock):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(500, {"error": {"message": "boom"}}))
+    _chat(harness)
+
+    upstream.selector_reply = _json_response(200, _decision(STRONG_DECISION))
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert len(upstream.selector_bodies) == 2
+    assert upstream.chat == ["vendor/light", "vendor/strong"]
