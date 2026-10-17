@@ -183,6 +183,8 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
             self._ensure_column(conn, "prompt_logs", "api_endpoint", "TEXT")
             self._ensure_column(conn, "prompt_logs", "response_preview", "TEXT")
+            self._ensure_column(conn, "prompt_logs", "tier_name", "TEXT")
+            self._ensure_column(conn, "prompt_logs", "tier_confidence", "REAL")
             self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
             self._ensure_column(conn, "class_sessions", "name", "TEXT")
             self._ensure_column(
@@ -342,13 +344,15 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "api_endpoint", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "response_preview", "TEXT")
+            self._ensure_column(conn, "prompt_logs_archive", "tier_name", "TEXT")
+            self._ensure_column(conn, "prompt_logs_archive", "tier_confidence", "REAL")
             conn.execute(
                 """
                 INSERT INTO prompt_logs_archive(
                     id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                     client_ip, created_at, archived_at, message_preview, messages_json,
-                    api_endpoint, response_preview
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    api_endpoint, response_preview, tier_name, tier_confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -366,6 +370,8 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     row.get("messages_json") or "",
                     row.get("api_endpoint") or "",
                     row.get("response_preview") or "",
+                    row.get("tier_name"),
+                    row.get("tier_confidence"),
                 ),
             )
             conn.commit()

@@ -112,6 +112,51 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
         assert conn.execute("SELECT COUNT(*) AS n FROM prompt_logs_archive").fetchone()["n"] == 0
 
 
+def _student_context(repo):
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Tiers", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    assert context is not None
+    return teacher, klass, context
+
+
+def test_postgres_prompt_log_keeps_tier_name_and_confidence(postgres_repo):
+    repo = postgres_repo
+    teacher, klass, context = _student_context(repo)
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier_name="進階", tier_confidence=0.92)
+    repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
+
+    logs = repo.list_prompt_logs(teacher["id"], klass["id"])
+
+    assert sorted((log["raw_prompt"], log["tier_name"], log["tier_confidence"]) for log in logs) == [
+        ("tiered", "進階", 0.92),
+        ("untiered", None, None),
+    ]
+
+
+def test_postgres_archive_keeps_tier_name_and_confidence(postgres_repo):
+    repo = postgres_repo
+    _, _, context = _student_context(repo)
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier_name="進階", tier_confidence=0.92)
+    repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = %s", ("2026-05-01T00:00:00+00:00",))
+
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 2
+
+    with repo._connect() as conn:
+        rows = conn.execute(
+            "SELECT raw_prompt, tier_name, tier_confidence FROM prompt_logs_archive ORDER BY raw_prompt"
+        ).fetchall()
+    assert [(r["raw_prompt"], r["tier_name"], r["tier_confidence"]) for r in rows] == [
+        ("tiered", "進階", 0.92),
+        ("untiered", None, None),
+    ]
+
+
 def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")

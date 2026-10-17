@@ -738,7 +738,7 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.chat_completions_nonstream(replace(req, model=model_id))
 
-        model_ids, _selection = await self._vcr_auto_text_walk(
+        model_ids, selection = await self._vcr_auto_text_walk(
             auth_context, last_user_text_from_chat(req.messages)
         )
         hit = await walker.run(model_ids, call)
@@ -750,6 +750,7 @@ class ApiUseCase:
             _usage_from_response(hit.value),
             assistant_messages=extract_assistant_messages_for_log(hit.value, CHAT_COMPLETIONS_PATH),
             api_endpoint=CHAT_COMPLETIONS_PATH,
+            selection=selection,
         )
         return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
 
@@ -766,7 +767,7 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.chat_completions_stream(replace(req, model=model_id))
 
-        model_ids, _selection = await self._vcr_auto_text_walk(
+        model_ids, selection = await self._vcr_auto_text_walk(
             auth_context, last_user_text_from_chat(req.messages)
         )
         async for chunk in walker.stream(model_ids, open_stream):
@@ -782,6 +783,7 @@ class ApiUseCase:
             tracker.usage,
             assistant_messages=tracker.assistant_messages,
             api_endpoint=CHAT_COMPLETIONS_PATH,
+            selection=selection,
         )
 
     async def _responses_vcr_auto(
@@ -796,7 +798,7 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.responses_create({**body, "model": model_id})
 
-        model_ids, _selection = await self._vcr_auto_text_walk(
+        model_ids, selection = await self._vcr_auto_text_walk(
             auth_context, last_user_text_from_responses(body)
         )
         hit = await walker.run(model_ids, call)
@@ -809,6 +811,7 @@ class ApiUseCase:
             _usage_from_response(hit.value),
             assistant_messages=extract_assistant_messages_for_log(hit.value, RESPONSES_PATH),
             api_endpoint=RESPONSES_PATH,
+            selection=selection,
         )
         return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
 
@@ -825,7 +828,7 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.responses_create_stream({**body, "model": model_id})
 
-        model_ids, _selection = await self._vcr_auto_text_walk(
+        model_ids, selection = await self._vcr_auto_text_walk(
             auth_context, last_user_text_from_responses(body)
         )
         async for chunk in walker.stream(model_ids, open_stream):
@@ -841,6 +844,7 @@ class ApiUseCase:
             tracker.usage,
             assistant_messages=tracker.assistant_messages,
             api_endpoint=RESPONSES_PATH,
+            selection=selection,
         )
 
     async def _images_vcr_auto(
@@ -1204,6 +1208,7 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = RESPONSES_PATH,
+        selection: TierSelection | None = None,
     ) -> None:
         model = body.get("model")
         model_name = model if isinstance(model, str) else "N/A"
@@ -1226,6 +1231,7 @@ class ApiUseCase:
             usage,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
+            selection=selection,
         )
 
     def _log_request(
@@ -1237,6 +1243,7 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = CHAT_COMPLETIONS_PATH,
+        selection: TierSelection | None = None,
     ) -> None:
         is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
         messages = [_message_to_log_dict(m) for m in req.messages]
@@ -1257,6 +1264,7 @@ class ApiUseCase:
             usage,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
+            selection=selection,
         )
 
     def _auth_for_log(
@@ -1287,7 +1295,9 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = "",
+        selection: TierSelection | None = None,
     ) -> None:
+        """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty."""
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
         if auth_context and auth_context.session_id and hasattr(
@@ -1313,6 +1323,8 @@ class ApiUseCase:
             response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
             api_endpoint=api_endpoint,
+            tier_name=selection.name if selection else None,
+            tier_confidence=selection.confidence if selection else None,
         )
 
     def _log_images_request(

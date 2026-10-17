@@ -391,6 +391,100 @@ def test_image_generation_never_asks_the_selector(harness: _Harness):
     assert upstream.chat == ["vendor/painter"]
 
 
+def _tier_fields(harness: _Harness) -> list[tuple]:
+    return [(log["model"], log["tier_name"], log["tier_confidence"]) for log in harness.logs()]
+
+
+def test_prompt_log_keeps_the_chosen_tier_name_and_confidence(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.03, "一般": 0.05, "困難": 0.92})))
+
+    assert _chat(harness).status_code == 200
+
+    assert _tier_fields(harness) == [(STRONG, "困難", 0.92)]
+
+
+def test_prompt_log_keeps_the_tier_name_from_the_time_of_the_call(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.03, "一般": 0.05, "困難": 0.92})))
+    assert _chat(harness).status_code == 200
+
+    renamed = [TIERS[0], TIERS[1], {**TIERS[2], "name": "進階"}]
+    _set_document(harness, _selector_document(tiers=renamed))
+
+    assert _tier_fields(harness) == [(STRONG, "困難", 0.92)]
+
+
+def test_chat_stream_prompt_log_keeps_the_chosen_tier(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.0, "一般": 0.0, "困難": 1.0})))
+    harness.openrouter._client.stream = MagicMock(
+        return_value=_BytesStream([_chat_chunk("vendor/strong"), b"data: [DONE]\n\n"])
+    )
+
+    assert _chat(harness, stream=True).status_code == 200
+
+    assert _tier_fields(harness) == [(STRONG, "困難", 1.0)]
+
+
+def test_responses_prompt_log_keeps_the_chosen_tier(harness: _Harness):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision({"輕量": 0.1, "一般": 0.8, "困難": 0.1})))
+    upstream.chat_replies["standard:cloud"] = _json_response(
+        200, {"id": "resp_1", "object": "response", "model": "standard:cloud", "output": []}
+    )
+
+    response = TestClient(harness.app).post(
+        "/v1/responses",
+        headers=harness.headers,
+        json={"model": VCR_AUTO_MODEL_ID, "input": "寫一個函式"},
+    )
+
+    assert response.status_code == 200
+    assert _tier_fields(harness) == [(STANDARD, "一般", 0.8)]
+
+
+def test_responses_stream_prompt_log_keeps_the_chosen_tier(harness: _Harness):
+    import json
+
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.0, "一般": 0.0, "困難": 1.0})))
+    event = {
+        "type": "response.completed",
+        "response": {"id": "resp_1", "object": "response", "model": "vendor/strong", "output": []},
+    }
+    harness.openrouter._client.stream = MagicMock(
+        return_value=_BytesStream([f"data: {json.dumps(event)}\n\n".encode()])
+    )
+
+    response = TestClient(harness.app).post(
+        "/v1/responses",
+        headers=harness.headers,
+        json={"model": VCR_AUTO_MODEL_ID, "input": "幫我設計整個系統", "stream": True},
+    )
+
+    assert response.status_code == 200
+    assert _tier_fields(harness) == [(STRONG, "困難", 1.0)]
+
+
+def test_failed_selection_leaves_the_prompt_log_tier_empty(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(500, {"error": {"message": "boom"}}))
+
+    assert _chat(harness).status_code == 200
+
+    assert _tier_fields(harness) == [(LIGHT, None, None)]
+
+
+def test_no_selection_leaves_the_prompt_log_tier_empty(harness: _Harness):
+    _set_document(harness, _selector_document(selector=[]))
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.0, "一般": 0.0, "困難": 1.0})))
+
+    assert _chat(harness).status_code == 200
+
+    assert _tier_fields(harness) == [(LIGHT, None, None)]
+
+
 # --- Selection memory (#66): one question, one selection ---
 
 

@@ -1759,6 +1759,15 @@
       return `<span class="tag tag-ended">${escapeHtml(endpoint)}</span>`;
     }
 
+    // Model ID, plus `名稱 · 信心` of the Auto Tier the vcr-auto selector chose, when stored.
+    function renderLogModel(item) {
+      const model = escapeHtml(item.model || '-');
+      const name = (item.tier_name || '').trim();
+      const confidence = Number(item.tier_confidence);
+      if (!name || item.tier_confidence == null || !Number.isFinite(confidence)) return model;
+      return `${model}<div class="hint">${escapeHtml(name)} · ${confidence.toFixed(2)}</div>`;
+    }
+
     function formatLogDetailRole(role) {
       const map = {
         user: '使用者',
@@ -1859,7 +1868,7 @@
               <td>${escapeHtml(formatLocalDateTime(item.created_at))}</td>
               <td>${escapeHtml(item.user_name || item.user_email || '-')}</td>
               <td>${renderLogEndpointTag(item)}</td>
-              <td>${escapeHtml(item.model || '-')}</td>
+              <td>${renderLogModel(item)}</td>
               <td>${renderStatusTag('prompt', item.status === 'rejected' ? 'rejected' : 'ok')}</td>
               <td><div class="logs-message-preview">${escapeHtml(formatLogPreview(item))}</div></td>
               <td><button class="btn-secondary btn-sm" onclick="showPromptDetail(${item.id})">查看詳情</button></td>

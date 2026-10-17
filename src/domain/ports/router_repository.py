@@ -263,7 +263,13 @@ class RouterRepositoryPort(Protocol):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
+        tier_name: str | None = None,
+        tier_confidence: float | None = None,
     ) -> None:
+        """tier_name/tier_confidence: the Auto Tier a vcr-auto selector chose, as it was then.
+
+        Both stay None when selection did not run or failed.
+        """
         ...
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
