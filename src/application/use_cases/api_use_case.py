@@ -19,9 +19,11 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.application.vcr_auto_selection_memory import VcrAutoSelectionMemory
 from src.application.vcr_auto_selector import VcrAutoSelector
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.auto_tier import (
+    AutoTier,
     TierSelection,
     last_user_text_from_chat,
     last_user_text_from_responses,
@@ -74,9 +76,11 @@ class ApiUseCase:
         web_search_backend: WebSearchPort | None = None,
         web_search_limiter: WebSearchRateLimiter | None = None,
         vcr_auto_selector: VcrAutoSelector | None = None,
+        vcr_auto_selection_memory: VcrAutoSelectionMemory | None = None,
     ):
         self.gateway = gateway
         self.vcr_auto_selector = vcr_auto_selector or VcrAutoSelector(gateway)
+        self.vcr_auto_selection_memory = vcr_auto_selection_memory or VcrAutoSelectionMemory()
         self.api_key_repo = api_key_repo
         self.logger = logger
         self.web_search_backend = web_search_backend
@@ -679,12 +683,33 @@ class ApiUseCase:
         tiers = selectable_tiers(document, model_ids)
         if not tiers:
             return model_ids, None
-        selection = await self.vcr_auto_selector.select(
-            selector_shelf_ids(document), tiers, last_user_text
-        )
+        selection = await self._remembered_selection(auth_context, document, tiers, last_user_text)
         if selection is None:
             return model_ids, None
         return tier_ordered_walk(document, model_ids, selection.tier_id), selection
+
+    async def _remembered_selection(
+        self,
+        auth_context: AuthContext | None,
+        document: list[Any] | None,
+        tiers: list[AutoTier],
+        last_user_text: str,
+    ) -> TierSelection | None:
+        """One question, one selection: reuse this key's choice for the same last user message.
+
+        A failed selection is not remembered, so the next call asks again.
+        """
+        memory_key = None
+        if auth_context is not None and auth_context.api_key_id is not None:
+            memory_key = str(auth_context.api_key_id)
+        if memory_key is not None:
+            remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, tiers)
+            if remembered is not None:
+                return remembered
+        selection = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        if selection is not None and memory_key is not None:
+            self.vcr_auto_selection_memory.remember(memory_key, last_user_text, tiers, selection)
+        return selection
 
     def _selection_document(self, auth_context: AuthContext | None) -> list[Any] | None:
         """The document whose Auto Tiers order the walk: only a sitting on Automatic Models."""
