@@ -523,6 +523,14 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.router_model_template(current_user_id(session_user_id))
         )
 
+    @router.get("/teacher/auto-tier-defaults")
+    async def get_auto_tier_defaults(
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.auto_tier_defaults(current_user_id(session_user_id))
+        )
+
     @router.put("/teacher/router-model-template")
     async def put_router_model_template(
         data: RouterModelTemplateRequest,

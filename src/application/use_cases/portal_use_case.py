@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import UTC, datetime
 import time
 from typing import Any
@@ -22,6 +23,7 @@ from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
+from src.domain.auto_tier import auto_tiers
 from src.domain.auto_tier_save_check import check_auto_tier_document
 from src.domain.model_document_upload import uploaded_model_document
 from src.domain.session_model_allowlist import (
@@ -584,6 +586,11 @@ class PortalUseCase:
         if document is None:
             raise PermissionError("teacher only")
         return document
+
+    def auto_tier_defaults(self, user_id: int) -> dict[str, Any]:
+        """The shipped starter's tiers: an editor starting point, never read by the router."""
+        self._assert_teacher(user_id)
+        return {"items": [asdict(tier) for tier in auto_tiers(load_vans_template())]}
 
     def save_router_model_template(self, user_id: int, document: Any) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)

@@ -350,6 +350,22 @@ def test_empty_selector_shelf_keeps_document_order(harness: _Harness):
     assert upstream.chat == ["vendor/light"]
 
 
+def test_a_document_without_tiers_keeps_document_order_and_never_uses_the_default_tiers(
+    harness: _Harness,
+):
+    # The models name the shipped default tier ids, yet the document stores no tiers.
+    models = [_tiered(LIGHT, "light"), _tiered(STANDARD, "standard"), _tiered(STRONG, "hard")]
+    document = _selector_document(models)
+    del document[0]["autoTiers"]
+    _set_document(harness, document)
+    upstream = _Upstream(harness, _json_response(200, _decision({"輕量": 0.0, "一般": 0.0, "困難": 1.0})))
+
+    response = _chat(harness)
+
+    _assert_selector_not_called(harness, upstream, response)
+    assert upstream.chat == ["vendor/light"]
+
+
 def test_one_tier_in_use_keeps_document_order(harness: _Harness):
     models = [_tiered(LIGHT, "t-strong"), _tiered(STRONG, "t-strong")]
     _set_document(harness, _selector_document(models))

@@ -60,6 +60,13 @@ def test_render_install_script_embeds_filtered_template():
     assert "ollama_cloud@minimax-m3:cloud" not in script
 
 
+def test_default_installers_leave_out_the_starter_tiers():
+    assert "autoTiers" not in render_install_vscode_models_script()
+    mac = render_install_vscode_models_command()
+    match = re.search(r"base64\.b64decode\('([A-Za-z0-9+/=]+)'\)", mac)
+    assert "autoTiers" not in base64.b64decode(match.group(1)).decode("utf-8")
+
+
 def test_render_install_command_targets_macos_paths():
     script = render_install_vscode_models_command()
     assert script.startswith("#!/bin/bash\n")
