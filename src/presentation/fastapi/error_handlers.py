@@ -11,6 +11,7 @@ from src.domain.errors import (
     EmbeddingsDisabledError,
     ImageGenerationDisabledError,
     ImageGenerationNotSupportedError,
+    InvalidJsonBodyError,
     InvalidModelIdError,
     ModelNotAllowedError,
     ServiceUnavailableError,
@@ -196,6 +197,17 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             content={"detail": exc.message},
         )
+
+    @app.exception_handler(InvalidJsonBodyError)
+    async def handle_invalid_json_body_error(request: Request, exc: InvalidJsonBodyError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
     @app.exception_handler(ImageGenerationNotSupportedError)
     async def handle_image_generation_not_supported(request: Request, exc: ImageGenerationNotSupportedError):

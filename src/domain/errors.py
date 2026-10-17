@@ -190,6 +190,15 @@ class QuarantineReleaseCooldownError(AppError):
         self.retry_after_sec = retry_after
 
 
+class InvalidJsonBodyError(AppError):
+    def __init__(self, message: str = "請求內容必須是 UTF-8 編碼的 JSON 物件"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="invalid_json_body",
+        )
+
+
 class InvalidModelIdError(AppError):
     def __init__(self, message: str):
         super().__init__(

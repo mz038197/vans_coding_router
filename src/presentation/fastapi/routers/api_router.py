@@ -11,6 +11,7 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.domain.errors import (
     AppError,
+    InvalidJsonBodyError,
     InvalidModelIdError,
     ModelNotAllowedError,
     ServiceUnavailableError,
@@ -53,6 +54,17 @@ def _extract_api_key(request: Request) -> str | None:
         return value or None
     value = normalize_api_key(request.headers.get("X-API-Key"))
     return value or None
+
+
+async def _json_object_body(request: Request) -> dict[str, Any]:
+    # 壞掉的 UTF-8 或 JSON 是呼叫端的錯，不是伺服器錯誤。
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise InvalidJsonBodyError() from exc
+    if not isinstance(body, dict):
+        raise InvalidJsonBodyError()
+    return body
 
 
 def _upstream_error_message(exc: UpstreamServiceError) -> str:
@@ -182,7 +194,7 @@ def create_api_router(
             api_use_case.log_invalid_auth(api_key or "", client_ip)
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
-        body: dict[str, Any] = await request.json()
+        body = await _json_object_body(request)
         auth_context = getattr(request.state, "auth_context", None)
         api_use_case.validate_responses_request(body)
         api_use_case.validate_model_allowed(str(body.get("model") or ""), auth_context)
@@ -260,7 +272,7 @@ def create_api_router(
             api_use_case.log_invalid_auth(api_key or "", client_ip)
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
-        body = await request.json()
+        body = await _json_object_body(request)
         data = await api_use_case.embeddings_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
@@ -461,7 +473,7 @@ def create_api_router(
             api_use_case.log_invalid_auth(api_key or "", client_ip)
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
-        body = await request.json()
+        body = await _json_object_body(request)
         data = await api_use_case.decisions_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
