@@ -1,0 +1,214 @@
+// Portal editor UI for Auto Tiers and the selector shelf (ADR-0037, #73).
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import vm from "node:vm";
+
+const portalHtml = readFileSync(
+  new URL("../../../src/presentation/fastapi/web/portal.html", import.meta.url),
+  "utf8",
+);
+
+function extractNamedFunction(source, name) {
+  const needle = `function ${name}(`;
+  const at = source.indexOf(needle);
+  if (at < 0) throw new Error(`missing function ${name}`);
+  const asyncPrefix = "async ";
+  const start =
+    at >= asyncPrefix.length && source.slice(at - asyncPrefix.length, at) === asyncPrefix
+      ? at - asyncPrefix.length
+      : at;
+  const brace = source.indexOf("{", start);
+  let depth = 0;
+  for (let i = brace; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unclosed function ${name}`);
+}
+
+const NAMES = [
+  "escapeHtml",
+  "modelsFromDocument",
+  "draftFromDocument",
+  "documentFromDraft",
+  "stencilDraftModel",
+  "modelShelf",
+  "autoSelectionVisible",
+  "prefillAutoTiers",
+  "addAutoTier",
+  "removeAutoTier",
+  "moveAutoTier",
+  "defaultForTier",
+  "fillDefaultTierDescription",
+  "autoTierInUse",
+  "toggleDraftSelector",
+  "draftAutoSnapshot",
+  "autoTierBlockHtml",
+  "draftModelTierField",
+  "candidateShelfChoicesHtml",
+  "sessionAutoSelectionBadge",
+];
+
+function sandbox() {
+  const stencil = portalHtml.match(/const VCROUTER_STENCIL = \{[\s\S]*?\n {4}\};/)[0];
+  const limits = portalHtml.match(/const AUTO_TIER_[A-Z_]+ = [^;]+;/g) || [];
+  const code = [stencil, ...limits, ...NAMES.map((name) => extractNamedFunction(portalHtml, name))].join("\n");
+  const box = {};
+  vm.runInNewContext(`${code}\n${NAMES.map((n) => `this.${n} = ${n};`).join("\n")}`, box);
+  return box;
+}
+
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+const DEFAULTS = [
+  { id: "light", name: "輕量", description: "預設輕量" },
+  { id: "standard", name: "一般", description: "預設一般" },
+  { id: "hard", name: "困難", description: "預設困難" },
+];
+const JEV = "openrouter@typesafe/jev-1.14";
+
+function tieredDraft(box) {
+  return box.draftFromDocument([{
+    name: "VCRouter",
+    autoTiers: [
+      { id: "t-light", name: "輕量", description: "小問題" },
+      { id: "t-hard", name: "困難", description: "大問題" },
+    ],
+    selectorShelf: [JEV],
+    models: [
+      { id: "ollama_cloud@light:cloud", name: "light", autoTier: "t-light" },
+      { id: "ollama_cloud@strong:cloud", name: "strong" },
+      { id: JEV, name: "jev", decisionShelf: true },
+    ],
+  }]);
+}
+
+test("tier settings show in the template editor and on Automatic Models, not on Picked Models", () => {
+  const box = sandbox();
+  assert.equal(box.autoSelectionVisible({ mode: "template" }, null), true);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "automatic" }), true);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: null }), true);
+  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "picked" }), false);
+});
+
+test("a document without tiers opens with the default tiers; one with tiers keeps its own", () => {
+  const box = sandbox();
+  const empty = box.draftFromDocument([{ name: "VCRouter", models: [] }]);
+  box.prefillAutoTiers(empty, DEFAULTS);
+  assert.deepEqual(plain(empty.autoTiers), DEFAULTS);
+  empty.autoTiers[0].name = "改過";
+  assert.equal(DEFAULTS[0].name, "輕量");
+
+  const tiered = tieredDraft(box);
+  box.prefillAutoTiers(tiered, DEFAULTS);
+  assert.deepEqual(plain(tiered.autoTiers).map((t) => t.id), ["t-light", "t-hard"]);
+});
+
+test("teacher adds, removes, and reorders tiers; the saved document keeps that order", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  const added = box.addAutoTier(draft);
+  assert.equal(draft.autoTiers.length, 3);
+  assert.equal(draft.autoTiers[2].id, added.id);
+  assert.ok(!["t-light", "t-hard"].includes(added.id));
+
+  box.moveAutoTier(draft, added.id, "t-light");
+  assert.deepEqual(draft.autoTiers.map((t) => t.id), [added.id, "t-light", "t-hard"]);
+
+  box.removeAutoTier(draft, added.id);
+  const saved = box.documentFromDraft(draft);
+  assert.deepEqual(saved[0].autoTiers.map((t) => t.id), ["t-light", "t-hard"]);
+});
+
+test("a tier that a model still uses cannot be removed", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  assert.equal(box.autoTierInUse(draft, "t-light"), true);
+  assert.equal(box.autoTierInUse(draft, "t-hard"), false);
+  box.removeAutoTier(draft, "t-light");
+  assert.deepEqual(draft.autoTiers.map((t) => t.id), ["t-light", "t-hard"]);
+});
+
+test("填入預設 puts the current default text back for that tier", () => {
+  const box = sandbox();
+  const draft = box.draftFromDocument([{ autoTiers: plain(DEFAULTS), models: [] }]);
+  draft.autoTiers[1].description = "老師改過";
+  box.fillDefaultTierDescription(draft, "standard", DEFAULTS);
+  assert.equal(draft.autoTiers[1].description, "預設一般");
+});
+
+test("the tier block lists tiers weakest first with limits, defaults, and the accuracy hint", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  const html = box.autoTierBlockHtml(draft, DEFAULTS);
+  assert.match(html, /越下面越強/);
+  assert.match(html, /修改說明可能影響自動選模的準確度/);
+  assert.match(html, /填入預設/);
+  assert.match(html, /新增 Tier/);
+  assert.match(html, /maxlength="300"/);
+  assert.match(html, /maxlength="20"/);
+  assert.match(html, /3\/300/);
+  assert.match(html, /draggable="true"/);
+  assert.ok(html.indexOf("輕量") < html.indexOf("困難"));
+});
+
+test("each text-shelf model picks one of the document's tiers", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  const field = box.draftModelTierField(draft.models[0], draft.autoTiers);
+  assert.match(field, /data-field="autoTier"/);
+  assert.match(field, /<option value="t-light" selected>輕量<\/option>/);
+  assert.match(field, /<option value="t-hard">困難<\/option>/);
+  assert.equal(box.draftModelTierField(draft.models[2], draft.autoTiers), "");
+});
+
+test("an OpenRouter decisions row offers 決策 and 自動選模, either or both", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  const html = box.candidateShelfChoicesHtml({ id: JEV, provider: "openrouter" }, "decisions", draft);
+  assert.match(html, /決策/);
+  assert.match(html, /自動選模/);
+  assert.equal((html.match(/checked/g) || []).length, 2);
+  assert.equal(box.candidateShelfChoicesHtml({ id: "x", provider: "openrouter" }, "text", draft), "");
+  assert.equal(box.candidateShelfChoicesHtml({ id: "x", provider: "ollama_cloud" }, "decisions", draft), "");
+
+  box.toggleDraftSelector(draft, JEV, false);
+  box.toggleDraftSelector(draft, "openrouter@other/judge", true);
+  box.toggleDraftSelector(draft, "openrouter@other/judge", true);
+  assert.deepEqual(plain(box.documentFromDraft(draft)[0].selectorShelf), ["openrouter@other/judge"]);
+  assert.equal(draft.models.find((m) => m.id === JEV).decisionShelf, true);
+});
+
+test("unsaved-changes check covers tiers, model tiers, and the selector shelf", () => {
+  const box = sandbox();
+  const draft = tieredDraft(box);
+  const before = box.draftAutoSnapshot(draft);
+  draft.autoTiers[0].description = "改了";
+  assert.notEqual(box.draftAutoSnapshot(draft), before);
+  draft.autoTiers[0].description = "小問題";
+  draft.models[1].autoTier = "t-hard";
+  assert.notEqual(box.draftAutoSnapshot(draft), before);
+  delete draft.models[1].autoTier;
+  box.toggleDraftSelector(draft, JEV, false);
+  assert.notEqual(box.draftAutoSnapshot(draft), before);
+  box.toggleDraftSelector(draft, JEV, true);
+  assert.equal(box.draftAutoSnapshot(draft), before);
+  assert.match(extractNamedFunction(portalHtml, "isSessionChatModelsDraftDirty"), /draftAutoSnapshot/);
+});
+
+test("class list shows 「自動選模」 only when the row says selection runs", () => {
+  const box = sandbox();
+  assert.match(box.sessionAutoSelectionBadge({ auto_selection_active: true }), /自動選模/);
+  assert.equal(box.sessionAutoSelectionBadge({ auto_selection_active: false }), "");
+  assert.equal(box.sessionAutoSelectionBadge({}), "");
+  assert.match(extractNamedFunction(portalHtml, "sessionModelAllowlistCell"), /sessionAutoSelectionBadge\(session\)/);
+});
+
+test("a refused save shows the server's reason", () => {
+  const save = extractNamedFunction(portalHtml, "saveSessionChatLanguageModels");
+  assert.match(save, /setSessionChatModelsMsg\('sessionChatModelsSaveMsg', err\?\.message/);
+});

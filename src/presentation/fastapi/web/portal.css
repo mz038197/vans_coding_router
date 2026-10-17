@@ -1120,6 +1120,72 @@
 
     .model-editor-msg.is-error { color: var(--error-fg); }
 
+    .model-editor-tiers {
+      flex-shrink: 0;
+      max-height: 38vh;
+      overflow: auto;
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: var(--surface-overlay);
+    }
+
+    .model-editor-tiers.hidden { display: none; }
+
+    .auto-tier-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .auto-tier-title h3 { margin: 0; font-size: 0.95rem; }
+
+    .model-editor-tiers .hint { margin: 4px 0 6px; }
+
+    .auto-tier-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 6px 0;
+      border-top: 1px solid var(--border-glass);
+    }
+
+    .auto-tier-handle {
+      cursor: grab;
+      color: var(--text-muted);
+      padding-top: 6px;
+      user-select: none;
+    }
+
+    .auto-tier-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+    .auto-tier-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    .auto-tier-name { flex: 1; min-width: 8em; }
+
+    .auto-tier-btn { padding: 3px 10px; font-size: 0.82rem; }
+
+    .auto-tier-description {
+      width: 100%;
+      box-sizing: border-box;
+      resize: vertical;
+      font: inherit;
+      font-size: 0.86rem;
+      color: var(--text-primary);
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 4px 6px;
+    }
+
+    .auto-tier-count { align-self: flex-end; font-size: 0.75rem; color: var(--text-muted); }
+
+    .candidate-shelf-choices { display: inline-flex; gap: 10px; margin-left: 8px; }
+
+    .candidate-shelf-choices label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+
     .model-editor-columns {
       display: flex;
       gap: 8px;
@@ -2229,6 +2295,18 @@
       max-height: 60px;
       margin-top: 8px;
       overflow: auto;
+    }
+
+    .session-auto-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--accent-border);
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-size: 0.78rem;
+      white-space: nowrap;
     }
 
     .session-model-pill {

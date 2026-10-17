@@ -365,6 +365,7 @@
         <p id="sessionChatModelsUploadMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsCatalogMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsSaveMsg" class="model-editor-msg" aria-live="polite"></p>
+        <section id="sessionAutoTiers" class="model-editor-tiers hidden" aria-label="自動選模 Tier"></section>
         <div class="model-editor-columns">
           <section class="model-editor-col model-editor-col-candidates">
             <h3>候選清單</h3>
@@ -901,7 +902,7 @@
         : '<span class="hint">尚未勾選對話模型</span>';
       return `<div class="session-models">
         <div class="session-models-head">
-          <span class="session-kicker">對話模型 ${edit}</span>
+          <span class="session-kicker">對話模型 ${edit} ${sessionAutoSelectionBadge(session)}</span>
           ${sessionModelChoiceControl(classId, session, true)}
         </div>
         <div class="session-model-pills">${pills}</div>
@@ -3077,6 +3078,245 @@ snippets:
       };
     }
 
+    // Auto Tiers and the selector shelf in the editor (ADR-0037, #73). Limits mirror the save check.
+    const AUTO_TIER_COUNT_MIN = 2;
+    const AUTO_TIER_COUNT_MAX = 6;
+    const AUTO_TIER_NAME_LIMIT = 20;
+    const AUTO_TIER_DESCRIPTION_LIMIT = 300;
+    let autoTierDefaults = null;
+    let sessionChatModelsAutoBaseline = '';
+
+    // Picked Models hides the tier settings but keeps them in the draft; templates always show them.
+    function autoSelectionVisible(context, session) {
+      if (context && context.mode === 'template') return true;
+      return !(session && session.classroom_model_choice === 'picked');
+    }
+
+    function sessionAutoSelectionShown() {
+      const sessionId = sessionChatModelsContext && sessionChatModelsContext.sessionId;
+      const session = sessionId && window.__sessionById ? window.__sessionById[sessionId] : null;
+      return autoSelectionVisible(sessionChatModelsContext, session);
+    }
+
+    async function loadAutoTierDefaults() {
+      if (autoTierDefaults) return autoTierDefaults;
+      try {
+        const data = await api('/teacher/auto-tier-defaults');
+        autoTierDefaults = Array.isArray(data && data.items) ? data.items : [];
+      } catch {
+        return [];
+      }
+      return autoTierDefaults;
+    }
+
+    function prefillAutoTiers(draft, defaults) {
+      if (Array.isArray(draft.autoTiers) && draft.autoTiers.length) return;
+      if (!Array.isArray(defaults) || !defaults.length) return;
+      draft.autoTiers = defaults.map((tier) => ({ id: tier.id, name: tier.name, description: tier.description }));
+    }
+
+    function autoTierInUse(draft, tierId) {
+      return (draft.models || []).some((model) => model.autoTier === tierId && modelShelf(model) === 'text');
+    }
+
+    function addAutoTier(draft) {
+      const tiers = Array.isArray(draft.autoTiers) ? draft.autoTiers : (draft.autoTiers = []);
+      if (tiers.length >= AUTO_TIER_COUNT_MAX) return null;
+      const ids = new Set(tiers.map((tier) => tier.id));
+      const names = new Set(tiers.map((tier) => tier.name));
+      let n = tiers.length + 1;
+      while (ids.has(`tier-${n}`)) n += 1;
+      let name = '新 Tier';
+      for (let k = 2; names.has(name); k += 1) name = `新 Tier ${k}`;
+      const tier = { id: `tier-${n}`, name, description: '' };
+      tiers.push(tier);
+      return tier;
+    }
+
+    function removeAutoTier(draft, tierId) {
+      if (autoTierInUse(draft, tierId)) return;
+      draft.autoTiers = (draft.autoTiers || []).filter((tier) => tier.id !== tierId);
+    }
+
+    // Drop one tier onto another: it takes that tier's place.
+    function moveAutoTier(draft, fromId, toId) {
+      const tiers = draft.autoTiers || [];
+      const from = tiers.findIndex((tier) => tier.id === fromId);
+      const to = tiers.findIndex((tier) => tier.id === toId);
+      if (from < 0 || to < 0 || from === to) return;
+      const [moved] = tiers.splice(from, 1);
+      tiers.splice(to, 0, moved);
+    }
+
+    function defaultForTier(draft, tierId, defaults) {
+      const list = Array.isArray(defaults) ? defaults : [];
+      const byId = list.find((tier) => tier.id === tierId);
+      if (byId) return byId;
+      const index = (draft.autoTiers || []).findIndex((tier) => tier.id === tierId);
+      return index >= 0 ? list[index] : undefined;
+    }
+
+    function fillDefaultTierDescription(draft, tierId, defaults) {
+      const tier = (draft.autoTiers || []).find((item) => item.id === tierId);
+      const preset = defaultForTier(draft, tierId, defaults);
+      if (tier && preset) tier.description = preset.description;
+    }
+
+    function toggleDraftSelector(draft, modelId, on) {
+      const ids = (draft.selectorShelf || []).filter((id) => id !== modelId);
+      if (on) ids.push(modelId);
+      draft.selectorShelf = ids;
+    }
+
+    // What the unsaved-changes check compares beyond model ids and shelves.
+    function draftAutoSnapshot(draft) {
+      return JSON.stringify({
+        tiers: (draft.autoTiers || []).map((tier) => [tier.id, tier.name, tier.description]),
+        selector: [...(draft.selectorShelf || [])].sort(),
+        modelTiers: (draft.models || []).map((model) => `${model.id}\u0000${model.autoTier || ''}`).sort(),
+      });
+    }
+
+    function autoTierBlockHtml(draft, defaults) {
+      const tiers = draft.autoTiers || [];
+      const rows = tiers.map((tier) => {
+        const inUse = autoTierInUse(draft, tier.id);
+        const canRemove = !inUse && tiers.length > AUTO_TIER_COUNT_MIN;
+        const removeTitle = inUse ? '還有模型使用這個 Tier' : canRemove ? '刪除 Tier' : `至少要有 ${AUTO_TIER_COUNT_MIN} 個 Tier`;
+        const id = escapeHtml(tier.id);
+        const description = String(tier.description || '');
+        const hasDefault = Boolean(defaultForTier(draft, tier.id, defaults));
+        return `<div class="auto-tier-row" draggable="true" data-tier-id="${id}" ondragstart="onAutoTierDragStart(event)" ondragover="event.preventDefault()" ondrop="onAutoTierDrop(event)">
+          <span class="auto-tier-handle" title="拖曳排序" aria-hidden="true">⋮⋮</span>
+          <div class="auto-tier-fields">
+            <div class="auto-tier-head">
+              <input class="catalog-field-input auto-tier-name" aria-label="Tier 名稱" maxlength="${AUTO_TIER_NAME_LIMIT}" data-tier-id="${id}" data-tier-field="name" value="${escapeHtml(tier.name || '')}" />
+              <button type="button" class="btn-secondary auto-tier-btn" ${hasDefault ? '' : 'disabled'} onclick="onFillDefaultTierDescription('${id}')">填入預設</button>
+              <button type="button" class="btn-secondary auto-tier-btn" title="${removeTitle}" aria-label="刪除 Tier" ${canRemove ? '' : 'disabled'} onclick="onRemoveAutoTier('${id}')">刪除</button>
+            </div>
+            <textarea class="auto-tier-description" aria-label="Tier 說明" rows="2" maxlength="${AUTO_TIER_DESCRIPTION_LIMIT}" data-tier-id="${id}" data-tier-field="description">${escapeHtml(description)}</textarea>
+            <span class="auto-tier-count" data-tier-count="${id}">${description.length}/${AUTO_TIER_DESCRIPTION_LIMIT}</span>
+          </div>
+        </div>`;
+      }).join('');
+      const canAdd = tiers.length < AUTO_TIER_COUNT_MAX;
+      return `<div class="auto-tier-title">
+          <h3>自動選模 Tier</h3>
+          <button type="button" class="btn-secondary auto-tier-btn" ${canAdd ? '' : 'disabled'} onclick="onAddAutoTier()">新增 Tier</button>
+        </div>
+        <p class="hint">由上到下排序，越下面越強。修改說明可能影響自動選模的準確度。</p>
+        ${rows || '<p class="hint">還沒有 Tier。</p>'}`;
+    }
+
+    function draftModelTierField(model, tiers) {
+      if (modelShelf(model) !== 'text') return '';
+      const list = tiers || [];
+      const current = model.autoTier || '';
+      const known = list.some((tier) => tier.id === current);
+      const options = [
+        `<option value=""${current ? '' : ' selected'}>未指定</option>`,
+        ...list.map((tier) => `<option value="${escapeHtml(tier.id)}"${tier.id === current ? ' selected' : ''}>${escapeHtml(tier.name)}</option>`),
+        current && !known ? `<option value="${escapeHtml(current)}" selected>（不存在的 Tier）</option>` : '',
+      ].join('');
+      return `<label class="catalog-field">Tier
+            <select class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-field="autoTier">${options}</select>
+          </label>`;
+    }
+
+    // An OpenRouter decisions row may go on the decision shelf, the selector shelf, or both.
+    function candidateShelfChoicesHtml(item, kind, draft) {
+      if (kind !== 'decisions' || !item || item.provider !== 'openrouter') return '';
+      const id = escapeHtml(item.id);
+      const decisionOn = (draft.models || []).some((model) => model.id === item.id && model.decisionShelf === true);
+      const selectorOn = (draft.selectorShelf || []).includes(item.id);
+      return `<span class="candidate-shelf-choices">
+          <label><input type="checkbox" value="${id}" data-shelf-choice="decisions" ${decisionOn ? 'checked' : ''} onchange="onCandidateShelfChoice(this)" />決策</label>
+          <label><input type="checkbox" value="${id}" data-shelf-choice="selector" ${selectorOn ? 'checked' : ''} onchange="onCandidateShelfChoice(this)" />自動選模</label>
+        </span>`;
+    }
+
+    function sessionAutoSelectionBadge(session) {
+      if (!session || session.auto_selection_active !== true) return '';
+      return '<span class="session-auto-badge" title="自動、自動選模架有模型、至少用到兩個 Tier">自動選模</span>';
+    }
+
+    function renderAutoTierBlock() {
+      const block = document.getElementById('sessionAutoTiers');
+      if (!block) return;
+      const shown = sessionAutoSelectionShown();
+      block.classList.toggle('hidden', !shown);
+      if (!shown) {
+        block.innerHTML = '';
+        return;
+      }
+      block.innerHTML = autoTierBlockHtml(sessionChatModelsDraft, autoTierDefaults || []);
+      block.querySelectorAll('[data-tier-field]').forEach((input) => {
+        input.addEventListener('input', onAutoTierField);
+        input.addEventListener('change', onAutoTierFieldCommit);
+      });
+    }
+
+    function onAutoTierField(event) {
+      const target = event.target;
+      const tierId = target.getAttribute('data-tier-id');
+      const field = target.getAttribute('data-tier-field');
+      const tier = (sessionChatModelsDraft.autoTiers || []).find((item) => item.id === tierId);
+      if (!tier || (field !== 'name' && field !== 'description')) return;
+      tier[field] = target.value;
+      if (field === 'description') {
+        const counter = target.parentElement && target.parentElement.querySelector('[data-tier-count]');
+        if (counter) counter.textContent = `${target.value.length}/${AUTO_TIER_DESCRIPTION_LIMIT}`;
+      }
+    }
+
+    function onAutoTierFieldCommit(event) {
+      onAutoTierField(event);
+      if (event.target.getAttribute('data-tier-field') === 'name') renderSessionChatDraft();
+    }
+
+    function onAddAutoTier() {
+      addAutoTier(sessionChatModelsDraft);
+      renderSessionChatModelsList();
+    }
+
+    function onRemoveAutoTier(tierId) {
+      removeAutoTier(sessionChatModelsDraft, tierId);
+      renderSessionChatModelsList();
+    }
+
+    function onFillDefaultTierDescription(tierId) {
+      fillDefaultTierDescription(sessionChatModelsDraft, tierId, autoTierDefaults || []);
+      renderAutoTierBlock();
+    }
+
+    function onAutoTierDragStart(event) {
+      const row = event.currentTarget;
+      if (event.dataTransfer) event.dataTransfer.setData('text/plain', row.getAttribute('data-tier-id'));
+    }
+
+    function onAutoTierDrop(event) {
+      event.preventDefault();
+      const fromId = event.dataTransfer && event.dataTransfer.getData('text/plain');
+      const toId = event.currentTarget.getAttribute('data-tier-id');
+      moveAutoTier(sessionChatModelsDraft, fromId, toId);
+      renderSessionChatModelsList();
+    }
+
+    function onCandidateShelfChoice(input) {
+      if (input.getAttribute('data-shelf-choice') === 'selector') {
+        toggleDraftSelector(sessionChatModelsDraft, input.value, input.checked);
+        sessionChatModelsCollapsed.selector = false;
+        renderSessionChatModelsList();
+        return;
+      }
+      onSessionChatModelCheck(input);
+    }
+
+    function onSelectorDraftCheck(input) {
+      toggleDraftSelector(sessionChatModelsDraft, input.value, input.checked);
+      renderSessionChatModelsList();
+    }
+
     // Upload (#70): the Portal merges the file into the open draft. Every Model ID lands on
     // the text shelf, legal file tiers are taken with each model's tier, and the file's
     // selector shelf is ignored. Nothing is stored until 儲存.
@@ -3205,9 +3445,16 @@ snippets:
       const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
       const q = (document.getElementById('sessionChatModelsSearch')?.value || '').trim().toLowerCase();
       const taken = draftModelIds();
+      const dual = sessionAutoSelectionShown() && sessionChatModelsCatalog.shelf === 'decisions';
+      const selector = new Set(sessionChatModelsDraft.selectorShelf || []);
       if (sessionChatModelsCatalog.unavailable) return [];
       return (sessionChatModelsCatalog.models || []).filter((item) => {
-        if (!item || !item.id || taken.has(item.id)) return false;
+        if (!item || !item.id) return false;
+        if (taken.has(item.id)) {
+          // An OpenRouter decisions row stays until it sits on both the decision and selector shelves.
+          const onDecision = draftModelById(item.id).decisionShelf === true;
+          if (!(dual && item.provider === 'openrouter' && onDecision && !selector.has(item.id))) return false;
+        }
         if (provider && item.provider !== provider) return false;
         if (!q) return true;
         return `${item.id} ${item.name || ''}`.toLowerCase().includes(q);
@@ -3324,6 +3571,7 @@ snippets:
           <label class="catalog-field">最大輸出 tokens
             <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(model.maxOutputTokens ?? ''))}" />
           </label>
+          ${sessionAutoSelectionShown() ? draftModelTierField(model, sessionChatModelsDraft.autoTiers) : ''}
         </div>`;
     }
 
@@ -3331,13 +3579,43 @@ snippets:
       const listEl = document.getElementById('sessionChatModelsList');
       if (!listEl) return;
       const rows = candidateRows();
-      listEl.innerHTML = rows.map((item) => `
+      const dual = sessionAutoSelectionShown();
+      listEl.innerHTML = rows.map((item) => {
+        const choices = dual ? candidateShelfChoicesHtml(item, sessionChatModelsCatalog.shelf, sessionChatModelsDraft) : '';
+        if (choices) {
+          return `
+        <div class="session-chat-models-row">
+          <div class="model-allowlist-item">
+            <span>${escapeHtml(item.name || item.id)} <code>${escapeHtml(item.id)}</code></span>
+            ${choices}
+          </div>
+        </div>`;
+        }
+        return `
         <div class="session-chat-models-row">
           <label class="model-allowlist-item">
             <input type="checkbox" value="${escapeHtml(item.id)}" onchange="onSessionChatModelCheck(this)" />
             <span>${escapeHtml(item.name || item.id)} <code>${escapeHtml(item.id)}</code></span>
           </label>
-        </div>`).join('') || '<p class="hint">沒有可顯示的模型。</p>';
+        </div>`;
+      }).join('') || '<p class="hint">沒有可顯示的模型。</p>';
+    }
+
+    function selectorDraftGroupHtml() {
+      const ids = sessionChatModelsDraft.selectorShelf || [];
+      if (!ids.length || !sessionAutoSelectionShown()) return '';
+      const collapsed = Boolean(sessionChatModelsCollapsed.selector);
+      const rows = collapsed ? '' : ids.map((modelId) => {
+        const known = draftModelById(modelId) || catalogModelById(modelId);
+        const name = (known && known.name) || modelId;
+        return `<div class="session-chat-models-row">
+            <label class="model-allowlist-item">
+              <input type="checkbox" value="${escapeHtml(modelId)}" checked onchange="onSelectorDraftCheck(this)" />
+              <span>${escapeHtml(name)} <code>${escapeHtml(modelId)}</code></span>
+            </label>
+          </div>`;
+      }).join('');
+      return `<button type="button" class="model-editor-shelf" data-shelf="selector" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="toggleSessionChatModelShelf('selector')">${collapsed ? '▸' : '▾'} 自動選模<span class="model-editor-shelf-count">${ids.length}</span></button>${rows}`;
     }
 
     function renderSessionChatDraft() {
@@ -3347,7 +3625,8 @@ snippets:
         ...shelf,
         models: (sessionChatModelsDraft.models || []).filter((model) => modelShelf(model) === shelf.id),
       })).filter((group) => group.models.length);
-      if (!groups.length) {
+      const selectorGroup = selectorDraftGroupHtml();
+      if (!groups.length && !selectorGroup) {
         listEl.innerHTML = '<p class="hint">還沒勾選。</p>';
         return;
       }
@@ -3366,7 +3645,7 @@ snippets:
           </div>`;
         }).join('');
         return `<button type="button" class="model-editor-shelf" data-shelf="${group.id}" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="toggleSessionChatModelShelf('${group.id}')">${collapsed ? '▸' : '▾'} ${group.label}<span class="model-editor-shelf-count">${group.models.length}</span></button>${rows}`;
-      }).join('');
+      }).join('') + selectorGroup;
       listEl.querySelectorAll('[data-field]').forEach((input) => {
         input.addEventListener('input', onSessionChatModelField);
         input.addEventListener('change', onSessionChatModelField);
@@ -3379,6 +3658,7 @@ snippets:
     }
 
     function renderSessionChatModelsList() {
+      renderAutoTierBlock();
       renderSessionDecisionShelf();
       renderSessionChatCandidates();
       renderSessionChatDraft();
@@ -3418,6 +3698,12 @@ snippets:
         model.thinking = Boolean(target.checked);
         return;
       }
+      if (field === 'autoTier') {
+        if (target.value) model.autoTier = target.value;
+        else delete model.autoTier;
+        if (event.type === 'change') renderAutoTierBlock();
+        return;
+      }
       if (field === 'maxInputTokens' || field === 'maxOutputTokens') {
         const n = Number(target.value);
         if (Number.isFinite(n) && n >= 1) model[field] = n;
@@ -3449,6 +3735,7 @@ snippets:
             && window.__sessionById[sessionChatModelsContext.sessionId].session_chat_language_models,
         );
       const current = sessionChatModelsDraft.models || [];
+      if (draftAutoSnapshot(sessionChatModelsDraft) !== sessionChatModelsAutoBaseline) return true;
       if (saved.length !== current.length) return true;
       const mark = (models) => {
         const labels = models.map((model) => `${model.id}:${modelShelf(model)}`);
@@ -3513,6 +3800,8 @@ snippets:
       sessionChatModelsLocked = false;
       sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(routerModelTemplate);
+      prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
+      sessionChatModelsAutoBaseline = draftAutoSnapshot(sessionChatModelsDraft);
       const shelf = document.getElementById('sessionDecisionShelf');
       if (shelf) shelf.value = 'text';
       if (title) title.textContent = '編輯模型範本';
@@ -3536,6 +3825,8 @@ snippets:
       sessionChatModelsLocked = false;
       sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(session && session.session_chat_language_models);
+      prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
+      sessionChatModelsAutoBaseline = draftAutoSnapshot(sessionChatModelsDraft);
       const shelf = document.getElementById('sessionDecisionShelf');
       if (shelf) shelf.value = 'text';
       if (title) {

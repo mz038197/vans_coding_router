@@ -23,7 +23,9 @@ from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
-from src.domain.auto_tier import auto_tiers
+from src.domain.auto_tier import auto_tiers, selectable_tiers
+from src.domain.classroom_model_choice import AUTOMATIC_MODELS
+from src.domain.model_shelf import is_non_text_shelf_model
 from src.domain.auto_tier_save_check import check_auto_tier_document
 from src.domain.model_document_upload import uploaded_model_document
 from src.domain.session_model_allowlist import (
@@ -392,7 +394,7 @@ class PortalUseCase:
 
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner_or_admin(user_id, class_id)
-        return self.repo.list_class_sessions(class_id)
+        return [_with_auto_selection(session) for session in self.repo.list_class_sessions(class_id)]
 
     def get_session(
         self, user_id: int, class_id: int, session_id: int
@@ -495,7 +497,7 @@ class PortalUseCase:
                 invocation_channel=invocation_channel,
             ),
         )
-        return session
+        return _with_auto_selection(session) if session else session
 
     @staticmethod
     def _agent_action_audit(
@@ -829,3 +831,21 @@ class PortalUseCase:
 
     def _has_role(self, user: dict[str, Any], role: str) -> bool:
         return role in set(user.get("roles") or [user.get("role")])
+
+
+def _with_auto_selection(session: dict[str, Any]) -> dict[str, Any]:
+    """Add the class-list 「自動選模」 badge condition (#73): the router would run selection."""
+    document = session.get("session_chat_language_models")
+    text_ids = [
+        model["id"]
+        for provider in document or []
+        if isinstance(provider, dict) and isinstance(provider.get("models"), list)
+        for model in provider["models"]
+        if isinstance(model, dict)
+        and isinstance(model.get("id"), str)
+        and not is_non_text_shelf_model(model)
+    ]
+    active = session.get("classroom_model_choice") == AUTOMATIC_MODELS and bool(
+        selectable_tiers(document, text_ids)
+    )
+    return {**session, "auto_selection_active": active}
