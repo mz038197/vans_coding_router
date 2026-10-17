@@ -22,6 +22,7 @@ from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
+from src.domain.auto_tier_save_check import check_auto_tier_document
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -437,8 +438,9 @@ class PortalUseCase:
             raise ValueError("座位上限必須為正整數")
         existing = self.get_session(user_id, class_id, session_id)
         if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
-            session_chat_language_models = normalize_session_chat_language_models(
-                session_chat_language_models
+            session_chat_language_models = self._checked_document(
+                session_chat_language_models,
+                previous=(existing or {}).get("session_chat_language_models"),
             )
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
             document = (existing or {}).get("session_chat_language_models") or []
@@ -584,8 +586,25 @@ class PortalUseCase:
 
     def save_router_model_template(self, user_id: int, document: Any) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)
-        normalized = normalize_session_chat_language_models(document)
+        normalized = self._checked_document(
+            document,
+            previous=self.repo.get_router_model_template(user_id),
+        )
         return self.repo.save_router_model_template(user_id, normalized)
+
+    def _checked_document(self, document: Any, *, previous: Any) -> list[dict[str, Any]]:
+        """The save-time form of a sitting document or template; ValueError refuses the save."""
+        normalized = normalize_session_chat_language_models(document)
+        check_auto_tier_document(
+            normalized,
+            previous=previous,
+            decision_list_ids={
+                item["id"]
+                for item in self._upstream_catalog.read("decisions")["models"]
+                if item.get("provider") == "openrouter"
+            },
+        )
+        return normalized
 
     def chat_language_models_template(
         self,

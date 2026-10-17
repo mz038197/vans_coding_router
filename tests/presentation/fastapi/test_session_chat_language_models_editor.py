@@ -235,7 +235,11 @@ def test_owner_and_admin_can_save_session_document_other_teacher_cannot(tmp_path
 
 
 def test_auto_tiers_tier_fields_and_selector_shelf_are_saved_as_given(tmp_path):
-    client, repo, _ = _client(tmp_path)
+    gateway = _catalog_gateway()
+    gateway.gateways["openrouter"].models_by_modality = {
+        "decisions": {"object": "list", "data": [{"id": "typesafe/jev-1.14", "name": "Jev"}]},
+    }
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     teacher, klass, session = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
     tiers = [

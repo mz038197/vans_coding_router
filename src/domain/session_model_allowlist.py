@@ -4,6 +4,7 @@ import copy
 import json
 from typing import Any
 
+from src.domain.auto_tier import AUTO_TIER_KEY
 from src.domain.model_shelf import (
     ROUTER_ONLY_DOCUMENT_KEYS,
     enforce_single_shelf,
@@ -177,6 +178,8 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
             restenciled["url"] = VCROUTER_STENCIL["url"]
             restenciled["requestHeaders"] = copy.deepcopy(VCROUTER_STENCIL["requestHeaders"])
             enforce_single_shelf(restenciled)
+            if is_non_text_shelf_model(restenciled):
+                restenciled.pop(AUTO_TIER_KEY, None)
             collected.append(restenciled)
     return [
         {

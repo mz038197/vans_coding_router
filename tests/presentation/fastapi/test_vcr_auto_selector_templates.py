@@ -95,9 +95,25 @@ def _router_only(document: list[dict]) -> dict:
 
 
 def test_new_class_session_copies_the_template_tiers_and_selector_shelf_independently(tmp_path):
-    from test_extension_portal import _client, _portal_cookie
+    from test_session_chat_language_models_editor import (
+        _catalog_gateway,
+        _classroom_providers,
+        _client,
+        _portal_cookie,
+    )
 
-    client, repo, _ = _client(tmp_path)
+    gateway = _catalog_gateway()
+    gateway.gateways["openrouter"].models_by_modality = {
+        "decisions": {
+            "object": "list",
+            "data": [
+                {"id": "typesafe/jev-1.14", "name": "Jev"},
+                {"id": "typesafe/template-later", "name": "Template later"},
+                {"id": "typesafe/sitting-later", "name": "Sitting later"},
+            ],
+        },
+    }
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     owner = repo.upsert_google_user("owner@school.edu", "Owner")
     cookies = _portal_cookie(repo, owner["id"])
     saved = client.put(
@@ -133,7 +149,11 @@ def test_new_class_session_copies_the_template_tiers_and_selector_shelf_independ
     assert _router_only(created.json()["session_chat_language_models"]) == template_view
 
     changed_template = _selector_document(
-        tiers=[{"id": "t-light", "name": "輕量", "description": "只改範本"}],
+        tiers=[
+            {"id": "t-light", "name": "輕量", "description": "只改範本"},
+            {"id": "t-standard", "name": "一般", "description": "單一檔案的功能"},
+            {"id": "t-strong", "name": "困難", "description": "跨檔案除錯"},
+        ],
         selector=["openrouter@typesafe/template-later"],
     )
     assert client.put(
@@ -145,7 +165,11 @@ def test_new_class_session_copies_the_template_tiers_and_selector_shelf_independ
     assert _router_only(sitting.json()["session_chat_language_models"]) == template_view
 
     changed_sitting = _selector_document(
-        tiers=[{"id": "t-strong", "name": "困難", "description": "只改課堂"}],
+        tiers=[
+            {"id": "t-light", "name": "輕量", "description": "語法小問題"},
+            {"id": "t-standard", "name": "一般", "description": "單一檔案的功能"},
+            {"id": "t-strong", "name": "困難", "description": "只改課堂"},
+        ],
         selector=["openrouter@typesafe/sitting-later"],
     )
     patched = client.patch(
@@ -155,7 +179,7 @@ def test_new_class_session_copies_the_template_tiers_and_selector_shelf_independ
     )
     assert patched.status_code == 200
     template = client.get("/teacher/router-model-template", cookies=cookies).json()
-    assert template[0]["autoTiers"] == [{"id": "t-light", "name": "輕量", "description": "只改範本"}]
+    assert template[0]["autoTiers"] == changed_template[0]["autoTiers"]
     assert template[0]["selectorShelf"] == ["openrouter@typesafe/template-later"]
 
 
