@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -198,3 +200,55 @@ def test_classroom_image_list_is_refused_when_the_image_shelf_is_empty(tmp_path)
     )
     assert images.status_code == 403
     assert images.json()["error"]["code"] == "image_generation_disabled"
+
+
+def test_router_only_fields_never_reach_a_copilot_list(tmp_path):
+    client, repo = _client(tmp_path)
+    api_key, teacher, klass, session = _classroom_key(client, repo)
+    repo.update_class_session(klass["id"], session["id"], classroom_model_choice="picked")
+    stored = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "apiType": "responses",
+            "models": [
+                {
+                    "id": "ollama_cloud@sitting-only:cloud",
+                    "name": "sitting-only",
+                    "imageShelf": False,
+                    "decisionShelf": False,
+                },
+                {"id": "openrouter@black-forest-labs/flux.2-pro", "name": "flux", "imageShelf": True},
+            ],
+        }
+    ]
+    with repo._connect() as conn:
+        conn.execute(
+            repo._sql("UPDATE class_sessions SET session_chat_language_models_json = ? WHERE id = ?"),
+            (json.dumps(stored), session["id"]),
+        )
+        conn.execute(
+            repo._sql("UPDATE router_model_templates SET document_json = ? WHERE user_id = ?"),
+            (json.dumps(stored), teacher["id"]),
+        )
+    headers = {"Authorization": f"Bearer {api_key}"}
+    student = repo.get_user_by_email("student@gmail.com")
+    personal = repo.issue_long_lived_key(teacher["id"])
+
+    keyed = client.get("/extension/chat-language-models", headers=headers)
+    models = client.get("/v1/models", headers=headers)
+    personal_models = client.get("/v1/models", headers={"Authorization": f"Bearer {personal}"})
+    script = client.get(
+        "/portal/download/install-vscode-models.ps1",
+        cookies=_portal_cookie(repo, student["id"]),
+        headers=headers,
+    )
+
+    assert [m["id"] for m in keyed.json()[0]["models"]] == ["ollama_cloud@sitting-only:cloud"]
+    assert [item["id"] for item in models.json()["data"]] == ["ollama_cloud@sitting-only:cloud"]
+    assert "ollama_cloud@sitting-only:cloud" in personal_models.text
+    assert "ollama_cloud@sitting-only:cloud" in script.text
+    for response in (keyed, models, personal_models, script):
+        assert response.status_code == 200
+        assert "imageShelf" not in response.text
+        assert "decisionShelf" not in response.text

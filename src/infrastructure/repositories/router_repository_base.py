@@ -16,7 +16,7 @@ from src.domain.decision_model import (
     decision_model_ids,
     normalize_decision_model,
 )
-from src.domain.model_shelf import omit_non_text_shelf_models, shelf_model_ids
+from src.domain.model_shelf import student_side_document, shelf_model_ids
 from src.domain.classroom_model_choice import (
     AUTOMATIC_MODELS,
     CLASSROOM_MODEL_CHOICE_UNCHANGED,
@@ -1079,7 +1079,7 @@ class RouterRepositoryBase(ABC):
         )
         data["session_chat_language_models"] = document
         data["model_allowlist"] = allowlist_from_document(
-            omit_non_text_shelf_models(document)
+            student_side_document(document)
         )
         stored = data.get("decision_model")
         data["decision_model"] = stored if isinstance(stored, str) else ""
@@ -1284,7 +1284,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return []
-            return allowlist_from_document(omit_non_text_shelf_models(document))
+            return allowlist_from_document(student_side_document(document))
 
     def classroom_api_key_session_allowlist(
         self, api_key: str
@@ -1327,7 +1327,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return True, []
-            return True, omit_non_text_shelf_models(document)
+            return True, student_side_document(document)
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
