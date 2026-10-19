@@ -1305,6 +1305,56 @@
       .wizard-problem { flex-direction: column; align-items: flex-start; }
     }
 
+    /* Steps 4 and 5: selector shelf, decision shelf, other-feature cards (#79). */
+    .wizard-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .wizard-note { margin: 2px 0 0; font-size: 0.8rem; }
+    .wizard-decision-shelf { margin-top: 20px; }
+    .wizard-decision-shelf h4, .wizard-picker-head h4 { margin: 0 0 6px; font-size: 1rem; }
+    .wizard-extra-card {
+      margin-bottom: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+    }
+    .wizard-extra-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .wizard-extra-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .wizard-extra-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 4px 3px 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      font-size: 0.85rem;
+      overflow-wrap: anywhere;
+    }
+    .wizard-extra-chip code { font-size: 0.72rem; }
+    .model-wizard:not(.show-model-ids) .wizard-extra-chip code { display: none; }
+    .wizard-extra-remove {
+      margin: 0;
+      padding: 0 6px;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      box-shadow: none;
+    }
+    .wizard-picker {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 2px solid var(--accent);
+      border-radius: 12px;
+    }
+    .wizard-picker-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .wizard-picker .wizard-chips { margin-bottom: 8px; }
+
     .model-editor-header {
       display: flex;
       align-items: center;
