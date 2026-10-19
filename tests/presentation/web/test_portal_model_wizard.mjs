@@ -32,6 +32,7 @@ const NAMES = [
   "modelEditorState",
   "modelEditorIssues",
   "modelWizardStepperHtml",
+  "modelWizardIssueAnchor",
   "modelWizardIssuesHtml",
   "modelWizardShelfChoices",
   "modelWizardAllModelsShelves",
