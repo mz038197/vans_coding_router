@@ -2200,3 +2200,8 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
     assert keys[1]["included_monthly_usage"]["summary"] == "$0.08 of $60 used"
     assert [item["in_flight"] for item in keys] == [0, 0]
 
+
+
+def test_the_old_model_editor_prototype_is_gone(tmp_path):
+    client, _, _ = _client(tmp_path)
+    assert client.get("/portal/prototype/model-editor").status_code == 404
