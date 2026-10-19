@@ -903,16 +903,11 @@
       return `${count} 個模型`;
     }
 
-    function sessionModelChoiceControl(classId, session, compact) {
-      const choice = session.classroom_model_choice === 'picked' || session.classroom_model_choice === 'automatic'
-        ? session.classroom_model_choice
-        : '';
-      const options = [
-        choice ? '' : '<option value="" selected disabled>未設定</option>',
-        `<option value="picked"${choice === 'picked' ? ' selected' : ''}>學生自選</option>`,
-        `<option value="automatic"${choice === 'automatic' ? ' selected' : ''}>自動</option>`,
-      ].join('');
-      return `<label class="session-model-choice${compact ? ' is-compact' : ''}">${compact ? '' : '模型選擇 '}<select aria-label="模型選擇" data-stored="${choice}" onchange="setClassroomModelChoice(${classId}, ${session.id}, this)">${options}</select></label>`;
+    // The sitting row only shows the Classroom Model Choice; it changes in the wizard's Step 1.
+    function sessionModelChoiceLabel(session) {
+      if (session.classroom_model_choice === 'automatic') return '自動';
+      if (session.classroom_model_choice === 'picked') return '學生自選';
+      return '未設定';
     }
 
     function sessionTextModels(session) {
@@ -929,11 +924,7 @@
     }
 
     function sessionModelAllowlistCell(classId, session) {
-      const edit = iconBtn(
-        'fas fa-pen',
-        '編輯本課對話模型',
-        `beginEditSessionChatLanguageModels(${classId}, ${session.id})`,
-      );
+      const edit = `<button type="button" class="btn-link session-model-settings-btn" onclick="beginEditSessionChatLanguageModels(${classId}, ${session.id})">模型設定</button>`;
       const chat = sessionTextModels(session);
       const pills = chat.length
         ? chat.map((model) => `<span class="session-model-pill" title="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</span>`).join('')
@@ -941,26 +932,10 @@
       return `<div class="session-models">
         <div class="session-models-head">
           <span class="session-kicker">對話模型 ${edit} ${sessionAutoSelectionBadge(session)}</span>
-          ${sessionModelChoiceControl(classId, session, true)}
+          <span class="session-model-choice">模式：${sessionModelChoiceLabel(session)}</span>
         </div>
         <div class="session-model-pills">${pills}</div>
       </div>`;
-    }
-
-    async function setClassroomModelChoice(classId, sessionId, selectEl) {
-      const value = selectEl.value;
-      const stored = selectEl.dataset.stored || '';
-      if (value !== 'picked' && value !== 'automatic') return;
-      try {
-        await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ classroom_model_choice: value }),
-        });
-        await reloadSessionViews(classId);
-      } catch (err) {
-        selectEl.value = stored;
-        throw err;
-      }
     }
 
     function sessionCatalogYaml(session) {
@@ -3340,13 +3315,35 @@ snippets:
       if (target === 'template') {
         return '<p class="hint">範本一律是「自動」。你的個人 API Key 呼叫 vcr-auto 時，會照這份範本的難度挑模型；新課堂建立後，可以在課堂裡改成「學生自選」。</p>';
       }
-      if (mode === 'automatic') {
-        return '<p><strong>自動</strong>：學生只看到一個 vcr-auto，router 依題目難度從你允許的模型裡挑一個。</p>';
-      }
-      if (mode === 'picked') {
-        return '<p><strong>學生自選</strong>：學生在 VS Code 的模型清單裡看到你允許的模型，自己挑。不會自動判斷難度。</p>';
-      }
-      return '<p><strong>還沒設定模式</strong>：VS Code 只列出 vcr-auto，但學生也可以直接指定你允許的任一個模型；不會自動判斷難度。</p>';
+      const card = (value, body) => {
+        const on = mode === value;
+        return `<button type="button" class="wizard-mode-card${on ? ' is-on' : ''}" role="radio" aria-checked="${on}" data-mode-card="${value}" onclick="setModelWizardMode('${value}')">
+            <strong>${CLASSROOM_MODEL_CHOICE_LABELS[value]}</strong>${body}</button>`;
+      };
+      const unset = mode === 'automatic' || mode === 'picked'
+        ? ''
+        : '<p class="wizard-mode-unset"><strong>還沒設定模式</strong>：現在 VS Code 只列出 vcr-auto，但學生也可以直接指定你允許的任一個模型；不會自動判斷難度。選一張卡片再按「儲存」才會設定；不選就存，模式維持不變。</p>';
+      return `${unset}<div class="wizard-mode-cards" role="radiogroup" aria-label="模式">
+          ${card('automatic', '學生只看到一個 vcr-auto。router 依題目難度，從你允許的模型裡挑一個。適合不想讓學生煩惱選模型的課。')}
+          ${card('picked', '學生在 VS Code 的模型清單裡看到你允許的模型，自己挑。不會自動判斷難度。')}
+        </div>
+        <p class="hint">模式會在按「儲存」時和模型清單一起存；按「取消」就不會改變。</p>`;
+    }
+
+    // Step 1 card click: changes only the open draft; 儲存 sends it with the document.
+    function setModelWizardMode(mode) {
+      if (modelWizardTarget() === 'template') return;
+      if (mode !== 'automatic' && mode !== 'picked') return;
+      sessionChatModelsMode = mode;
+      renderModelWizardVisibility();
+      refreshModelWizardStatus();
+    }
+
+    // One PATCH body for a sitting's 儲存. With no mode picked the stored choice stays as it is.
+    function sessionChatModelsSaveBody(document, mode) {
+      const body = { session_chat_language_models: document };
+      if (mode === 'automatic' || mode === 'picked') body.classroom_model_choice = mode;
+      return body;
     }
 
     function modelWizardOffNoteHtml(mode) {
@@ -4079,14 +4076,19 @@ snippets:
 
     function isSessionChatModelsDraftDirty() {
       const editingTemplate = sessionChatModelsContext && sessionChatModelsContext.mode === 'template';
+      const session = !editingTemplate
+        && sessionChatModelsContext
+        && window.__sessionById
+        && window.__sessionById[sessionChatModelsContext.sessionId];
       const saved = editingTemplate
         ? modelsFromDocument(routerModelTemplate)
-        : modelsFromDocument(
-          sessionChatModelsContext
-            && window.__sessionById
-            && window.__sessionById[sessionChatModelsContext.sessionId]
-            && window.__sessionById[sessionChatModelsContext.sessionId].session_chat_language_models,
-        );
+        : modelsFromDocument(session && session.session_chat_language_models);
+      if (!editingTemplate) {
+        const storedMode = session && CLASSROOM_MODEL_CHOICE_LABELS[session.classroom_model_choice]
+          ? session.classroom_model_choice
+          : null;
+        if (sessionChatModelsMode !== storedMode) return true;
+      }
       const current = sessionChatModelsDraft.models || [];
       if (draftAutoSnapshot(sessionChatModelsDraft) !== sessionChatModelsAutoBaseline) return true;
       if (saved.length !== current.length) return true;
@@ -4212,9 +4214,9 @@ snippets:
       try {
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
-          body: JSON.stringify({
-            session_chat_language_models: documentFromDraft(sessionChatModelsDraft),
-          }),
+          body: JSON.stringify(
+            sessionChatModelsSaveBody(documentFromDraft(sessionChatModelsDraft), sessionChatModelsMode),
+          ),
         });
         closeSessionChatModelsModal();
         await reloadSessionViews(classId);

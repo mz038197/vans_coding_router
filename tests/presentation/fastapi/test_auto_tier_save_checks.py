@@ -254,3 +254,59 @@ def test_a_stored_selector_id_survives_a_catalog_that_no_longer_lists_it(tmp_pat
         _document(tiers=renamed, selector=[JEV, "openrouter@typesafe/jev-2"]),
         "自動選模架只接受 OpenRouter 決策清單的 Model ID：openrouter@typesafe/jev-2",
     )
+
+
+def _sitting_state(saves):
+    session = saves.client.get(saves.session_url, cookies=saves.cookies).json()
+    return session["classroom_model_choice"], session["session_chat_language_models"]
+
+
+def test_one_patch_saves_the_mode_and_the_document_together(tmp_path):
+    """The wizard's 儲存 sends Classroom Model Choice and the document in one PATCH (#76)."""
+    saves = _Saves(tmp_path)
+    assert saves.client.patch(
+        saves.session_url, cookies=saves.cookies, json={"classroom_model_choice": "automatic"}
+    ).status_code == 200
+
+    response = saves.client.patch(
+        saves.session_url,
+        cookies=saves.cookies,
+        json={
+            "classroom_model_choice": "picked",
+            "session_chat_language_models": _document(tiers=TWO_TIERS, selector=[JEV]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    choice, document = _sitting_state(saves)
+    assert choice == "picked"
+    assert document[0]["selectorShelf"] == [JEV]
+    assert [m["id"] for m in document[0]["models"]] == [LIGHT, STRONG]
+
+
+def test_a_refused_document_leaves_the_mode_unchanged_too(tmp_path):
+    saves = _Saves(tmp_path)
+    assert saves.client.patch(
+        saves.session_url,
+        cookies=saves.cookies,
+        json={
+            "classroom_model_choice": "automatic",
+            "session_chat_language_models": _document(tiers=TWO_TIERS),
+        },
+    ).status_code == 200
+    before = _sitting_state(saves)
+
+    response = saves.client.patch(
+        saves.session_url,
+        cookies=saves.cookies,
+        json={
+            "classroom_model_choice": "picked",
+            "session_chat_language_models": _document(
+                tiers=[_tier("a", "同名"), _tier("b", "同名")], models=[]
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "難度名稱「同名」重複" in response.json()["detail"]
+    assert _sitting_state(saves) == before

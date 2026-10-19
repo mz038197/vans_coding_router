@@ -1177,6 +1177,35 @@
 
     .wizard-off-note p { margin: 0; }
 
+    .wizard-mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 12px; }
+
+    .wizard-mode-card {
+      text-align: left;
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 2px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: none;
+      line-height: 1.5;
+    }
+
+    .wizard-mode-card:hover { background: var(--surface-2); color: var(--text-primary); }
+    .wizard-mode-card.is-on { border-color: var(--accent); background: var(--accent-soft); }
+    .wizard-mode-card strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+
+    .wizard-mode-unset {
+      margin: 0 0 12px;
+      padding: 10px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: var(--surface-overlay);
+    }
+
+    @media (max-width: 640px) {
+      .wizard-mode-cards { grid-template-columns: 1fr; }
+    }
+
     .wizard-nav { display: flex; justify-content: space-between; margin-top: 20px; }
     .wizard-nav button[hidden] { display: none; }
 
@@ -2413,14 +2442,7 @@
 
     .session-models-head { justify-content: space-between; }
 
-    .session-model-choice.is-compact { margin: 0; }
-
-    .session-model-choice.is-compact select {
-      width: auto;
-      min-width: 6.5rem;
-      margin: 0;
-      padding: 4px 8px;
-    }
+    .session-model-choice { font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
 
     .session-model-pills {
       display: flex;
