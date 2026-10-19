@@ -153,8 +153,8 @@
         <div id="keyTab" class="hidden">
           <div id="teacherKeyMeta" class="key-meta table-wrap"></div>
           <button onclick="resetTeacherKey()">重設個人 API Key</button>
-          <button type="button" class="btn-secondary" onclick="beginEditRouterModelTemplate()">編輯模型範本</button>
-          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製儲存。模型範本是這把個人 API Key 的 vcr-auto 候選清單，新課堂會在建立時複製一次。</p>
+          <button type="button" class="btn-secondary" onclick="beginEditRouterModelTemplate()">預設模型設定</button>
+          <p class="hint">完整 key 僅在重設當下顯示一次，請立即複製儲存。「預設模型設定」（模型範本）是這把個人 API Key 用的模型設定，新課堂會在建立時複製一次；也可以從「我的課程」工具列打開。</p>
           <pre id="teacherKeyDisplay" class="key-display hidden"></pre>
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
@@ -174,6 +174,7 @@
               <input id="className" placeholder="新課程名稱" aria-label="新課程名稱" />
               <button type="button" id="createClassBtn" onclick="createClass()">建立</button>
             </span>
+            <button type="button" class="btn-secondary course-toolbar-template" onclick="beginEditRouterModelTemplate()">預設模型設定</button>
           </div>
           <div id="courseDetail"><p class="hint">請選擇課程</p></div>
         </div>
@@ -358,6 +359,7 @@
         </div>
       </div>
       <div class="modal-body model-wizard-body" id="modelWizardBody">
+        <div class="wizard-template-banner" id="modelWizardTemplateBanner" role="note" hidden><strong>模型範本：</strong>新課堂建立時會複製這份設定，也是你的個人 API Key 用的設定。改這裡不會影響已經建立的課堂。</div>
         <p id="sessionChatModelsUploadMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsCatalogMsg" class="model-editor-msg" aria-live="polite"></p>
         <p id="sessionChatModelsSaveMsg" class="model-editor-msg" aria-live="polite"></p>
@@ -4665,6 +4667,8 @@ snippets:
       if (heading) heading.textContent = title;
       const wizard = document.getElementById('modelWizard');
       if (wizard) wizard.classList.toggle('is-template', sessionChatModelsContext.mode === 'template');
+      const banner = document.getElementById('modelWizardTemplateBanner');
+      if (banner) banner.hidden = sessionChatModelsContext.mode !== 'template';
       modelWizardStep = 1;
       modelWizardShowIds = false;
       modelWizardExtraUi = freshModelWizardExtraUi();
