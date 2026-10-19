@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=model-wizard-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=model-wizard-step2-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -371,7 +371,8 @@
             <section class="wizard-panel" data-wizard-panel="2" aria-labelledby="modelWizardTitle2" hidden>
               <h3 id="modelWizardTitle2">學生可用的模型</h3>
               <p class="hint">勾選這堂課允許的對話模型。</p>
-              <div data-wizard-slot="2"></div>
+              <input id="modelWizardTextSearch" class="wizard-text-search" type="search" aria-label="搜尋模型" placeholder="搜尋名稱或 provider" oninput="onModelWizardTextSearch(this.value)" />
+              <div id="modelWizardTextShelf" aria-live="polite"></div>
             </section>
             <section class="wizard-panel" data-wizard-panel="3" aria-labelledby="modelWizardTitle3" hidden>
               <h3 id="modelWizardTitle3">分配難度</h3>
@@ -3658,6 +3659,7 @@ snippets:
             sessionChatModelsDraft,
           );
           sessionChatModelsCollapsed.text = false;
+          modelWizardTextUi.chosenCollapsed = false;
           setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
           renderSessionChatModelsList();
         } catch (err) {
@@ -3936,6 +3938,204 @@ snippets:
     function toggleSessionChatModelShelf(shelf) {
       sessionChatModelsCollapsed[shelf] = !sessionChatModelsCollapsed[shelf];
       renderSessionChatDraft();
+    }
+
+    // Step 2's screen-only state and its catalog. Neither is stored in the document, and both
+    // reset each time the wizard opens.
+    function freshModelWizardTextUi() {
+      return { filter: '', query: '', collapsed: {}, chosenCollapsed: false, advancedOpen: {} };
+    }
+    let modelWizardTextUi = freshModelWizardTextUi();
+    let modelWizardTextCatalog = { models: [], unavailable: false };
+    let modelWizardTextCatalogRequest = 0;
+
+    // Step 2 lists the kind-split providers' text models and the All Models providers'
+    // whole lists together; a check puts either on the text shelf.
+    async function loadModelWizardTextCatalog() {
+      const requestId = ++modelWizardTextCatalogRequest;
+      const fetchOne = (shelf) => api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`)
+        .catch(() => ({ models: [], unavailable: true, failed: true }));
+      const [text, all] = await Promise.all([fetchOne('text'), fetchOne('all')]);
+      if (requestId !== modelWizardTextCatalogRequest) return;
+      [text, all].forEach((catalog) => {
+        if (Array.isArray(catalog.kind_split_providers)) sessionChatProviderGroups.kindSplit = catalog.kind_split_providers;
+        if (Array.isArray(catalog.all_models_providers)) sessionChatProviderGroups.allModels = catalog.all_models_providers;
+      });
+      const models = [text, all].flatMap((catalog) => (Array.isArray(catalog.models) ? catalog.models : []));
+      const allMissing = all.unavailable || all.failed;
+      const unavailable = !models.length && Boolean(text.unavailable || text.failed)
+        && (allMissing || !(sessionChatProviderGroups.allModels || []).length);
+      modelWizardTextCatalog = { models, unavailable };
+      setSessionChatModelsMsg(
+        'sessionChatModelsCatalogMsg',
+        unavailable ? '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。' : '',
+        unavailable,
+      );
+    }
+
+    function renderModelWizardTextShelf() {
+      const el = document.getElementById('modelWizardTextShelf');
+      if (!el || modelWizardStep !== 2) return;
+      const view = modelWizardTextShelfView({
+        catalog: modelWizardTextCatalog.models,
+        catalogUnavailable: modelWizardTextCatalog.unavailable,
+        providers: allTeacherProviders(),
+        draft: sessionChatModelsDraft,
+        ui: modelWizardTextUi,
+      });
+      el.innerHTML = modelWizardTextShelfHtml(view, sessionChatModelsDraft, modelWizardTextUi);
+    }
+
+    function onModelWizardTextSearch(value) {
+      modelWizardTextUi.query = String(value || '');
+      renderModelWizardTextShelf();
+    }
+
+    function setModelWizardTextFilter(provider) {
+      modelWizardTextUi.filter = provider || '';
+      renderModelWizardTextShelf();
+    }
+
+    function toggleModelWizardTextGroup(key) {
+      if (key === '__chosen__') modelWizardTextUi.chosenCollapsed = !modelWizardTextUi.chosenCollapsed;
+      else modelWizardTextUi.collapsed[key] = !modelWizardTextUi.collapsed[key];
+      renderModelWizardTextShelf();
+    }
+
+    function onModelWizardTextAdvancedToggle(details) {
+      modelWizardTextUi.advancedOpen[details.getAttribute('data-advanced')] = details.open;
+    }
+
+    function onModelWizardTextCheck(input) {
+      const item = (modelWizardTextCatalog.models || []).find((model) => model.id === input.value);
+      checkDraftTextModel(sessionChatModelsDraft, input.value, input.checked, item && item.name);
+      renderSessionChatModelsList();
+    }
+
+    // Puts a model on the text shelf (restoring what it had before an uncheck) or takes it
+    // off the draft, keeping its settings in draft.removed for a later re-check.
+    function checkDraftTextModel(draft, modelId, checked, name) {
+      draft.removed = draft.removed || {};
+      const existing = draft.models.find((model) => model.id === modelId);
+      if (checked) {
+        const restored = draft.removed[modelId];
+        const next = existing || (restored ? { ...restored } : defaultVcrouterModel(modelId, name || modelId));
+        applyShelf(next, 'text');
+        if (!existing) draft.models.push(next);
+        delete draft.removed[modelId];
+      } else {
+        if (existing) draft.removed[modelId] = { ...existing };
+        draft.models = draft.models.filter((model) => model.id !== modelId);
+      }
+      return draft;
+    }
+
+    // Step 2 (#77): the text shelf. `catalog` is every text model the Upstream Model Catalog
+    // lists (kind-split providers' text list plus All Models providers' whole list); `ui` is
+    // screen-only state { filter, query, collapsed: { provider: true }, chosenCollapsed }.
+    function modelWizardTextShelfView(input) {
+      const catalog = (input.catalog || []).filter((item) => item && item.id);
+      const ui = input.ui || {};
+      const providers = [...(input.providers || [])];
+      catalog.forEach((item) => {
+        if (!providers.includes(item.provider)) providers.push(item.provider);
+      });
+      const filter = providers.includes(ui.filter) ? ui.filter : '';
+      const ofProvider = (provider) => catalog.filter((item) => item.provider === provider);
+      const filters = [
+        { provider: '', label: '全部', count: catalog.length, active: filter === '' },
+        ...providers.map((provider) => ({
+          provider, label: provider, count: ofProvider(provider).length, active: filter === provider,
+        })),
+      ];
+      const draftModels = (input.draft && input.draft.models) || [];
+      const taken = new Set(draftModels.map((model) => model.id));
+      const textModels = draftModels.filter((model) => modelShelf(model) === 'text');
+      const textIds = new Set(textModels.map((model) => model.id));
+      const listed = new Set(catalog.map((item) => item.id));
+      const chosen = {
+        count: textModels.length,
+        collapsed: Boolean(ui.chosenCollapsed),
+        models: textModels.map((model) => ({
+          id: model.id,
+          name: model.name || model.id,
+          provider: modelIdPrefix(model.id),
+          missing: !input.catalogUnavailable && !listed.has(model.id),
+        })),
+      };
+      const query = String(ui.query || '').trim().toLowerCase();
+      const matches = (item) => !query
+        || `${item.name || ''} ${item.id} ${item.provider}`.toLowerCase().includes(query);
+      const collapsed = ui.collapsed || {};
+      const groups = providers.filter((provider) => !filter || provider === filter).map((provider) => {
+        const all = ofProvider(provider);
+        const open = all.filter((item) => !taken.has(item.id));
+        const rows = open.filter(matches).map((item) => ({ id: item.id, name: item.name || item.id, provider }));
+        let empty = '';
+        if (!rows.length) {
+          if (!all.length) empty = '目錄沒有列出這家的模型';
+          else if (open.length) empty = '沒有符合搜尋的模型';
+          else empty = '這家的模型都已經勾選';
+        }
+        return {
+          provider,
+          picked: all.filter((item) => textIds.has(item.id)).length,
+          total: all.length,
+          collapsed: !query && Boolean(collapsed[provider]),
+          rows,
+          empty,
+        };
+      });
+      return { filters, chosen, groups, searching: Boolean(query) };
+    }
+
+    // 進階設定 for a checked text model. The Auto Tier lives in Step 3, not here.
+    function modelWizardTextFieldsHtml(model) {
+      const id = escapeHtml(model.id);
+      const handlers = 'oninput="onSessionChatModelField(event)" onchange="onSessionChatModelField(event)"';
+      return `<div class="wizard-text-fields">
+          <label>顯示名稱<input type="text" data-model-id="${id}" data-field="name" value="${escapeHtml(model.name || '')}" ${handlers} /></label>
+          <label class="wizard-text-check">思考<input type="checkbox" data-model-id="${id}" data-field="thinking" ${model.thinking ? 'checked' : ''} ${handlers} /></label>
+          <label>最大輸入 tokens<input type="number" min="1" data-model-id="${id}" data-field="maxInputTokens" value="${escapeHtml(String(model.maxInputTokens ?? ''))}" ${handlers} /></label>
+          <label>最大輸出 tokens<input type="number" min="1" data-model-id="${id}" data-field="maxOutputTokens" value="${escapeHtml(String(model.maxOutputTokens ?? ''))}" ${handlers} /></label>
+        </div>`;
+    }
+
+    // Renders a modelWizardTextShelfView. The search box sits outside this HTML so typing
+    // never loses focus.
+    function modelWizardTextShelfHtml(view, draft, ui) {
+      const advancedOpen = (ui && ui.advancedOpen) || {};
+      const byId = new Map(((draft && draft.models) || []).map((model) => [model.id, model]));
+      const filters = view.filters.map((f) => (
+        `<button type="button" class="wizard-chip${f.active ? ' is-on' : ''}" data-text-filter="${escapeHtml(f.provider)}" aria-pressed="${f.active}" onclick="setModelWizardTextFilter(this.getAttribute('data-text-filter'))">${escapeHtml(f.label)} (${f.count})</button>`
+      )).join('');
+      const head = (key, collapsed, label, count) => (
+        `<button type="button" class="wizard-group-head" data-text-group="${escapeHtml(key)}" aria-expanded="${!collapsed}" onclick="toggleModelWizardTextGroup(this.getAttribute('data-text-group'))">
+            <span>${collapsed ? '▸' : '▾'} ${escapeHtml(label)}</span><span class="wizard-group-count">${escapeHtml(count)}</span></button>`
+      );
+      const item = (row, checked) => {
+        const model = checked ? byId.get(row.id) : null;
+        const missing = row.missing ? '<span class="session-chat-models-missing">目錄未列出</span>' : '';
+        const advanced = model
+          ? `<details class="wizard-text-advanced" data-advanced="${escapeHtml(row.id)}"${advancedOpen[row.id] ? ' open' : ''} ontoggle="onModelWizardTextAdvancedToggle(this)"><summary>進階設定</summary>${modelWizardTextFieldsHtml(model)}</details>`
+          : '';
+        return `<div class="wizard-text-item">
+            <input type="checkbox" value="${escapeHtml(row.id)}"${checked ? ' checked' : ''} aria-label="允許 ${escapeHtml(row.name)}" onchange="onModelWizardTextCheck(this)" />
+            <div class="wizard-text-main"><strong>${escapeHtml(row.name)}</strong> <span class="wizard-text-provider">${escapeHtml(row.provider)}</span> ${missing}
+              <code>${escapeHtml(row.id)}</code>${advanced}</div>
+          </div>`;
+      };
+      const list = (rows, checked) => `<div class="wizard-text-list">${rows.map((row) => item(row, checked)).join('')}</div>`;
+      const empty = (text) => `<p class="hint wizard-group-empty">${escapeHtml(text)}</p>`;
+      const chosen = view.chosen;
+      const chosenBody = chosen.collapsed ? '' : (chosen.models.length ? list(chosen.models, true) : empty('還沒有勾選任何模型'));
+      const groups = view.groups.map((group) => {
+        const body = group.collapsed ? '' : (group.rows.length ? list(group.rows, false) : empty(group.empty));
+        return `<div class="wizard-group">${head(group.provider, group.collapsed, group.provider, `已選 ${group.picked}／${group.total}`)}${body}</div>`;
+      }).join('');
+      return `<div class="wizard-chips" role="group" aria-label="依 provider 篩選">${filters}</div>
+        <div class="wizard-group is-chosen">${head('__chosen__', chosen.collapsed, '已勾選', `${chosen.count} 個模型`)}${chosenBody}</div>
+        ${groups}`;
     }
 
     function renderSessionChatModelsList() {
