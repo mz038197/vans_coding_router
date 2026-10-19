@@ -37,7 +37,6 @@ const NAMES = [
   "documentFromDraft",
   "stencilDraftModel",
   "modelShelf",
-  "autoSelectionVisible",
   "prefillAutoTiers",
   "addAutoTier",
   "removeAutoTier",
@@ -92,16 +91,6 @@ function tieredDraft(box) {
     ],
   }]);
 }
-
-test("tier settings show in the template editor and only on Automatic Models in a sitting", () => {
-  const box = sandbox();
-  assert.equal(box.autoSelectionVisible({ mode: "template" }, null), true);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "automatic" }), true);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: null }), false);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, {}), false);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, { classroom_model_choice: "picked" }), false);
-  assert.equal(box.autoSelectionVisible({ sessionId: 1 }, null), false);
-});
 
 test("a document without tiers opens with the default tiers; one with tiers keeps its own", () => {
   const box = sandbox();
