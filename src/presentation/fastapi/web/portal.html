@@ -341,8 +341,9 @@
 
   <div class="modal" id="editSessionChatModelsModal">
     <div class="modal-content modal-content-models model-wizard" id="modelWizard" role="dialog" aria-modal="true" aria-labelledby="editSessionChatModelsTitle">
+      <div class="wizard-dialog-bg" id="modelWizardDialog" hidden></div>
       <div class="modal-header model-editor-header">
-        <span id="editSessionChatModelsTitle">課堂模型設定</span>
+        <span><span id="editSessionChatModelsTitle">課堂模型設定</span><span class="wizard-dirty" id="modelWizardDirty" hidden>有尚未儲存的修改</span></span>
         <div class="model-editor-header-actions">
           <div class="wizard-menu" id="modelWizardMenu">
             <button type="button" class="btn-secondary" id="modelWizardMenuBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="modelWizardMenuList" onclick="toggleModelWizardMenu()">更多 ▾</button>
@@ -414,7 +415,7 @@
             </section>
             <section class="wizard-panel" data-wizard-panel="6" aria-labelledby="modelWizardTitle6" hidden>
               <h3 id="modelWizardTitle6">檢查與儲存</h3>
-              <div id="modelWizardIssues" class="wizard-problems"></div>
+              <div id="modelWizardSummary" aria-live="polite"></div>
             </section>
             <div class="wizard-nav">
               <button type="button" class="btn-secondary" id="modelWizardPrev" onclick="stepModelWizard(-1)">上一步</button>
@@ -3646,6 +3647,83 @@ snippets:
       }).join('');
     }
 
+    const MODEL_WIZARD_EXTRA_LABELS = { image: '生圖', embeddings: '嵌入', speech: '語音', speech_transcription: '語音轉寫' };
+
+    // Step 6 in plain words: what students get under the draft as it stands. `input` is the
+    // modelEditorState input plus `nameOf(modelId)` for selector names outside the draft.
+    function modelWizardSummaryHtml(input, state) {
+      const draft = (input && input.draft) || { models: [] };
+      const models = draft.models || [];
+      const label = (model) => escapeHtml(model.name || model.id);
+      const nameOf = (id) => {
+        const known = (input.nameOf && input.nameOf(id)) || (models.find((model) => model.id === id) || {}).name;
+        return escapeHtml(known || String(id).split('@').pop());
+      };
+      const text = models.filter((model) => modelShelf(model) === 'text');
+      const listed = text.map(label);
+      const parts = [];
+      if (state.selectionActive) {
+        const selector = draft.selectorShelf || [];
+        const backups = selector.slice(1).map(nameOf);
+        const lines = (draft.autoTiers || [])
+          .map((tier) => ({ tier, held: text.filter((model) => model.autoTier === tier.id) }))
+          .filter((row) => row.held.length)
+          .map((row) => `「${escapeHtml(row.tier.name)}」的題目會先用 ${row.held.map(label).join('，不行再用 ')}`);
+        parts.push(`<div class="wizard-say"><p><strong>✓ 自動選模會啟用。</strong>學生只看到 vcr-auto；${nameOf(selector[0])} 會先判斷題目難度${backups.length ? `（${nameOf(selector[0])} 失敗時改用 ${backups.join('，再不行用 ')}）` : ''}：</p>
+            <ul>${lines.map((line) => `<li>${line}</li>`).join('')}</ul>
+            <p class="hint">選中的難度沒有額度時，會先試更強的難度，再試更弱的；判斷不出來時照清單順序。</p></div>`);
+      } else if (state.automatic) {
+        parts.push(`<div class="wizard-say"><p><strong>自動選模還不會啟用。</strong>學生還是只看到 vcr-auto，會照清單順序用模型：${listed.join(' → ') || '（還沒有模型）'}。</p>
+            <p>原因如下，修好後就會啟用：</p></div>`);
+      } else if (input.mode === 'picked') {
+        parts.push(`<div class="wizard-say"><p>學生會在 VS Code 的模型清單看到 ${listed.length} 個模型：${listed.join('、') || '（沒有）'}，自己挑。</p>
+            <p class="hint">難度和自動選模的設定都保留著，切回「自動」就會生效。</p></div>`);
+      } else {
+        parts.push(`<div class="wizard-say"><p><strong>還沒設定模式。</strong>VS Code 只列出 vcr-auto，但學生也可以直接指定：${listed.join('、') || '（沒有）'}；不會自動判斷難度。
+            <button type="button" class="btn-link" onclick="goToModelWizardStep(1)">去第 1 步選模式</button></p></div>`);
+      }
+      if (state.issues.length) parts.push(`<div class="wizard-problems">${modelWizardIssuesHtml(state)}</div>`);
+      const extras = Object.keys(MODEL_WIZARD_EXTRA_LABELS)
+        .filter((shelf) => models.some((model) => modelShelf(model) === shelf))
+        .map((shelf) => MODEL_WIZARD_EXTRA_LABELS[shelf]);
+      const deciders = models.filter((model) => modelShelf(model) === 'decisions').map(label);
+      parts.push(`<p class="hint wizard-say-extra">其他功能：${extras.length ? `${extras.join('、')} 已開啟` : '都沒開'}。學生自己呼叫決策模型：${deciders.length ? deciders.join('、') : '關閉'}。</p>`);
+      return parts.join('');
+    }
+
+    function modelWizardDialogShell(title, body, actions) {
+      return `<div class="wizard-dialog" role="alertdialog" aria-modal="true" aria-labelledby="modelWizardDialogTitle" aria-describedby="modelWizardDialogBody">
+          <h3 id="modelWizardDialogTitle">${title}</h3>
+          <div id="modelWizardDialogBody">${body}</div>
+          <div class="wizard-dialog-actions">${actions}</div>
+        </div>`;
+    }
+
+    // 儲存 refused: by the editor's own check (each blocker jumps to its spot), or by the
+    // server (`serverError`, shown in its own words).
+    function modelWizardSaveDialogHtml(state, serverError) {
+      const ok = '<button type="button" onclick="closeModelWizardDialog()">知道了</button>';
+      if (serverError) {
+        return modelWizardDialogShell('沒有儲存', `<p>伺服器拒絕了這次儲存：</p><p class="wizard-dialog-error">${escapeHtml(serverError)}</p>`, ok);
+      }
+      const blockers = state.issues.filter((issue) => issue.block);
+      const items = blockers.map((issue) => {
+        const anchor = modelWizardIssueAnchor(issue);
+        const attrs = (issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '')
+          + (anchor ? ` data-wizard-anchor="${anchor}"` : '');
+        return `<li><button type="button" class="btn-link" data-wizard-jump="${issue.step}"${attrs} onclick="closeModelWizardDialog(); jumpToModelWizardIssue(this)">${escapeHtml(issue.text)}</button>（第 ${issue.step} 步）</li>`;
+      }).join('');
+      return modelWizardDialogShell('還不能儲存', `<p>有 ${blockers.length} 個地方要先處理：</p><ul class="wizard-dialog-list">${items}</ul>`, ok);
+    }
+
+    function modelWizardDiscardDialogHtml() {
+      return modelWizardDialogShell(
+        '有尚未儲存的修改',
+        '<p>離開的話，這次的修改會被捨棄。</p>',
+        '<button type="button" class="btn-secondary" onclick="closeModelWizardDialog()">繼續編輯</button><button type="button" onclick="discardModelWizardChanges()">捨棄修改</button>',
+      );
+    }
+
     // Step 3 top half. `refusal` ({ tierId, holders }) is the last refused delete, shown on
     // that tier's row until the next edit.
     function autoTierBlockHtml(draft, defaults, refusal) {
@@ -4543,9 +4621,52 @@ snippets:
       const state = currentModelEditorState();
       const steps = document.getElementById('modelWizardSteps');
       if (steps) steps.innerHTML = modelWizardStepperHtml(state, modelWizardStep);
-      const issues = document.getElementById('modelWizardIssues');
-      if (issues) issues.innerHTML = modelWizardIssuesHtml(state);
+      const summary = document.getElementById('modelWizardSummary');
+      if (summary) {
+        summary.innerHTML = modelWizardSummaryHtml({
+          draft: sessionChatModelsDraft,
+          mode: sessionChatModelsMode,
+          target: modelWizardTarget(),
+          nameOf: (id) => (catalogModelById(id) || {}).name,
+        }, state);
+      }
+      const dirty = document.getElementById('modelWizardDirty');
+      if (dirty) dirty.hidden = !isSessionChatModelsDraftDirty();
     }
+
+    // The in-page dialog over the wizard; `html` comes from a modelWizard*DialogHtml builder.
+    function openModelWizardDialog(html) {
+      const root = document.getElementById('modelWizardDialog');
+      if (!root) return;
+      root.innerHTML = html;
+      root.hidden = false;
+      const first = root.querySelector('.wizard-dialog-actions button:last-child');
+      if (first) first.focus();
+    }
+
+    function closeModelWizardDialog() {
+      const root = document.getElementById('modelWizardDialog');
+      if (!root) return;
+      root.hidden = true;
+      root.innerHTML = '';
+    }
+
+    function modelWizardDialogOpen() {
+      const root = document.getElementById('modelWizardDialog');
+      return Boolean(root && !root.hidden);
+    }
+
+    function discardModelWizardChanges() {
+      closeModelWizardDialog();
+      closeSessionChatModelsModal();
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && modelWizardDialogOpen()) {
+        event.preventDefault();
+        closeModelWizardDialog();
+      }
+    });
 
     // Shows the current step's panel, parks the shared catalog columns in it, and swaps
     // Steps 3 and 4 between their settings and the "not used in this mode" note.
@@ -4736,6 +4857,7 @@ snippets:
     function closeSessionChatModelsModal() {
       const modal = document.getElementById('editSessionChatModelsModal');
       if (modal) modal.classList.remove('show');
+      closeModelWizardDialog();
       sessionChatModelsContext = null;
       sessionChatModelsMode = null;
       sessionChatModelsDraft = { models: [], removed: {} };
@@ -4774,8 +4896,8 @@ snippets:
 
     function requestCloseSessionChatModelsModal() {
       if (isSessionChatModelsDraftDirty()) {
-        const ok = window.confirm('尚未儲存，確定離開？');
-        if (!ok) return;
+        openModelWizardDialog(modelWizardDiscardDialogHtml());
+        return;
       }
       closeSessionChatModelsModal();
     }
@@ -4856,11 +4978,14 @@ snippets:
       const saveBtn = document.getElementById('sessionChatModelsSaveBtn');
       const state = currentModelEditorState();
       if (!state.canSave) {
-        const count = state.issues.filter((issue) => issue.block).length;
-        await goToModelWizardStep(MODEL_WIZARD_STEPS.length);
-        setSessionChatModelsMsg('sessionChatModelsSaveMsg', `還有 ${count} 個問題要先處理才能儲存。`, true);
+        openModelWizardDialog(modelWizardSaveDialogHtml(state, ''));
         return;
       }
+      const refused = (err) => {
+        sessionChatModelsLocked = false;
+        setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
+        openModelWizardDialog(modelWizardSaveDialogHtml(state, err?.message || '儲存失敗'));
+      };
       if (sessionChatModelsContext.mode === 'template') {
         sessionChatModelsLocked = true;
         if (saveBtn) saveBtn.disabled = true;
@@ -4875,8 +5000,7 @@ snippets:
           routerModelTemplate = Array.isArray(saved) ? saved : [];
           closeSessionChatModelsModal();
         } catch (err) {
-          sessionChatModelsLocked = false;
-          setSessionChatModelsMsg('sessionChatModelsSaveMsg', err?.message || '儲存失敗', true);
+          refused(err);
         } finally {
           if (saveBtn) saveBtn.disabled = false;
         }
@@ -4896,8 +5020,7 @@ snippets:
         closeSessionChatModelsModal();
         await reloadSessionViews(classId);
       } catch (err) {
-        sessionChatModelsLocked = false;
-        setSessionChatModelsMsg('sessionChatModelsSaveMsg', err?.message || '儲存失敗', true);
+        refused(err);
       } finally {
         if (saveBtn) saveBtn.disabled = false;
       }
