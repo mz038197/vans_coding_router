@@ -14,13 +14,14 @@ function extractNamedFunction(source, name) {
   const needle = `function ${name}(`;
   const at = source.indexOf(needle);
   if (at < 0) throw new Error(`missing function ${name}`);
+  const start = source.slice(at - 6, at) === "async " ? at - 6 : at;
   const brace = source.indexOf("{", at);
   let depth = 0;
   for (let i = brace; i < source.length; i += 1) {
     if (source[i] === "{") depth += 1;
     else if (source[i] === "}") {
       depth -= 1;
-      if (depth === 0) return source.slice(at, i + 1);
+      if (depth === 0) return source.slice(start, i + 1);
     }
   }
   throw new Error(`unclosed function ${name}`);
@@ -324,4 +325,95 @@ test("a checked model the catalog does not list is still in 已勾選, marked mi
   const draft = { models: [{ id: "openrouter@gone/model", name: "Gone" }], removed: {} };
   const state = view(box, { draft });
   assert.deepEqual(state.chosen.models.map((m) => [m.id, m.missing]), [["openrouter@gone/model", true]]);
+});
+
+// Drives the real open / step-change path. Every page function not listed in REAL is a
+// recording stub, so the test only cares that Step 2 loads its catalog and renders.
+function wiredPage() {
+  const REAL = [
+    "openModelWizard",
+    "goToModelWizardStep",
+    "renderSessionChatModelsList",
+    "renderModelWizardTextShelf",
+    "freshModelWizardTextUi",
+    "modelWizardTextShelfView",
+    "modelWizardTextShelfHtml",
+    "modelWizardTextFieldsHtml",
+    "escapeHtml",
+    "modelShelf",
+    "modelIdPrefix",
+  ];
+  const builtins = new Set(["Math", "Number", "String", "Array", "Set", "Map", "JSON", "Object", "Promise", "Boolean", "undefined"]);
+  const calls = [];
+  const elements = {};
+  const element = (id) => {
+    elements[id] ||= {
+      id, value: "", innerHTML: "", textContent: "", hidden: false, disabled: false, scrollTop: 0,
+      classList: { toggle() {}, add() {}, remove() {} },
+      setAttribute() {},
+    };
+    return elements[id];
+  };
+  const store = {
+    calls,
+    elements,
+    document: { getElementById: element, querySelector: () => null, querySelectorAll: () => [] },
+    sessionChatModelsContext: { classId: 1, sessionId: 2 },
+    sessionChatModelsDraft: { models: [{ id: "openrouter@x/delta", name: "Delta" }], removed: {} },
+    MODEL_WIZARD_STEPS: [1, 2, 3, 4, 5, 6],
+    MODEL_WIZARD_STEP_SHELVES: { 2: ["text"], 3: ["text"], 4: ["decisions"], 5: ["image"] },
+    modelWizardStep: 3,
+    modelWizardTextUi: { filter: "acme", query: "stale", collapsed: { openrouter: true }, chosenCollapsed: true, advancedOpen: {} },
+    modelWizardTextCatalog: { models: [], unavailable: false },
+    allTeacherProviders: () => PROVIDERS,
+    loadModelWizardTextCatalog: async () => {
+      calls.push("loadModelWizardTextCatalog");
+      store.modelWizardTextCatalog = { models: CATALOG, unavailable: false };
+    },
+  };
+  const scope = new Proxy(store, {
+    has: (target, name) => typeof name === "string" && !REAL.includes(name) && !builtins.has(name),
+    get: (target, name) => {
+      if (name === Symbol.unscopables) return undefined;
+      if (name in target) return target[name];
+      return () => { calls.push(name); return undefined; };
+    },
+    set: (target, name, value) => { target[name] = value; return true; },
+  });
+  const code = REAL.map((name) => extractNamedFunction(portalHtml, name)).join("\n");
+  const fns = vm.runInNewContext(
+    `(function (scope) { with (scope) { ${code}\n return { ${REAL.join(", ")} }; } })`,
+    {},
+  )(scope);
+  return { store, fns };
+}
+
+test("opening the editor loads Step 2's catalog and forgets the last filter, search and collapse", async () => {
+  const { store, fns } = wiredPage();
+  store.document.getElementById("modelWizardTextSearch").value = "stale";
+  await fns.openModelWizard("課堂模型設定");
+  assert.ok(store.calls.includes("loadModelWizardTextCatalog"));
+  assert.deepEqual(plain(store.modelWizardTextUi), {
+    filter: "", query: "", collapsed: {}, chosenCollapsed: false, advancedOpen: {},
+  });
+  assert.equal(store.elements.modelWizardTextSearch.value, "");
+});
+
+test("going to Step 2 renders the text shelf from the loaded catalog", async () => {
+  const { store, fns } = wiredPage();
+  await fns.openModelWizard("預設模型設定");
+  await fns.goToModelWizardStep(2);
+  const shelf = store.elements.modelWizardTextShelf.innerHTML;
+  assert.match(shelf, /value="openrouter@x\/gamma"/);
+  assert.match(shelf, /value="openrouter@x\/delta" checked/);
+  assert.match(shelf, /已選 1／3/);
+});
+
+test("a draft change re-renders the text shelf while Step 2 is on screen", async () => {
+  const { store, fns } = wiredPage();
+  await fns.openModelWizard("課堂模型設定");
+  await fns.goToModelWizardStep(2);
+  store.sessionChatModelsDraft.models.push({ id: "openrouter@x/gamma", name: "Gamma" });
+  fns.renderSessionChatModelsList();
+  assert.match(store.elements.modelWizardTextShelf.innerHTML, /value="openrouter@x\/gamma" checked/);
 });

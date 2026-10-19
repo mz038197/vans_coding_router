@@ -4530,6 +4530,7 @@ snippets:
       renderSessionDecisionShelf();
       renderSessionChatCandidates();
       renderSessionChatDraft();
+      renderModelWizardTextShelf();
       refreshModelWizardStatus();
     }
 
@@ -4581,6 +4582,10 @@ snippets:
       modelWizardStep = Math.min(Math.max(Number(step) || 1, 1), MODEL_WIZARD_STEPS.length);
       const body = document.getElementById('modelWizardBody');
       if (body) body.scrollTop = 0;
+      if (modelWizardStep === 2) {
+        renderSessionChatModelsList();
+        return;
+      }
       if (modelWizardStep === 4 || modelWizardStep === 5) {
         const step = modelWizardStep;
         renderSessionChatModelsList();
@@ -4665,6 +4670,9 @@ snippets:
       modelWizardExtraUi = freshModelWizardExtraUi();
       modelWizardDecisionCatalog = null;
       modelWizardExtraCatalogs = null;
+      modelWizardTextUi = freshModelWizardTextUi();
+      const textSearch = document.getElementById('modelWizardTextSearch');
+      if (textSearch) textSearch.value = '';
       renderModelWizardIds();
       closeModelWizardMenu();
       setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
@@ -4673,7 +4681,7 @@ snippets:
       if (search) search.value = '';
       const shelf = document.getElementById('sessionDecisionShelf');
       if (shelf) shelf.value = 'text';
-      await loadSessionChatModelsCatalog('text');
+      await Promise.all([loadSessionChatModelsCatalog('text'), loadModelWizardTextCatalog()]);
       renderSessionChatModelsList();
       if (modal) modal.classList.add('show');
     }
