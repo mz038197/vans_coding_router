@@ -40,14 +40,14 @@ const NAMES = [
   "prefillAutoTiers",
   "addAutoTier",
   "removeAutoTier",
-  "moveAutoTier",
+  "shiftAutoTier",
+  "autoTierHolders",
   "defaultForTier",
   "fillDefaultTierDescription",
   "autoTierInUse",
   "toggleDraftSelector",
   "draftAutoSnapshot",
   "autoTierBlockHtml",
-  "draftModelTierField",
   "candidateShelfChoicesHtml",
   "sessionAutoSelectionBadge",
 ];
@@ -113,7 +113,8 @@ test("teacher adds, removes, and reorders tiers; the saved document keeps that o
   assert.equal(draft.autoTiers[2].id, added.id);
   assert.ok(!["t-light", "t-hard"].includes(added.id));
 
-  box.moveAutoTier(draft, added.id, "t-light");
+  box.shiftAutoTier(draft, added.id, -1);
+  box.shiftAutoTier(draft, added.id, -1);
   assert.deepEqual(draft.autoTiers.map((t) => t.id), [added.id, "t-light", "t-hard"]);
 
   box.removeAutoTier(draft, added.id);
@@ -142,8 +143,8 @@ test("the tier block lists tiers weakest first with limits, defaults, and the ac
   const box = sandbox();
   const draft = tieredDraft(box);
   const html = box.autoTierBlockHtml(draft, DEFAULTS);
-  assert.match(html, /越下面越強/);
-  assert.match(html, /修改說明可能影響自動選模的準確度/);
+  assert.match(html, /由上到下越來越強/);
+  assert.match(html, /修改難度說明可能影響自動選模的準確度/);
   assert.match(html, /填入預設/);
   assert.match(html, /新增難度/);
   assert.match(html, /aria-label="難度名稱"/);
@@ -152,22 +153,7 @@ test("the tier block lists tiers weakest first with limits, defaults, and the ac
   assert.match(html, /maxlength="300"/);
   assert.match(html, /maxlength="20"/);
   assert.match(html, /3\/300/);
-  assert.match(html, /draggable="true"/);
   assert.ok(html.indexOf("輕量") < html.indexOf("困難"));
-});
-
-test("each text-shelf model picks one of the document's tiers", () => {
-  const box = sandbox();
-  const draft = tieredDraft(box);
-  const field = box.draftModelTierField(draft.models[0], draft.autoTiers);
-  assert.match(field, /data-field="autoTier"/);
-  assert.match(field, /<option value="t-light" selected>輕量<\/option>/);
-  assert.match(field, /<option value="t-hard">困難<\/option>/);
-  assert.equal(box.draftModelTierField(draft.models[2], draft.autoTiers), "");
-  assert.match(field, /<label class="catalog-field">難度/);
-  assert.doesNotMatch(userFacingText(field), /Tier/);
-  const orphan = box.draftModelTierField({ id: "x", autoTier: "gone" }, draft.autoTiers);
-  assert.match(orphan, /（不存在的難度）/);
 });
 
 test("an OpenRouter decisions row offers 決策 and 自動選模, either or both", () => {

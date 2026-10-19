@@ -378,8 +378,9 @@
               <h3 id="modelWizardTitle3">分配難度</h3>
               <div class="wizard-off-note" data-wizard-off="3"></div>
               <div data-wizard-on="3">
-                <section id="sessionAutoTiers" class="model-editor-tiers" aria-label="自動選模難度"></section>
-                <div data-wizard-slot="3"></div>
+                <section id="sessionAutoTiers" class="model-editor-tiers" aria-label="難度"></section>
+                <h4 class="wizard-subhead">每個模型屬於哪個難度</h4>
+                <section id="modelWizardTierTable" aria-label="每個模型屬於哪個難度"></section>
               </div>
             </section>
             <section class="wizard-panel" data-wizard-panel="4" aria-labelledby="modelWizardTitle4" hidden>
@@ -3149,8 +3150,15 @@ snippets:
       draft.autoTiers = defaults.map((tier) => ({ id: tier.id, name: tier.name, description: tier.description }));
     }
 
+    // Text-shelf models sitting in this tier, as the teacher reads them.
+    function autoTierHolders(draft, tierId) {
+      return (draft.models || [])
+        .filter((model) => model.autoTier === tierId && modelShelf(model) === 'text')
+        .map((model) => model.name || model.id);
+    }
+
     function autoTierInUse(draft, tierId) {
-      return (draft.models || []).some((model) => model.autoTier === tierId && modelShelf(model) === 'text');
+      return autoTierHolders(draft, tierId).length > 0;
     }
 
     function addAutoTier(draft) {
@@ -3167,19 +3175,21 @@ snippets:
       return tier;
     }
 
+    // A tier that still holds models stays; `holders` names them for the refusal message.
     function removeAutoTier(draft, tierId) {
-      if (autoTierInUse(draft, tierId)) return;
+      const holders = autoTierHolders(draft, tierId);
+      if (holders.length) return { removed: false, holders };
       draft.autoTiers = (draft.autoTiers || []).filter((tier) => tier.id !== tierId);
+      return { removed: true, holders: [] };
     }
 
-    // Drop one tier onto another: it takes that tier's place.
-    function moveAutoTier(draft, fromId, toId) {
+    // ↑ 較弱 is delta -1, ↓ 較強 is +1. Tiers run weakest first; a tier at either end stays.
+    function shiftAutoTier(draft, tierId, delta) {
       const tiers = draft.autoTiers || [];
-      const from = tiers.findIndex((tier) => tier.id === fromId);
-      const to = tiers.findIndex((tier) => tier.id === toId);
-      if (from < 0 || to < 0 || from === to) return;
-      const [moved] = tiers.splice(from, 1);
-      tiers.splice(to, 0, moved);
+      const from = tiers.findIndex((tier) => tier.id === tierId);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= tiers.length) return;
+      [tiers[from], tiers[to]] = [tiers[to], tiers[from]];
     }
 
     function defaultForTier(draft, tierId, defaults) {
@@ -3613,10 +3623,20 @@ snippets:
       }).join('');
     }
 
+    // Which part of its step an issue highlights when there is no tier row to point at.
+    function modelWizardIssueAnchor(issue) {
+      if (issue.tierId) return null;
+      if (issue.code === 'tier-count') return 'tiers';
+      if (issue.code === 'model-untiered' || issue.code === 'model-tier-missing' || issue.code === 'tiers-used') return 'assign';
+      return null;
+    }
+
     function modelWizardIssuesHtml(state) {
       if (!state.issues.length) return '<p class="hint">沒有需要處理的問題。</p>';
       return state.issues.map((issue) => {
-        const tier = issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '';
+        const anchor = modelWizardIssueAnchor(issue);
+        const tier = (issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '')
+          + (anchor ? ` data-wizard-anchor="${anchor}"` : '');
         return `<div class="wizard-problem${issue.block ? ' is-block' : ''}">
             <span>${escapeHtml(issue.text)}${issue.block ? '<span class="wizard-problem-tag">要先處理才能儲存</span>' : ''}</span>
             <button type="button" class="btn-secondary wizard-small-btn" data-wizard-jump="${issue.step}"${tier} onclick="jumpToModelWizardIssue(this)">去第 ${issue.step} 步修正</button>
@@ -3624,50 +3644,75 @@ snippets:
       }).join('');
     }
 
-    function autoTierBlockHtml(draft, defaults) {
+    // Step 3 top half. `refusal` ({ tierId, holders }) is the last refused delete, shown on
+    // that tier's row until the next edit.
+    function autoTierBlockHtml(draft, defaults, refusal) {
       const tiers = draft.autoTiers || [];
-      const rows = tiers.map((tier) => {
-        const inUse = autoTierInUse(draft, tier.id);
-        const canRemove = !inUse && tiers.length > AUTO_TIER_COUNT_MIN;
-        const removeTitle = inUse ? '還有模型使用這個難度' : canRemove ? '刪除難度' : `至少要有 ${AUTO_TIER_COUNT_MIN} 個難度`;
+      const rows = tiers.map((tier, index) => {
         const id = escapeHtml(tier.id);
+        const name = String(tier.name || '');
         const description = String(tier.description || '');
         const hasDefault = Boolean(defaultForTier(draft, tier.id, defaults));
-        return `<div class="auto-tier-row" draggable="true" data-tier-id="${id}" ondragstart="onAutoTierDragStart(event)" ondragover="event.preventDefault()" ondrop="onAutoTierDrop(event)">
-          <span class="auto-tier-handle" title="拖曳排序" aria-hidden="true">⋮⋮</span>
+        const shown = escapeHtml(name.trim() || `第 ${index + 1} 個難度`);
+        const refused = refusal && refusal.tierId === tier.id && refusal.holders && refusal.holders.length
+          ? `<p class="auto-tier-refusal" role="alert">「${shown}」還有模型，不能刪除。先在下面的表格把 ${escapeHtml(refusal.holders.join('、'))} 移到其他難度。</p>`
+          : '';
+        return `<div class="auto-tier-row" data-tier-id="${id}">
+          <span class="auto-tier-num" aria-hidden="true">${index + 1}</span>
           <div class="auto-tier-fields">
-            <div class="auto-tier-head">
-              <input class="catalog-field-input auto-tier-name" aria-label="難度名稱" maxlength="${AUTO_TIER_NAME_LIMIT}" data-tier-id="${id}" data-tier-field="name" value="${escapeHtml(tier.name || '')}" />
-              <button type="button" class="btn-secondary auto-tier-btn" ${hasDefault ? '' : 'disabled'} onclick="onFillDefaultTierDescription('${id}')">填入預設</button>
-              <button type="button" class="btn-secondary auto-tier-btn" title="${removeTitle}" aria-label="刪除難度" ${canRemove ? '' : 'disabled'} onclick="onRemoveAutoTier('${id}')">刪除</button>
+            <input class="catalog-field-input auto-tier-name" aria-label="難度名稱" maxlength="${AUTO_TIER_NAME_LIMIT}" data-tier-id="${id}" data-tier-field="name" value="${escapeHtml(name)}" />
+            <textarea class="auto-tier-description" aria-label="難度說明" rows="3" maxlength="${AUTO_TIER_DESCRIPTION_LIMIT}" data-tier-id="${id}" data-tier-field="description">${escapeHtml(description)}</textarea>
+            <div class="auto-tier-foot">
+              <span class="auto-tier-count" data-tier-count="${id}">${[...description].length}/${AUTO_TIER_DESCRIPTION_LIMIT}</span>
+              <button type="button" class="btn-link auto-tier-btn" ${hasDefault ? '' : 'disabled'} onclick="onFillDefaultTierDescription('${id}')">填入預設</button>
             </div>
-            <textarea class="auto-tier-description" aria-label="難度說明" rows="2" maxlength="${AUTO_TIER_DESCRIPTION_LIMIT}" data-tier-id="${id}" data-tier-field="description">${escapeHtml(description)}</textarea>
-            <span class="auto-tier-count" data-tier-count="${id}">${description.length}/${AUTO_TIER_DESCRIPTION_LIMIT}</span>
+            ${refused}
+          </div>
+          <div class="auto-tier-actions">
+            <button type="button" class="btn-secondary auto-tier-btn" aria-label="${shown} 往較弱移" ${index === 0 ? 'disabled' : ''} onclick="onShiftAutoTier('${id}', -1)">↑ 較弱</button>
+            <button type="button" class="btn-secondary auto-tier-btn" aria-label="${shown} 往較強移" ${index === tiers.length - 1 ? 'disabled' : ''} onclick="onShiftAutoTier('${id}', 1)">↓ 較強</button>
+            <button type="button" class="btn-secondary auto-tier-btn" aria-label="刪除 ${shown}" onclick="onRemoveAutoTier('${id}')">刪除</button>
           </div>
         </div>`;
       }).join('');
       const canAdd = tiers.length < AUTO_TIER_COUNT_MAX;
-      return `<div class="auto-tier-title">
-          <h3>自動選模難度</h3>
-          <button type="button" class="btn-secondary auto-tier-btn" ${canAdd ? '' : 'disabled'} onclick="onAddAutoTier()">新增難度</button>
-        </div>
-        <p class="hint">由上到下排序，越下面越強。修改說明可能影響自動選模的準確度。</p>
-        ${rows || '<p class="hint">還沒有難度。</p>'}`;
+      return `<p class="hint">先確認難度的名稱和說明（由上到下越來越強），再替每個模型選一個難度。判斷難度的模型會讀這些說明，決定學生的題目屬於哪一級；修改難度說明可能影響自動選模的準確度。</p>
+        <div class="auto-tier-list" data-wizard-anchor="tiers">${rows || '<p class="hint">還沒有難度。</p>'}</div>
+        <div class="auto-tier-add"><button type="button" class="btn-secondary auto-tier-btn" ${canAdd ? '' : 'disabled'} onclick="onAddAutoTier()">＋ 新增難度</button>
+          <span class="hint">最多 ${AUTO_TIER_COUNT_MAX} 個</span></div>`;
     }
 
-    function draftModelTierField(model, tiers) {
-      if (modelShelf(model) !== 'text') return '';
-      const list = tiers || [];
-      const current = model.autoTier || '';
-      const known = list.some((tier) => tier.id === current);
-      const options = [
-        `<option value=""${current ? '' : ' selected'}>未指定</option>`,
-        ...list.map((tier) => `<option value="${escapeHtml(tier.id)}"${tier.id === current ? ' selected' : ''}>${escapeHtml(tier.name)}</option>`),
-        current && !known ? `<option value="${escapeHtml(current)}" selected>（不存在的難度）</option>` : '',
-      ].join('');
-      return `<label class="catalog-field">難度
-            <select class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-field="autoTier">${options}</select>
-          </label>`;
+    // Only a text-shelf model takes a tier; tiers are referenced by id, so a rename keeps it.
+    function setDraftModelTier(draft, modelId, tierId) {
+      const model = (draft.models || []).find((item) => item.id === modelId);
+      if (!model || modelShelf(model) !== 'text') return;
+      if (tierId) model.autoTier = tierId;
+      else delete model.autoTier;
+    }
+
+    // Step 3 bottom half: one row per checked text model, one radio column per tier.
+    function modelTierTableHtml(draft) {
+      const tiers = draft.autoTiers || [];
+      const models = (draft.models || []).filter((model) => modelShelf(model) === 'text');
+      if (!models.length) {
+        return `<p class="hint" data-wizard-anchor="assign">還沒有勾選學生可用的模型。
+            <button type="button" class="btn-link" onclick="goToModelWizardStep(2)">去第 2 步加模型</button></p>`;
+      }
+      const tierIds = new Set(tiers.map((tier) => tier.id));
+      const tierLabel = (tier, index) => String(tier.name || '').trim() || `第 ${index + 1} 個難度`;
+      const head = tiers.map((tier, index) => `<th scope="col">${escapeHtml(tierLabel(tier, index))}</th>`).join('');
+      const rows = models.map((model) => {
+        const label = model.name || model.id;
+        const placed = Boolean(model.autoTier) && tierIds.has(model.autoTier);
+        const tag = placed ? '' : `<span class="wizard-problem-tag">${model.autoTier ? '難度已經不存在' : '還沒分難度'}</span>`;
+        const id = escapeHtml(model.id);
+        const cells = tiers.map((tier, index) => `<td><input type="radio" name="model-tier-${id}" value="${escapeHtml(tier.id)}" data-model-id="${id}"${model.autoTier === tier.id ? ' checked' : ''} aria-label="${escapeHtml(label)} 分到 ${escapeHtml(tierLabel(tier, index))}" onchange="onModelTierPick(this)" /></td>`).join('');
+        return `<tr${placed ? '' : ' class="is-untiered"'}><th scope="row"><strong>${escapeHtml(label)}</strong>${tag}<code class="model-tier-id">${id}</code></th>${cells}</tr>`;
+      }).join('');
+      return `<div class="model-tier-table-wrap" data-wizard-anchor="assign"><table class="model-tier-table">
+          <thead><tr><th scope="col">模型</th>${head}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`;
     }
 
     // An OpenRouter decisions row may go on the decision shelf, the selector shelf, or both.
@@ -3687,18 +3732,29 @@ snippets:
       return '<span class="session-auto-badge" title="自動、自動選模架有模型、至少用到兩個難度">自動選模</span>';
     }
 
+    // The last refused tier delete; cleared by the next tier edit or when the editor opens.
+    let autoTierRefusal = null;
+
+    // Step 3: the tier list on top, the model x tier table below.
     function renderAutoTierBlock() {
       const block = document.getElementById('sessionAutoTiers');
       if (!block) return;
       if (!modelWizardShows(3)) {
         block.innerHTML = '';
+        renderModelTierTable();
         return;
       }
-      block.innerHTML = autoTierBlockHtml(sessionChatModelsDraft, autoTierDefaults || []);
+      block.innerHTML = autoTierBlockHtml(sessionChatModelsDraft, autoTierDefaults || [], autoTierRefusal);
       block.querySelectorAll('[data-tier-field]').forEach((input) => {
         input.addEventListener('input', onAutoTierField);
         input.addEventListener('change', onAutoTierFieldCommit);
       });
+      renderModelTierTable();
+    }
+
+    function renderModelTierTable() {
+      const table = document.getElementById('modelWizardTierTable');
+      if (table) table.innerHTML = modelWizardShows(3) ? modelTierTableHtml(sessionChatModelsDraft) : '';
     }
 
     function onAutoTierField(event) {
@@ -3709,43 +3765,58 @@ snippets:
       if (!tier || (field !== 'name' && field !== 'description')) return;
       tier[field] = target.value;
       if (field === 'description') {
-        const counter = target.parentElement && target.parentElement.querySelector('[data-tier-count]');
-        if (counter) counter.textContent = `${target.value.length}/${AUTO_TIER_DESCRIPTION_LIMIT}`;
+        const row = target.closest('.auto-tier-row');
+        const counter = row && row.querySelector('[data-tier-count]');
+        if (counter) counter.textContent = `${[...target.value].length}/${AUTO_TIER_DESCRIPTION_LIMIT}`;
       }
       refreshModelWizardStatus();
     }
 
+    // A committed rename relabels the table's column; the models keep the tier id.
     function onAutoTierFieldCommit(event) {
       onAutoTierField(event);
-      if (event.target.getAttribute('data-tier-field') === 'name') renderSessionChatDraft();
+      if (event.target.getAttribute('data-tier-field') === 'name') renderModelTierTable();
+    }
+
+    function rerenderAutoTiers(refusal) {
+      autoTierRefusal = refusal || null;
+      renderAutoTierBlock();
+      refreshModelWizardStatus();
     }
 
     function onAddAutoTier() {
-      addAutoTier(sessionChatModelsDraft);
-      renderSessionChatModelsList();
+      const tier = addAutoTier(sessionChatModelsDraft);
+      rerenderAutoTiers();
+      if (!tier) return;
+      const input = [...document.querySelectorAll('#sessionAutoTiers [data-tier-field="name"]')]
+        .find((el) => el.getAttribute('data-tier-id') === tier.id);
+      if (input) input.focus();
     }
 
     function onRemoveAutoTier(tierId) {
-      removeAutoTier(sessionChatModelsDraft, tierId);
-      renderSessionChatModelsList();
+      const result = removeAutoTier(sessionChatModelsDraft, tierId);
+      rerenderAutoTiers(result.removed ? null : { tierId, holders: result.holders });
+    }
+
+    function onShiftAutoTier(tierId, delta) {
+      shiftAutoTier(sessionChatModelsDraft, tierId, delta);
+      rerenderAutoTiers();
     }
 
     function onFillDefaultTierDescription(tierId) {
       fillDefaultTierDescription(sessionChatModelsDraft, tierId, autoTierDefaults || []);
-      renderAutoTierBlock();
+      rerenderAutoTiers();
     }
 
-    function onAutoTierDragStart(event) {
-      const row = event.currentTarget;
-      if (event.dataTransfer) event.dataTransfer.setData('text/plain', row.getAttribute('data-tier-id'));
-    }
-
-    function onAutoTierDrop(event) {
-      event.preventDefault();
-      const fromId = event.dataTransfer && event.dataTransfer.getData('text/plain');
-      const toId = event.currentTarget.getAttribute('data-tier-id');
-      moveAutoTier(sessionChatModelsDraft, fromId, toId);
-      renderSessionChatModelsList();
+    // Redraws the row's red mark and keeps focus on the picked radio for keyboard users.
+    function onModelTierPick(input) {
+      const modelId = input.getAttribute('data-model-id');
+      const tierId = input.value;
+      setDraftModelTier(sessionChatModelsDraft, modelId, tierId);
+      rerenderAutoTiers();
+      const picked = [...document.querySelectorAll('#modelWizardTierTable input[type="radio"]')]
+        .find((el) => el.getAttribute('data-model-id') === modelId && el.value === tierId);
+      if (picked) picked.focus();
     }
 
     function onCandidateShelfChoice(input) {
@@ -4030,7 +4101,6 @@ snippets:
           <label class="catalog-field">最大輸出 tokens
             <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(model.maxOutputTokens ?? ''))}" />
           </label>
-          ${modelWizardShows(3) ? draftModelTierField(model, sessionChatModelsDraft.autoTiers) : ''}
         </div>`;
     }
 
@@ -4534,13 +4604,15 @@ snippets:
     async function jumpToModelWizardIssue(button) {
       const step = Number(button.getAttribute('data-wizard-jump'));
       const tierId = button.getAttribute('data-tier-id');
+      const anchor = button.getAttribute('data-wizard-anchor');
       await goToModelWizardStep(step);
       const panel = document.querySelector(`#modelWizard [data-wizard-panel="${step}"]`);
       if (!panel) return;
       const row = tierId
         ? [...panel.querySelectorAll('.auto-tier-row[data-tier-id]')].find((el) => el.getAttribute('data-tier-id') === tierId)
         : null;
-      const target = row || panel.querySelector(`[data-wizard-on="${step}"]`) || panel;
+      const spot = anchor ? panel.querySelector(`[data-wizard-anchor="${anchor}"]`) : null;
+      const target = row || spot || panel.querySelector(`[data-wizard-on="${step}"]`) || panel;
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       target.classList.remove('wizard-flash');
       void target.offsetWidth;
@@ -4638,13 +4710,6 @@ snippets:
       if (!model || !field) return;
       if (field === 'thinking') {
         model.thinking = Boolean(target.checked);
-        return;
-      }
-      if (field === 'autoTier') {
-        if (target.value) model.autoTier = target.value;
-        else delete model.autoTier;
-        if (event.type === 'change') renderAutoTierBlock();
-        refreshModelWizardStatus();
         return;
       }
       if (field === 'maxInputTokens' || field === 'maxOutputTokens') {
@@ -4751,6 +4816,7 @@ snippets:
       sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(routerModelTemplate);
       prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
+      autoTierRefusal = null;
       sessionChatModelsAutoBaseline = draftAutoSnapshot(sessionChatModelsDraft);
       await openModelWizard('預設模型設定（模型範本）');
     }
@@ -4767,6 +4833,7 @@ snippets:
       sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(session && session.session_chat_language_models);
       prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
+      autoTierRefusal = null;
       sessionChatModelsAutoBaseline = draftAutoSnapshot(sessionChatModelsDraft);
       const label = session ? sessionDisplayName(session) : `課堂 #${sessionId}`;
       await openModelWizard(`課堂模型設定 · ${label}`);
