@@ -325,10 +325,9 @@ test("the editor shell: a labelled dialog, a step list, text header buttons, and
   assert.match(modal, />下一步</);
 });
 
-test("儲存 refuses while a blocker remains and sends the teacher to Step 6", () => {
+test("儲存 refuses while a blocker remains and lists the blockers in a dialog", () => {
   const save = extractNamedFunction(portalHtml, "saveSessionChatLanguageModels");
-  assert.match(save, /if \(!state\.canSave\)/);
-  assert.match(save, /goToModelWizardStep\(MODEL_WIZARD_STEPS\.length\)/);
+  assert.match(save, /if \(!state\.canSave\) \{\s*openModelWizardDialog\(modelWizardSaveDialogHtml\(state, ''\)\);\s*return;/);
 });
 
 test("both editors open on Step 1", () => {
