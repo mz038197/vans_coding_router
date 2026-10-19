@@ -1017,34 +1017,10 @@
       max-height: 46vh;
     }
 
-    .session-chat-models-row {
-      padding: 8px 10px;
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      background: var(--surface-overlay);
-    }
-
-    .session-chat-models-row.is-missing {
-      border-color: var(--accent-border);
-    }
-
     .session-chat-models-missing {
       margin-left: 6px;
       font-size: 0.78rem;
       color: var(--text-muted);
-    }
-
-    .session-chat-models-fields {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 12px;
-      margin: 10px 0 0;
-    }
-
-    .session-chat-models-check-field {
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
 
     #editSessionChatModelsModal.show {
@@ -1064,7 +1040,7 @@
 
     #editSessionChatModelsModal .modal-header { flex-shrink: 0; }
 
-    /* Step wizard (#74): the modal body is the one scroll area; nothing inside it scrolls. */
+    /* Step wizard: the modal body is the one scroll area; nothing inside it scrolls. */
     #editSessionChatModelsModal .modal-body {
       flex: 1;
       min-height: 0;
@@ -1075,7 +1051,7 @@
       padding: 12px 16px 20px;
     }
 
-    /* Router Model Template editor (#81): a gold frame and header so it never reads as a sitting. */
+    /* Router Model Template editor: a gold frame and header so it never reads as a sitting. */
     .model-wizard.is-template {
       border-color: rgba(248, 192, 0, 0.75);
       box-shadow: 0 0 0 3px rgba(248, 192, 0, 0.25);
@@ -1288,11 +1264,7 @@
     .wizard-flash { animation: wizard-flash 1.2s ease; }
     @keyframes wizard-flash { 0%, 60% { box-shadow: 0 0 0 4px var(--brand-yellow); } 100% { box-shadow: none; } }
 
-    .model-wizard:not(.show-model-ids) .model-allowlist-item code { display: none; }
-
-    #modelWizardColumns.is-draft-only .model-editor-col-candidates { display: none; }
-
-    /* Step 2: the text shelf (#77). */
+    /* Step 2: the text shelf. */
     .wizard-text-search { width: 100%; box-sizing: border-box; margin: 4px 0 10px; }
     .wizard-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
     .wizard-chip {
@@ -1359,14 +1331,12 @@
       .wizard-layout { grid-template-columns: 1fr; }
       .wizard-steps { position: static; flex-direction: row; overflow-x: auto; }
       .wizard-step { flex-shrink: 0; }
-      .model-editor-columns { flex-direction: column; align-items: stretch; }
-      .model-editor-columns .model-editor-col { flex: none; }
       .wizard-problem { flex-direction: column; align-items: flex-start; }
       .auto-tier-row { grid-template-columns: 24px minmax(0, 1fr); }
       .auto-tier-actions { grid-column: 2; flex-direction: row; flex-wrap: wrap; }
     }
 
-    /* Steps 4 and 5: selector shelf, decision shelf, other-feature cards (#79). */
+    /* Steps 4 and 5: selector shelf, decision shelf, other-feature cards. */
     .wizard-badge {
       display: inline-block;
       padding: 1px 8px;
@@ -1435,23 +1405,6 @@
       display: flex;
       gap: 4px;
       flex-shrink: 0;
-    }
-
-    .model-editor-icon {
-      width: 32px;
-      height: 32px;
-      margin: 0;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 8px;
-    }
-
-    .model-editor-icon svg {
-      width: 16px;
-      height: 16px;
-      display: block;
     }
 
     .model-editor-msg {
@@ -1539,121 +1492,6 @@
 
     .auto-tier-count { align-self: flex-end; font-size: 0.75rem; color: var(--text-muted); }
 
-    .candidate-shelf-choices { display: inline-flex; gap: 10px; margin-left: 8px; }
-
-    .candidate-shelf-choices label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
-
-    .model-editor-columns {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .model-editor-columns[hidden] { display: none; }
-
-    .model-editor-col {
-      container-type: inline-size;
-      min-width: 0;
-      min-height: 0;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      border: 1px solid var(--border-strong);
-      border-radius: 12px;
-      background: var(--surface-1);
-      overflow: hidden;
-    }
-
-    .model-editor-col-candidates { flex: 2 1 0; }
-
-    .model-editor-col-draft { flex: 3 1 0; }
-
-    .model-editor-col h3 {
-      margin: 0;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--border-strong);
-      font-size: 0.95rem;
-      flex-shrink: 0;
-    }
-
-    .model-editor-controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      flex-shrink: 0;
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--border-strong);
-    }
-
-    .model-editor-controls select,
-    .model-editor-controls input[type="search"] {
-      margin: 0;
-      padding: 6px 8px;
-      min-width: 0;
-      width: auto;
-      max-width: none;
-    }
-
-    .model-editor-controls select {
-      flex: 1 1 9rem;
-      appearance: none;
-      padding-right: 1.6rem;
-      background-image:
-        linear-gradient(45deg, transparent 50%, currentColor 50%),
-        linear-gradient(135deg, currentColor 50%, transparent 50%);
-      background-position: calc(100% - 14px) 55%, calc(100% - 9px) 55%;
-      background-size: 5px 5px, 5px 5px;
-      background-repeat: no-repeat;
-    }
-
-    .model-editor-controls input[type="search"] { flex: 2 1 9rem; }
-
-    .model-editor-controls .session-decision-model-row,
-    #sessionDecisionShelfRow,
-    #sessionAllModelsShelfRow {
-      display: contents;
-    }
-
-    .model-editor-scroll { padding: 8px 10px; }
-
-    .model-editor-shelf {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      width: 100%;
-      margin: 10px 0 6px;
-      padding: 6px 2px;
-      background: transparent;
-      color: var(--text-primary);
-      box-shadow: none;
-      border: 0;
-      border-radius: 0;
-      font-weight: 600;
-      text-align: left;
-    }
-
-    .model-editor-shelf:hover {
-      background: transparent;
-      color: var(--accent-text);
-    }
-
-    .model-editor-shelf-count {
-      color: var(--text-muted);
-      font-variant-numeric: tabular-nums;
-    }
-
-    @container (max-width: 460px) {
-      .session-chat-models-fields { grid-template-columns: 1fr; }
-      .model-editor-controls select,
-      .model-editor-controls input[type="search"] {
-        flex: 1 0 100%;
-      }
-    }
-
     .model-allowlist-restrict {
       display: flex;
       gap: 8px;
@@ -1676,18 +1514,6 @@
       font-size: 0.82rem;
       color: var(--text-muted);
       margin-bottom: 6px;
-    }
-
-    .model-allowlist-item {
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      margin: 0 0 6px;
-      font-size: 0.9rem;
-    }
-
-    .model-allowlist-item code {
-      font-size: 0.78rem;
     }
 
     .modal-header {

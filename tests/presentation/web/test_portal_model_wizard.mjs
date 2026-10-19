@@ -31,11 +31,11 @@ const NAMES = [
   "modelShelf",
   "modelEditorState",
   "modelEditorIssues",
+  "autoTierLabel",
   "modelWizardStepperHtml",
   "modelWizardIssueAnchor",
+  "modelWizardJumpAttrs",
   "modelWizardIssuesHtml",
-  "modelWizardShelfChoices",
-  "modelWizardAllModelsShelves",
   "modelWizardStepContentShown",
   "modelWizardModeHtml",
   "modelWizardOffNoteHtml",
@@ -45,8 +45,6 @@ function sandbox() {
   const constants = [
     ...(portalHtml.match(/const AUTO_TIER_[A-Z_]+ = [^;]+;/g) || []),
     portalHtml.match(/const MODEL_WIZARD_STEPS = \[[\s\S]*?\n {4}\];/)[0],
-    portalHtml.match(/const MODEL_WIZARD_STEP_SHELVES = \{[\s\S]*?\n {4}\};/)[0],
-    portalHtml.match(/const ALL_MODELS_ASSIGNABLE_SHELVES = [^;]+;/)[0],
     portalHtml.match(/const CLASSROOM_MODEL_CHOICE_LABELS = [^;]+;/)[0],
   ];
   const code = [...constants, ...NAMES.map((name) => extractNamedFunction(portalHtml, name))].join("\n");
@@ -89,7 +87,7 @@ test("a ready Automatic Models sitting marks every step ✓ and can save", () =>
   const state = box.modelEditorState({ draft: readyDraft(), mode: "automatic", target: "session" });
   assert.deepEqual(marks(state), { 1: "ok", 2: "ok", 3: "ok", 4: "ok", 5: "ok", 6: "ok" });
   assert.deepEqual(plain(state.steps).map((s) => s.title), [
-    "模式", "學生可用的模型", "分配難度", "誰來判斷難度", "其他功能", "檢查與儲存",
+    "模型選擇", "學生可用的模型", "分配難度", "自動選模：誰來判斷難度", "其他功能", "檢查與儲存",
   ]);
   assert.deepEqual(plain(state.issues), []);
   assert.equal(state.canSave, true);
@@ -236,7 +234,7 @@ test("the step list shows each mark, the current step, and lets the teacher clic
   assert.match(html, /data-wizard-step="4"[^>]*aria-current="step"/);
   assert.equal((html.match(/aria-current/g) || []).length, 1);
   assert.match(html, /誰來判斷難度[\s\S]*?⚠/);
-  assert.match(html, /模式[\s\S]*?✓/);
+  assert.match(html, /模型選擇[\s\S]*?✓/);
   const picked = box.modelWizardStepperHtml(box.modelEditorState({ draft, mode: "picked", target: "session" }), 1);
   assert.match(picked, /分配難度[\s\S]*?—/);
 });
@@ -250,29 +248,10 @@ test("Step 6 lists each issue with its blocker tag and a 去第 N 步修正 butt
   const html = box.modelWizardIssuesHtml(state);
   assert.match(html, /第 2 個難度還沒有名稱[\s\S]*?要先處理才能儲存[\s\S]*?去第 3 步修正/);
   assert.match(html, /data-wizard-jump="3" data-tier-id="hard"/);
-  assert.match(html, /還沒選判斷難度的模型[\s\S]*?去第 4 步修正/);
+  assert.match(html, /還沒選自動選模的模型[\s\S]*?去第 4 步修正/);
   assert.equal((html.match(/要先處理才能儲存/g) || []).length, 1);
   const clean = box.modelEditorState({ draft: readyDraft(), mode: "automatic", target: "session" });
   assert.match(box.modelWizardIssuesHtml(clean), /沒有需要處理的問題/);
-});
-
-test("each step's catalog offers only that step's shelves", () => {
-  const box = sandbox();
-  const kindSplit = ["text", "decisions", "image", "embeddings", "speech", "speech_transcription"];
-  assert.deepEqual(plain(box.modelWizardShelfChoices(2, kindSplit)), ["text"]);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(4, kindSplit)), ["decisions"]);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(5, kindSplit)), ["image", "embeddings", "speech", "speech_transcription"]);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(1, kindSplit)), []);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(6, kindSplit)), []);
-});
-
-test("an All Models provider lists in Step 2 onto text and in Step 5 onto speech shelves, not in Step 4", () => {
-  const box = sandbox();
-  assert.deepEqual(plain(box.modelWizardShelfChoices(2, ["all"])), ["all"]);
-  assert.deepEqual(plain(box.modelWizardAllModelsShelves(2)), ["text"]);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(5, ["all"])), ["all"]);
-  assert.deepEqual(plain(box.modelWizardAllModelsShelves(5)), ["speech", "speech_transcription"]);
-  assert.deepEqual(plain(box.modelWizardShelfChoices(4, ["all"])), []);
 });
 
 test("Steps 3 and 4 hide their settings outside Automatic Models unless a blocker must be fixed there", () => {
@@ -297,7 +276,7 @@ test("Step 1 describes the mode; the template is always 自動", () => {
   assert.match(box.modelWizardModeHtml("template", null), /範本一律是「自動」/);
   assert.match(box.modelWizardModeHtml("session", "automatic"), /自動/);
   assert.match(box.modelWizardModeHtml("session", "picked"), /學生自選/);
-  assert.match(box.modelWizardModeHtml("session", null), /還沒設定模式/);
+  assert.match(box.modelWizardModeHtml("session", null), /還沒設定模型選擇/);
 });
 
 test("the off note names the mode and links back to Step 1", () => {
@@ -306,7 +285,7 @@ test("the off note names the mode and links back to Step 1", () => {
   assert.match(html, /現在是「學生自選」，這一步用不到/);
   assert.match(html, /設定都保留著/);
   assert.match(html, /goToModelWizardStep\(1\)/);
-  assert.match(box.modelWizardOffNoteHtml(null), /還沒設定模式/);
+  assert.match(box.modelWizardOffNoteHtml(null), /還沒設定模型選擇/);
 });
 
 test("the editor shell: a labelled dialog, a step list, text header buttons, and a 更多 menu", () => {

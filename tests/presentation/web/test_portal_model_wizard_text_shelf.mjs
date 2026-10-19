@@ -32,7 +32,7 @@ const NAMES = [
   "modelShelf",
   "modelIdPrefix",
   "modelWizardTextShelfView",
-  "checkDraftTextModel",
+  "checkDraftShelfModel",
   "defaultVcrouterModel",
   "clearShelfFlags",
   "applyShelf",
@@ -130,9 +130,9 @@ test("provider groups show 已選 x／y and leave out checked models", () => {
   const state = view(box, { draft: pickedDraft() });
   const byProvider = Object.fromEntries(state.groups.map((g) => [g.provider, g]));
   assert.deepEqual([byProvider.ollama_cloud.picked, byProvider.ollama_cloud.total], [1, 2]);
-  assert.deepEqual([byProvider.openrouter.picked, byProvider.openrouter.total], [1, 3]);
+  // Epsilon sits on another shelf, so it is neither counted nor offered again here.
+  assert.deepEqual([byProvider.openrouter.picked, byProvider.openrouter.total], [1, 2]);
   assert.deepEqual(byProvider.ollama_cloud.rows.map((r) => r.id), ["ollama_cloud@a:cloud"]);
-  // Epsilon sits on another shelf, so it is not offered again here.
   assert.deepEqual(byProvider.openrouter.rows.map((r) => r.id), ["openrouter@x/gamma"]);
 });
 
@@ -155,7 +155,7 @@ test("search does not change 已選 x／y", () => {
   const box = sandbox();
   const state = view(box, { draft: pickedDraft(), ui: { query: "gamma" } });
   const openrouter = state.groups.find((g) => g.provider === "openrouter");
-  assert.deepEqual([openrouter.picked, openrouter.total], [1, 3]);
+  assert.deepEqual([openrouter.picked, openrouter.total], [1, 2]);
 });
 
 test("collapsed groups hide their rows; 已勾選 collapsed still reports its count", () => {
@@ -191,10 +191,21 @@ test("an empty group says why: no search match, or every model already checked",
   assert.equal(allPicked.groups.find((g) => g.provider === "openrouter").empty, "");
 });
 
+test("a model sitting on another shelf is left out of 已選 x／y and the provider count", () => {
+  const box = sandbox();
+  const draft = pickedDraft();
+  box.checkDraftShelfModel(draft, "openrouter@x/gamma", true, "Gamma", "text");
+  const state = view(box, { draft });
+  const openrouter = state.groups.find((g) => g.provider === "openrouter");
+  assert.deepEqual([openrouter.picked, openrouter.total], [2, 2]);
+  assert.equal(openrouter.empty, "這家的模型都已經勾選");
+  assert.equal(state.filters.find((f) => f.provider === "openrouter").count, 2);
+});
+
 test("checking a model moves it into 已勾選 on the text shelf; unchecking sends it back", () => {
   const box = sandbox();
   const draft = pickedDraft();
-  box.checkDraftTextModel(draft, "openrouter@x/gamma", true, "Gamma");
+  box.checkDraftShelfModel(draft, "openrouter@x/gamma", true, "Gamma", "text");
   let state = view(box, { draft });
   assert.deepEqual(state.chosen.models.map((m) => m.id), [
     "openrouter@x/delta",
@@ -207,7 +218,7 @@ test("checking a model moves it into 已勾選 on the text shelf; unchecking sen
   assert.equal(added.name, "Gamma");
   assert.equal(box.modelShelf(added), "text");
 
-  box.checkDraftTextModel(draft, "openrouter@x/delta", false);
+  box.checkDraftShelfModel(draft, "openrouter@x/delta", false, "", "text");
   state = view(box, { draft });
   assert.deepEqual(state.chosen.models.map((m) => m.id), ["ollama_cloud@b:cloud", "openrouter@x/gamma"]);
   openrouter = state.groups.find((g) => g.provider === "openrouter");
@@ -218,8 +229,8 @@ test("re-checking a model brings back the settings it had before it was unchecke
   const box = sandbox();
   const draft = pickedDraft();
   draft.models[0].maxOutputTokens = 1234;
-  box.checkDraftTextModel(draft, "openrouter@x/delta", false);
-  box.checkDraftTextModel(draft, "openrouter@x/delta", true, "Delta");
+  box.checkDraftShelfModel(draft, "openrouter@x/delta", false, "", "text");
+  box.checkDraftShelfModel(draft, "openrouter@x/delta", true, "Delta", "text");
   const back = draft.models.find((m) => m.id === "openrouter@x/delta");
   assert.equal(back.name, "Delta 顯示名");
   assert.equal(back.maxOutputTokens, 1234);
@@ -233,8 +244,9 @@ function html(box, { draft = pickedDraft(), ui = {} } = {}) {
 test("the filter row shows 全部 and each provider with its count, the active one pressed", () => {
   const box = sandbox();
   const out = html(box, { ui: { filter: "openrouter" } });
-  assert.match(out, /data-text-filter=""[^>]*aria-pressed="false"[^>]*>全部 \(6\)</);
-  assert.match(out, /data-text-filter="openrouter"[^>]*aria-pressed="true"[^>]*>openrouter \(3\)</);
+  // Epsilon sits on the decision shelf, so neither count includes it.
+  assert.match(out, /data-text-filter=""[^>]*aria-pressed="false"[^>]*>全部 \(5\)</);
+  assert.match(out, /data-text-filter="openrouter"[^>]*aria-pressed="true"[^>]*>openrouter \(2\)</);
 });
 
 test("已勾選 header shows N 個模型 and its expanded state; collapsed it hides the rows", () => {
@@ -250,7 +262,7 @@ test("已勾選 header shows N 個模型 and its expanded state; collapsed it hi
 test("a provider group header shows 已選 x／y; collapsed it hides the rows", () => {
   const box = sandbox();
   const open = html(box);
-  assert.match(open, /data-text-group="openrouter"[^>]*aria-expanded="true"[\s\S]*?已選 1／3/);
+  assert.match(open, /data-text-group="openrouter"[^>]*aria-expanded="true"[\s\S]*?已選 1／2/);
   assert.match(open, /value="openrouter@x\/gamma"/);
   const shut = html(box, { ui: { collapsed: { openrouter: true } } });
   assert.match(shut, /data-text-group="openrouter"[^>]*aria-expanded="false"/);

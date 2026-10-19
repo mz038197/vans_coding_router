@@ -755,7 +755,7 @@ def test_portal_session_row_shows_session_chat_language_models_editor(tmp_path):
     assert "downloadCurrentSessionChatModels()\">下載目前清單" in html
     assert 'onclick="requestCloseSessionChatModelsModal()">取消' in html
     assert 'onclick="saveSessionChatLanguageModels()">儲存' in html
-    assert "model-editor-col-candidates" in html
-    assert "model-editor-col-draft" in html
+    assert 'id="modelWizardSteps"' in html
+    assert "model-editor-col" not in html
     assert "session_chat_language_models" in html
     assert 'id="sessionChatModelsJson"' not in html

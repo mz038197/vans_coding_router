@@ -1,5 +1,7 @@
 # Teachers edit models in two columns
 
+Status: superseded by ADR-0038 (the six-step wizard).
+
 The teacher editor for Session Chat Language Models and the Router Model Template is one modal. The left column is the Upstream Model Catalog for the kind loaded when the modal opened or when the kind changed. In the editor that column is labeled 候選清單. That label is not the vcr-auto candidate list on a Personal API Key. The right column is the whole draft, grouped by shelf. Checking and unchecking moves a Model ID between the columns. Provider, kind, and search stay above the left list. A provider with no kind split also shows the assignment shelf on that row. The modal uses the screen width minus a margin and the height below navigation. The columns scroll on their own and stay side by side. Upload, download template, download current list, cancel, and save are icons on the title row. Upload arrives on the text shelf.
 
 ## Considered Options

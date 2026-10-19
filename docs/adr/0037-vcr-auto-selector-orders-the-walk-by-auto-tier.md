@@ -1,6 +1,6 @@
 # A vcr-auto Selector orders the text-shelf walk by Auto Tier
 
-Status: proposed
+Status: proposed. Amended by ADR-0038 for the editor: the selector shelf has its own wizard step instead of the two-column editor's 決策 and 自動選模 row choices, and under Picked Models the tiers and the selector shelf stay hidden unless a tier or selector problem would block saving, in which case they show so the teacher can fix it.
 
 Each Session Chat Language Models document and each Router Model Template defines its own Auto Tiers: an ordered list of two to six labels, each with a Tier Description. The teacher names them, at most 20 characters and unique within the document, and orders them from weakest to strongest. A Tier Description is at most 300 characters, in any language, and is never blank. A text-shelf Model ID carries at most one Auto Tier of its own document. The tiers belong to that document alone: changing them in one sitting changes no other sitting and no template.
 

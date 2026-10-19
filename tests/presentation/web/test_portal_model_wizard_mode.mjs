@@ -33,6 +33,7 @@ const NAMES = [
   "draftAutoSnapshot",
   "modelEditorState",
   "modelEditorIssues",
+  "autoTierLabel",
   "modelWizardModeHtml",
   "modelWizardTarget",
   "currentModelEditorState",
@@ -104,21 +105,21 @@ function sitting(choice) {
 test("Step 1 offers 自動 and 學生自選 as two radio cards, the stored one checked", () => {
   const box = sandbox();
   const html = box.modelWizardModeHtml("session", "picked");
-  assert.match(html, /role="radiogroup"/);
+  assert.match(html, /role="radiogroup" aria-label="模型選擇"/);
   assert.deepEqual(cards(html), [
     { mode: "automatic", checked: false, radio: true },
     { mode: "picked", checked: true, radio: true },
   ]);
   assert.match(html, /自動[\s\S]*?vcr-auto[\s\S]*?學生自選[\s\S]*?自己挑/);
   assert.match(html, /setModelWizardMode\('automatic'\)/);
-  assert.doesNotMatch(html, /還沒設定模式/);
+  assert.doesNotMatch(html, /還沒設定模型選擇/);
 });
 
 test("with no Classroom Model Choice stored neither card is checked and the mixed behavior is explained", () => {
   const box = sandbox();
   const html = box.modelWizardModeHtml("session", null);
   assert.deepEqual(cards(html).map((c) => c.checked), [false, false]);
-  assert.match(html, /還沒設定模式/);
+  assert.match(html, /還沒設定模型選擇/);
   assert.match(html, /vcr-auto[\s\S]*?也可以直接指定/);
 });
 
@@ -190,7 +191,7 @@ test("the sitting row shows the mode as text, not a dropdown that saves at once"
   assert.equal(box.sessionModelChoiceLabel(sitting(null)), "未設定");
   const cell = extractNamedFunction(portalHtml, "sessionModelAllowlistCell");
   assert.doesNotMatch(cell, /<select/);
-  assert.match(cell, /sessionModelChoiceLabel\(session\)/);
+  assert.match(cell, /模型選擇：\$\{sessionModelChoiceLabel\(session\)\}/);
   assert.match(cell, />模型設定</);
   assert.doesNotMatch(portalHtml, /setClassroomModelChoice|sessionModelChoiceControl/);
 });

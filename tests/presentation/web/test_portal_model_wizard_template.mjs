@@ -62,6 +62,7 @@ const REAL = [
   "currentModelEditorState",
   "modelEditorState",
   "modelEditorIssues",
+  "autoTierLabel",
   "modelShelf",
   "modelsFromDocument",
   "draftFromDocument",

@@ -368,7 +368,7 @@
           <nav class="wizard-steps" id="modelWizardSteps" aria-label="步驟"></nav>
           <div class="wizard-content">
             <section class="wizard-panel" data-wizard-panel="1" aria-labelledby="modelWizardTitle1">
-              <h3 id="modelWizardTitle1">模式</h3>
+              <h3 id="modelWizardTitle1">模型選擇</h3>
               <div id="modelWizardMode"></div>
             </section>
             <section class="wizard-panel" data-wizard-panel="2" aria-labelledby="modelWizardTitle2" hidden>
@@ -387,17 +387,12 @@
               </div>
             </section>
             <section class="wizard-panel" data-wizard-panel="4" aria-labelledby="modelWizardTitle4" hidden>
-              <h3 id="modelWizardTitle4">誰來判斷難度</h3>
+              <h3 id="modelWizardTitle4">自動選模：誰來判斷難度</h3>
               <div class="wizard-off-note" data-wizard-off="4"></div>
               <div data-wizard-on="4">
-                <p class="hint">學生每問一題，清單的第一個模型會先讀題目、決定用哪個難度，大約 0.5 秒。它失敗時改用下一個；全部失敗就照清單順序用，學生的提問不會因此失敗。</p>
+                <p class="hint">學生每問一題，清單的第一個自動選模模型會先讀題目、決定用哪個難度，通常約半秒。它失敗時改用下一個；整個判斷最多等 1.5 秒，等不到結果就照清單順序用模型，學生的提問不會因此失敗。</p>
                 <div id="modelWizardSelector" aria-live="polite"></div>
               </div>
-              <section class="wizard-decision-shelf" aria-labelledby="modelWizardDecisionTitle">
-                <h4 id="modelWizardDecisionTitle">另外：讓學生自己呼叫決策模型</h4>
-                <p class="hint">這是另一個功能（決策架）：學生自己寫的程式可以呼叫這些決策模型，跟判斷難度無關。同一個模型可以同時用來判斷難度和放在這裡。</p>
-                <div id="modelWizardDecisionShelf"></div>
-              </section>
             </section>
             <section class="wizard-panel" data-wizard-panel="5" aria-labelledby="modelWizardTitle5" hidden>
               <h3 id="modelWizardTitle5">其他功能</h3>
@@ -412,6 +407,11 @@
                 <input id="modelWizardExtraSearch" class="wizard-text-search" type="search" aria-label="搜尋模型" placeholder="搜尋模型名稱或廠商" oninput="onModelWizardExtraSearch(this.value)" />
                 <div id="modelWizardExtraPickerList" aria-live="polite"></div>
               </section>
+              <section class="wizard-decision-shelf" aria-labelledby="modelWizardDecisionTitle">
+                <h4 id="modelWizardDecisionTitle">讓學生自己呼叫決策模型</h4>
+                <p class="hint">決策架：學生自己寫的程式可以呼叫這些決策模型。這跟第 4 步的自動選模無關；同一個模型可以同時用來自動選模和放在這裡。</p>
+                <div id="modelWizardDecisionShelf"></div>
+              </section>
             </section>
             <section class="wizard-panel" data-wizard-panel="6" aria-labelledby="modelWizardTitle6" hidden>
               <h3 id="modelWizardTitle6">檢查與儲存</h3>
@@ -422,37 +422,6 @@
               <button type="button" id="modelWizardNext" onclick="stepModelWizard(1)">下一步</button>
             </div>
           </div>
-        </div>
-        <div class="model-editor-columns" id="modelWizardColumns">
-          <section class="model-editor-col model-editor-col-candidates">
-            <h3>候選清單</h3>
-            <div class="model-editor-controls">
-              <select id="sessionChatModelsProvider" aria-label="廠商" onchange="onSessionChatModelsProviderChange()"></select>
-              <div id="sessionDecisionShelfRow">
-                <select id="sessionDecisionShelf" aria-label="模型種類" onchange="onSessionDecisionShelfChange()">
-                  <option value="text">文字</option>
-                  <option value="decisions">決策</option>
-                  <option value="image">生圖</option>
-                  <option value="embeddings">嵌入</option>
-                  <option value="speech">語音</option>
-                  <option value="speech_transcription">語音轉寫</option>
-                </select>
-              </div>
-              <div id="sessionAllModelsShelfRow" class="hidden">
-                <select id="sessionAllModelsShelf" aria-label="指定架">
-                  <option value="text">文字</option>
-                  <option value="speech">語音</option>
-                  <option value="speech_transcription">語音轉寫</option>
-                </select>
-              </div>
-              <input id="sessionChatModelsSearch" type="search" aria-label="搜尋" placeholder="名稱或 id" oninput="renderSessionChatCandidates()" />
-            </div>
-            <div id="sessionChatModelsList" class="model-editor-scroll"></div>
-          </section>
-          <section class="model-editor-col model-editor-col-draft">
-            <h3>已勾選</h3>
-            <div id="sessionChatModelsDraft" class="model-editor-scroll"></div>
-          </section>
         </div>
       </div>
     </div>
@@ -951,7 +920,7 @@
       return `<div class="session-models">
         <div class="session-models-head">
           <span class="session-kicker">對話模型 ${edit} ${sessionAutoSelectionBadge(session)}</span>
-          <span class="session-model-choice">模式：${sessionModelChoiceLabel(session)}</span>
+          <span class="session-model-choice">模型選擇：${sessionModelChoiceLabel(session)}</span>
         </div>
         <div class="session-model-pills">${pills}</div>
       </div>`;
@@ -3037,12 +3006,9 @@ snippets:
 
     let sessionChatModelsContext = null;
     let sessionChatModelsDraft = { models: [], removed: {} };
-    let sessionChatModelsCatalog = { providers: [], models: [], unavailable: false, shelf: 'text' };
     let sessionChatProviderGroups = { kindSplit: [], allModels: [] };
     let sessionChatModelsUploadBound = false;
-    let sessionChatModelsCatalogRequest = 0;
     let sessionChatModelsLocked = false;
-    let sessionChatModelsCollapsed = {};
     const SESSION_CHAT_MODEL_SHELVES = [
       { id: 'text', label: '文字' },
       { id: 'decisions', label: '決策' },
@@ -3110,7 +3076,7 @@ snippets:
       };
     }
 
-    // Auto Tiers and the selector shelf in the editor (ADR-0037, #73). Limits mirror the save check.
+    // Auto Tiers and the selector shelf in the editor (ADR-0037). Limits mirror the save check.
     const AUTO_TIER_COUNT_MIN = 2;
     const AUTO_TIER_COUNT_MAX = 6;
     const AUTO_TIER_NAME_LIMIT = 20;
@@ -3215,7 +3181,7 @@ snippets:
       draft.selectorShelf = ids;
     }
 
-    // Step 4 (#79): one step earlier in the selector shelf's fallback order.
+    // Step 4: one step earlier in the selector shelf's fallback order.
     function moveDraftSelectorEarlier(draft, modelId) {
       const ids = draft.selectorShelf || [];
       const at = ids.indexOf(modelId);
@@ -3223,12 +3189,14 @@ snippets:
       [ids[at - 1], ids[at]] = [ids[at], ids[at - 1]];
     }
 
-    // Short notes beside known decision models, from docs/research/tier-descriptions-bench.md.
-    // Matched on the upstream path so a new version keeps its note.
+    // Short notes beside known decision models, from the final (v2) run in
+    // docs/research/tier-descriptions-bench.md: 64 labelled questions, the ≥ 0.2 rule the
+    // router uses, every miss one tier stronger. Matched on the measured version's upstream
+    // path, so another version reads as unmeasured.
     const SELECTOR_NOTES = [
-      { match: 'typesafe/jev', note: '回應最快、成本最低（實測平均約 0.5 秒）' },
-      { match: 'microsoft/microsoft-decision', note: '判斷穩定，偶爾超過 1.5 秒' },
-      { match: 'openai/gpt-6-luna-decisions', note: '實測準確率最高' },
+      { match: 'typesafe/jev-1.14', note: '實測平均約 0.45 秒，通常最快；64 題分對 63 題，另 1 題多分一級' },
+      { match: 'microsoft/microsoft-decision-1', note: '成本最低，約另外兩個的 1/3 到 1/4；64 題分對 62 題，另 2 題多分一級' },
+      { match: 'openai/gpt-6-luna-decisions', note: '64 題全部分對；成本最高' },
     ];
 
     function selectorNote(modelId) {
@@ -3237,7 +3205,7 @@ snippets:
       return known ? known.note : '未經過難度實測';
     }
 
-    // Step 4 (#79). `catalog` is the decisions list of the Upstream Model Catalog; only
+    // Step 4. `catalog` is the decisions list of the Upstream Model Catalog; only
     // OpenRouter rows can judge difficulty or go on the decision shelf. Stored ids the list no
     // longer shows stay listed so the teacher can still remove them.
     function modelWizardSelectorView(input) {
@@ -3281,8 +3249,9 @@ snippets:
     }
 
     // Puts a model on `shelf` (restoring what it had before a removal) or takes it off that
-    // shelf. A Model ID sits on one shelf of the document; the selector shelf is a separate
-    // id list, so the decision shelf never touches it.
+    // shelf, keeping its settings in draft.removed for a later re-check. A Model ID sits on
+    // one shelf of the document; the selector shelf is a separate id list, so the decision
+    // shelf never touches it.
     function checkDraftShelfModel(draft, modelId, checked, name, shelf) {
       draft.removed = draft.removed || {};
       const existing = (draft.models || []).find((model) => model.id === modelId);
@@ -3299,8 +3268,8 @@ snippets:
       return draft;
     }
 
-    // Step 5 (#79): the other-feature shelves, one card each. `allModels` marks the shelves an
-    // All Models provider's whole list can fill (ALL_MODELS_ASSIGNABLE_SHELVES).
+    // Step 5: the other-feature shelves, one card each. `allModels` marks the shelves an
+    // All Models provider's whole list can fill.
     const MODEL_WIZARD_EXTRA_KINDS = [
       { shelf: 'image', label: '生圖', hint: '學生可以請 AI 產生圖片', allModels: false },
       { shelf: 'embeddings', label: '嵌入', hint: '把文字轉成向量，用來做搜尋或比對', allModels: false },
@@ -3457,13 +3426,12 @@ snippets:
       });
     }
 
-    // Step wizard (#74). Each later ticket rebuilds one step's body; the shell, the step
-    // marks, and the issue list come from modelEditorState.
+    // Step wizard. The step marks and the issue list come from modelEditorState.
     const MODEL_WIZARD_STEPS = [
-      { n: 1, key: 'mode', title: '模式' },
+      { n: 1, key: 'mode', title: '模型選擇' },
       { n: 2, key: 'models', title: '學生可用的模型' },
       { n: 3, key: 'tiers', title: '分配難度' },
-      { n: 4, key: 'selector', title: '誰來判斷難度' },
+      { n: 4, key: 'selector', title: '自動選模：誰來判斷難度' },
       { n: 5, key: 'extras', title: '其他功能' },
       { n: 6, key: 'review', title: '檢查與儲存' },
     ];
@@ -3489,8 +3457,8 @@ snippets:
       tiers.forEach((tier, index) => {
         const name = String(tier.name || '');
         const description = String(tier.description || '');
-        const shown = name.trim() || `第 ${index + 1} 個難度`;
-        if (!name.trim()) add('tier-name-blank', 3, `第 ${index + 1} 個難度還沒有名稱`, true, tier.id);
+        const shown = autoTierLabel(tier, index);
+        if (!name.trim()) add('tier-name-blank', 3, `${shown}還沒有名稱`, true, tier.id);
         else if (seen.has(name)) add('tier-name-duplicate', 3, `難度名稱「${shown}」重複了`, true, tier.id);
         seen.add(name);
         if ([...name].length > AUTO_TIER_NAME_LIMIT) add('tier-name-long', 3, `「${shown}」的名稱超過 ${AUTO_TIER_NAME_LIMIT} 字`, true, tier.id);
@@ -3505,7 +3473,7 @@ snippets:
         add('model-untiered', 3, `還有 ${untiered.length} 個模型沒分難度：${untiered.map(label).join('、')}`, true);
       }
       if (automatic) {
-        if (!selector.length) add('selector-empty', 4, '還沒選判斷難度的模型', false);
+        if (!selector.length) add('selector-empty', 4, '還沒選自動選模的模型', false);
         const used = new Set(textModels.map((model) => model.autoTier).filter((id) => tierIds.has(id)));
         if (used.size < 2) add('tiers-used', 3, `至少要兩個難度有模型（現在 ${used.size} 個）`, false);
       }
@@ -3540,29 +3508,6 @@ snippets:
       };
     }
 
-    // Which shelves each step's catalog columns work on. Step 3 shows only the checked text
-    // models (their tier fields); Steps 1 and 6 have no columns.
-    const MODEL_WIZARD_STEP_SHELVES = {
-      2: ['text'],
-      3: ['text'],
-      4: ['decisions'],
-      5: ['image', 'embeddings', 'speech', 'speech_transcription'],
-    };
-    const ALL_MODELS_ASSIGNABLE_SHELVES = ['text', 'speech', 'speech_transcription'];
-
-    function modelWizardAllModelsShelves(step) {
-      return (MODEL_WIZARD_STEP_SHELVES[step] || []).filter((shelf) => ALL_MODELS_ASSIGNABLE_SHELVES.includes(shelf));
-    }
-
-    // `choices` is what a provider offers (shelfChoicesForProvider); 'all' means an All Models
-    // provider, usable in a step only when the step has a shelf it can assign to.
-    function modelWizardShelfChoices(step, choices) {
-      const shelves = MODEL_WIZARD_STEP_SHELVES[step] || [];
-      return (choices || []).filter((choice) => (
-        choice === 'all' ? modelWizardAllModelsShelves(step).length > 0 : shelves.includes(choice)
-      ));
-    }
-
     // Steps 3 and 4 keep their settings hidden outside Automatic Models (ADR-0037), except
     // while a save-blocking issue needs fixing there.
     function modelWizardStepContentShown(state, step) {
@@ -3583,12 +3528,12 @@ snippets:
       };
       const unset = mode === 'automatic' || mode === 'picked'
         ? ''
-        : '<p class="wizard-mode-unset"><strong>還沒設定模式</strong>：現在 VS Code 只列出 vcr-auto，但學生也可以直接指定你允許的任一個模型；不會自動判斷難度。選一張卡片再按「儲存」才會設定；不選就存，模式維持不變。</p>';
-      return `${unset}<div class="wizard-mode-cards" role="radiogroup" aria-label="模式">
+        : '<p class="wizard-mode-unset"><strong>還沒設定模型選擇</strong>：現在 VS Code 只列出 vcr-auto，但學生也可以直接指定你允許的任一個模型；不會自動判斷難度。選一張卡片再按「儲存」才會設定；不選就存，模型選擇維持不變。</p>';
+      return `${unset}<div class="wizard-mode-cards" role="radiogroup" aria-label="模型選擇">
           ${card('automatic', '學生只看到一個 vcr-auto。router 依題目難度，從你允許的模型裡挑一個。適合不想讓學生煩惱選模型的課。')}
           ${card('picked', '學生在 VS Code 的模型清單裡看到你允許的模型，自己挑。不會自動判斷難度。')}
         </div>
-        <p class="hint">模式會在按「儲存」時和模型清單一起存；按「取消」就不會改變。</p>`;
+        <p class="hint">模型選擇會在按「儲存」時和模型清單一起存；按「取消」就不會改變。</p>`;
     }
 
     // Step 1 card click: changes only the open draft; 儲存 sends it with the document.
@@ -3609,14 +3554,14 @@ snippets:
 
     function modelWizardOffNoteHtml(mode) {
       const label = CLASSROOM_MODEL_CHOICE_LABELS[mode];
-      const now = label ? `現在是「${label}」` : '現在還沒設定模式';
+      const now = label ? `現在是「${label}」` : '現在還沒設定模型選擇';
       return `<p><strong>${now}，這一步用不到。</strong>這裡的設定都保留著，切回「自動」就會生效。
-          <button type="button" class="btn-link" onclick="goToModelWizardStep(1)">去第 1 步看模式</button></p>`;
+          <button type="button" class="btn-link" onclick="goToModelWizardStep(1)">去第 1 步看模型選擇</button></p>`;
     }
 
     function modelWizardStepperHtml(state, current) {
       const marks = { ok: '✓', warn: '⚠', off: '—' };
-      const hints = { ok: '沒問題', warn: '有待處理', off: '目前模式用不到' };
+      const hints = { ok: '沒問題', warn: '有待處理', off: '目前的模型選擇用不到' };
       return state.steps.map((step) => {
         const on = step.n === current;
         return `<button type="button" class="wizard-step${on ? ' is-current' : ''}${step.mark === 'off' ? ' is-off' : ''}" data-wizard-step="${step.n}"${on ? ' aria-current="step"' : ''} onclick="goToModelWizardStep(${step.n})">
@@ -3634,20 +3579,23 @@ snippets:
       return null;
     }
 
+    // The attributes jumpToModelWizardIssue reads: the step, then the tier row or the spot.
+    function modelWizardJumpAttrs(issue) {
+      const anchor = modelWizardIssueAnchor(issue);
+      return ` data-wizard-jump="${issue.step}"`
+        + (issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '')
+        + (anchor ? ` data-wizard-anchor="${anchor}"` : '');
+    }
+
     function modelWizardIssuesHtml(state) {
       if (!state.issues.length) return '<p class="hint">沒有需要處理的問題。</p>';
       return state.issues.map((issue) => {
-        const anchor = modelWizardIssueAnchor(issue);
-        const tier = (issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '')
-          + (anchor ? ` data-wizard-anchor="${anchor}"` : '');
         return `<div class="wizard-problem${issue.block ? ' is-block' : ''}">
             <span>${escapeHtml(issue.text)}${issue.block ? '<span class="wizard-problem-tag">要先處理才能儲存</span>' : ''}</span>
-            <button type="button" class="btn-secondary wizard-small-btn" data-wizard-jump="${issue.step}"${tier} onclick="jumpToModelWizardIssue(this)">去第 ${issue.step} 步修正</button>
+            <button type="button" class="btn-secondary wizard-small-btn"${modelWizardJumpAttrs(issue)} onclick="jumpToModelWizardIssue(this)">去第 ${issue.step} 步修正</button>
           </div>`;
       }).join('');
     }
-
-    const MODEL_WIZARD_EXTRA_LABELS = { image: '生圖', embeddings: '嵌入', speech: '語音', speech_transcription: '語音轉寫' };
 
     // Step 6 in plain words: what students get under the draft as it stands. `input` is the
     // modelEditorState input plus `nameOf(modelId)` for selector names outside the draft.
@@ -3679,13 +3627,13 @@ snippets:
         parts.push(`<div class="wizard-say"><p>學生會在 VS Code 的模型清單看到 ${listed.length} 個模型：${listed.join('、') || '（沒有）'}，自己挑。</p>
             <p class="hint">難度和自動選模的設定都保留著，切回「自動」就會生效。</p></div>`);
       } else {
-        parts.push(`<div class="wizard-say"><p><strong>還沒設定模式。</strong>VS Code 只列出 vcr-auto，但學生也可以直接指定：${listed.join('、') || '（沒有）'}；不會自動判斷難度。
-            <button type="button" class="btn-link" onclick="goToModelWizardStep(1)">去第 1 步選模式</button></p></div>`);
+        parts.push(`<div class="wizard-say"><p><strong>還沒設定模型選擇。</strong>VS Code 只列出 vcr-auto，但學生也可以直接指定：${listed.join('、') || '（沒有）'}；不會自動判斷難度。
+            <button type="button" class="btn-link" onclick="goToModelWizardStep(1)">去第 1 步選模型選擇</button></p></div>`);
       }
       if (state.issues.length) parts.push(`<div class="wizard-problems">${modelWizardIssuesHtml(state)}</div>`);
-      const extras = Object.keys(MODEL_WIZARD_EXTRA_LABELS)
-        .filter((shelf) => models.some((model) => modelShelf(model) === shelf))
-        .map((shelf) => MODEL_WIZARD_EXTRA_LABELS[shelf]);
+      const extras = MODEL_WIZARD_EXTRA_KINDS
+        .filter((kind) => models.some((model) => modelShelf(model) === kind.shelf))
+        .map((kind) => kind.label);
       const deciders = models.filter((model) => modelShelf(model) === 'decisions').map(label);
       parts.push(`<p class="hint wizard-say-extra">其他功能：${extras.length ? `${extras.join('、')} 已開啟` : '都沒開'}。學生自己呼叫決策模型：${deciders.length ? deciders.join('、') : '關閉'}。</p>`);
       return parts.join('');
@@ -3708,10 +3656,7 @@ snippets:
       }
       const blockers = state.issues.filter((issue) => issue.block);
       const items = blockers.map((issue) => {
-        const anchor = modelWizardIssueAnchor(issue);
-        const attrs = (issue.tierId ? ` data-tier-id="${escapeHtml(issue.tierId)}"` : '')
-          + (anchor ? ` data-wizard-anchor="${anchor}"` : '');
-        return `<li><button type="button" class="btn-link" data-wizard-jump="${issue.step}"${attrs} onclick="closeModelWizardDialog(); jumpToModelWizardIssue(this)">${escapeHtml(issue.text)}</button>（第 ${issue.step} 步）</li>`;
+        return `<li><button type="button" class="btn-link"${modelWizardJumpAttrs(issue)} onclick="closeModelWizardDialog(); jumpToModelWizardIssue(this)">${escapeHtml(issue.text)}</button>（第 ${issue.step} 步）</li>`;
       }).join('');
       return modelWizardDialogShell('還不能儲存', `<p>有 ${blockers.length} 個地方要先處理：</p><ul class="wizard-dialog-list">${items}</ul>`, ok);
     }
@@ -3724,6 +3669,11 @@ snippets:
       );
     }
 
+    // What the editor calls a tier: its name, or its place while the name is blank.
+    function autoTierLabel(tier, index) {
+      return String(tier.name || '').trim() || `第 ${index + 1} 個難度`;
+    }
+
     // Step 3 top half. `refusal` ({ tierId, holders }) is the last refused delete, shown on
     // that tier's row until the next edit.
     function autoTierBlockHtml(draft, defaults, refusal) {
@@ -3733,7 +3683,7 @@ snippets:
         const name = String(tier.name || '');
         const description = String(tier.description || '');
         const hasDefault = Boolean(defaultForTier(draft, tier.id, defaults));
-        const shown = escapeHtml(name.trim() || `第 ${index + 1} 個難度`);
+        const shown = escapeHtml(autoTierLabel(tier, index));
         const refused = refusal && refusal.tierId === tier.id && refusal.holders && refusal.holders.length
           ? `<p class="auto-tier-refusal" role="alert">「${shown}」還有模型，不能刪除。先在下面的表格把 ${escapeHtml(refusal.holders.join('、'))} 移到其他難度。</p>`
           : '';
@@ -3779,32 +3729,19 @@ snippets:
             <button type="button" class="btn-link" onclick="goToModelWizardStep(2)">去第 2 步加模型</button></p>`;
       }
       const tierIds = new Set(tiers.map((tier) => tier.id));
-      const tierLabel = (tier, index) => String(tier.name || '').trim() || `第 ${index + 1} 個難度`;
-      const head = tiers.map((tier, index) => `<th scope="col">${escapeHtml(tierLabel(tier, index))}</th>`).join('');
+      const head = tiers.map((tier, index) => `<th scope="col">${escapeHtml(autoTierLabel(tier, index))}</th>`).join('');
       const rows = models.map((model) => {
         const label = model.name || model.id;
         const placed = Boolean(model.autoTier) && tierIds.has(model.autoTier);
         const tag = placed ? '' : `<span class="wizard-problem-tag">${model.autoTier ? '難度已經不存在' : '還沒分難度'}</span>`;
         const id = escapeHtml(model.id);
-        const cells = tiers.map((tier, index) => `<td><input type="radio" name="model-tier-${id}" value="${escapeHtml(tier.id)}" data-model-id="${id}"${model.autoTier === tier.id ? ' checked' : ''} aria-label="${escapeHtml(label)} 分到 ${escapeHtml(tierLabel(tier, index))}" onchange="onModelTierPick(this)" /></td>`).join('');
+        const cells = tiers.map((tier, index) => `<td><input type="radio" name="model-tier-${id}" value="${escapeHtml(tier.id)}" data-model-id="${id}"${model.autoTier === tier.id ? ' checked' : ''} aria-label="${escapeHtml(label)} 分到 ${escapeHtml(autoTierLabel(tier, index))}" onchange="onModelTierPick(this)" /></td>`).join('');
         return `<tr${placed ? '' : ' class="is-untiered"'}><th scope="row"><strong>${escapeHtml(label)}</strong>${tag}<code class="model-tier-id">${id}</code></th>${cells}</tr>`;
       }).join('');
       return `<div class="model-tier-table-wrap" data-wizard-anchor="assign"><table class="model-tier-table">
           <thead><tr><th scope="col">模型</th>${head}</tr></thead>
           <tbody>${rows}</tbody>
         </table></div>`;
-    }
-
-    // An OpenRouter decisions row may go on the decision shelf, the selector shelf, or both.
-    function candidateShelfChoicesHtml(item, kind, draft) {
-      if (kind !== 'decisions' || !item || item.provider !== 'openrouter') return '';
-      const id = escapeHtml(item.id);
-      const decisionOn = (draft.models || []).some((model) => model.id === item.id && model.decisionShelf === true);
-      const selectorOn = (draft.selectorShelf || []).includes(item.id);
-      return `<span class="candidate-shelf-choices">
-          <label><input type="checkbox" value="${id}" data-shelf-choice="decisions" ${decisionOn ? 'checked' : ''} onchange="onCandidateShelfChoice(this)" />決策</label>
-          <label><input type="checkbox" value="${id}" data-shelf-choice="selector" ${selectorOn ? 'checked' : ''} onchange="onCandidateShelfChoice(this)" />自動選模</label>
-        </span>`;
     }
 
     function sessionAutoSelectionBadge(session) {
@@ -3899,22 +3836,7 @@ snippets:
       if (picked) picked.focus();
     }
 
-    function onCandidateShelfChoice(input) {
-      if (input.getAttribute('data-shelf-choice') === 'selector') {
-        toggleDraftSelector(sessionChatModelsDraft, input.value, input.checked);
-        sessionChatModelsCollapsed.selector = false;
-        renderSessionChatModelsList();
-        return;
-      }
-      onSessionChatModelCheck(input);
-    }
-
-    function onSelectorDraftCheck(input) {
-      toggleDraftSelector(sessionChatModelsDraft, input.value, input.checked);
-      renderSessionChatModelsList();
-    }
-
-    // Upload (#70): the Portal merges the file into the open draft. Every Model ID lands on
+    // Upload: the Portal merges the file into the open draft. Every Model ID lands on
     // the text shelf, legal file tiers are taken with each model's tier, and the file's
     // selector shelf is ignored. Nothing is stored until 儲存.
     async function uploadedSessionChatModelsDraft(raw, draft) {
@@ -3985,7 +3907,6 @@ snippets:
             String(reader.result || ''),
             sessionChatModelsDraft,
           );
-          sessionChatModelsCollapsed.text = false;
           modelWizardTextUi.chosenCollapsed = false;
           setSessionChatModelsMsg('sessionChatModelsUploadMsg', `已載入 ${file.name}（尚未儲存）`, false);
           renderSessionChatModelsList();
@@ -4019,67 +3940,8 @@ snippets:
       ])];
     }
 
-    function populateSessionChatModelsProviders() {
-      const select = document.getElementById('sessionChatModelsProvider');
-      if (!select) return;
-      const providers = allTeacherProviders().filter((name) => (
-        modelWizardShelfChoices(modelWizardStep, shelfChoicesForProvider(name)).length > 0
-      ));
-      const previous = select.value;
-      select.innerHTML = providers.map((name) => (
-        `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
-      )).join('');
-      if (previous && providers.includes(previous)) select.value = previous;
-    }
-
-    function catalogModelById(modelId) {
-      return (sessionChatModelsCatalog.models || []).find((item) => item.id === modelId);
-    }
-
     function draftModelById(modelId) {
       return sessionChatModelsDraft.models.find((model) => model.id === modelId);
-    }
-
-    function draftModelIds() {
-      return new Set((sessionChatModelsDraft.models || []).map((model) => model.id));
-    }
-
-    function candidateRows() {
-      const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
-      const q = (document.getElementById('sessionChatModelsSearch')?.value || '').trim().toLowerCase();
-      const taken = draftModelIds();
-      const dual = modelWizardShows(4) && sessionChatModelsCatalog.shelf === 'decisions';
-      const selector = new Set(sessionChatModelsDraft.selectorShelf || []);
-      if (sessionChatModelsCatalog.unavailable) return [];
-      return (sessionChatModelsCatalog.models || []).filter((item) => {
-        if (!item || !item.id) return false;
-        if (taken.has(item.id)) {
-          // An OpenRouter decisions row stays until it sits on both the decision and selector shelves.
-          const onDecision = draftModelById(item.id).decisionShelf === true;
-          if (!(dual && item.provider === 'openrouter' && onDecision && !selector.has(item.id))) return false;
-        }
-        if (provider && item.provider !== provider) return false;
-        if (!q) return true;
-        return `${item.id} ${item.name || ''}`.toLowerCase().includes(q);
-      });
-    }
-
-    function catalogListsModel(model) {
-      if (!model || !model.id) return true;
-      const snapshot = sessionChatModelsCatalog;
-      if (snapshot.unavailable) return true;
-      const listed = (snapshot.models || []).some((item) => item.id === model.id);
-      if (snapshot.shelf === 'all') {
-        const provider = modelIdPrefix(model.id);
-        if (!(sessionChatProviderGroups.allModels || []).includes(provider)) return true;
-        return listed;
-      }
-      if (modelShelf(model) !== snapshot.shelf) return true;
-      return listed;
-    }
-
-    function currentDecisionShelf() {
-      return document.getElementById('sessionDecisionShelf')?.value || 'text';
     }
 
     function clearShelfFlags(model) {
@@ -4109,164 +3971,6 @@ snippets:
       return 'text';
     }
 
-    function assignmentShelf() {
-      if (currentDecisionShelf() === 'all') {
-        return document.getElementById('sessionAllModelsShelf')?.value || 'text';
-      }
-      return currentDecisionShelf();
-    }
-
-    function shelfChoicesForProvider(provider) {
-      const kindSplit = sessionChatProviderGroups.kindSplit || [];
-      if (kindSplit.includes(provider)) return ['text', 'decisions', 'image', 'embeddings', 'speech', 'speech_transcription'];
-      return ['all'];
-    }
-
-    function renderSessionDecisionShelf() {
-      const row = document.getElementById('sessionDecisionShelfRow');
-      const select = document.getElementById('sessionDecisionShelf');
-      if (!row || !select) return;
-      const provider = document.getElementById('sessionChatModelsProvider')?.value || '';
-      const choices = modelWizardShelfChoices(modelWizardStep, shelfChoicesForProvider(provider));
-      const labels = {
-        text: '文字',
-        decisions: '決策',
-        image: '生圖',
-        embeddings: '嵌入',
-        speech: '語音',
-        speech_transcription: '語音轉寫',
-        all: '全部',
-      };
-      const previous = select.value;
-      select.innerHTML = choices.map((value) => (
-        `<option value="${value}">${labels[value]}</option>`
-      )).join('');
-      select.value = choices.includes(previous) ? previous : (choices[0] || '');
-      const assignment = document.getElementById('sessionAllModelsShelfRow');
-      if (assignment) assignment.classList.toggle('hidden', select.value !== 'all');
-      const assignSelect = document.getElementById('sessionAllModelsShelf');
-      if (assignSelect) {
-        const assignable = modelWizardAllModelsShelves(modelWizardStep);
-        const before = assignSelect.value;
-        assignSelect.innerHTML = assignable.map((value) => `<option value="${value}">${labels[value]}</option>`).join('');
-        assignSelect.value = assignable.includes(before) ? before : (assignable[0] || '');
-      }
-    }
-
-    async function onSessionChatModelsProviderChange() {
-      renderSessionDecisionShelf();
-      if (sessionChatModelsCatalog.shelf !== currentDecisionShelf()) {
-        await loadSessionChatModelsCatalog(currentDecisionShelf());
-      }
-      renderSessionChatModelsList();
-    }
-
-    async function onSessionDecisionShelfChange() {
-      await loadSessionChatModelsCatalog(currentDecisionShelf());
-      renderSessionChatModelsList();
-    }
-
-    function draftModelFields(model) {
-      return `
-        <div class="session-chat-models-fields">
-          <label class="catalog-field">顯示名稱
-            <input class="catalog-field-input" data-model-id="${escapeHtml(model.id)}" data-field="name" value="${escapeHtml(model.name || '')}" />
-          </label>
-          <label class="catalog-field session-chat-models-check-field">思考
-            <input type="checkbox" data-model-id="${escapeHtml(model.id)}" data-field="thinking" ${model.thinking ? 'checked' : ''} />
-          </label>
-          <label class="catalog-field">最大輸入 tokens
-            <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxInputTokens" value="${escapeHtml(String(model.maxInputTokens ?? ''))}" />
-          </label>
-          <label class="catalog-field">最大輸出 tokens
-            <input class="catalog-field-input" type="number" min="1" data-model-id="${escapeHtml(model.id)}" data-field="maxOutputTokens" value="${escapeHtml(String(model.maxOutputTokens ?? ''))}" />
-          </label>
-        </div>`;
-    }
-
-    function renderSessionChatCandidates() {
-      const listEl = document.getElementById('sessionChatModelsList');
-      if (!listEl) return;
-      const rows = candidateRows();
-      const dual = modelWizardShows(4);
-      listEl.innerHTML = rows.map((item) => {
-        const choices = dual ? candidateShelfChoicesHtml(item, sessionChatModelsCatalog.shelf, sessionChatModelsDraft) : '';
-        if (choices) {
-          return `
-        <div class="session-chat-models-row">
-          <div class="model-allowlist-item">
-            <span>${escapeHtml(item.name || item.id)} <code>${escapeHtml(item.id)}</code></span>
-            ${choices}
-          </div>
-        </div>`;
-        }
-        return `
-        <div class="session-chat-models-row">
-          <label class="model-allowlist-item">
-            <input type="checkbox" value="${escapeHtml(item.id)}" onchange="onSessionChatModelCheck(this)" />
-            <span>${escapeHtml(item.name || item.id)} <code>${escapeHtml(item.id)}</code></span>
-          </label>
-        </div>`;
-      }).join('') || '<p class="hint">沒有可顯示的模型。</p>';
-    }
-
-    function selectorDraftGroupHtml() {
-      const ids = sessionChatModelsDraft.selectorShelf || [];
-      if (!ids.length || !modelWizardShows(4)) return '';
-      const collapsed = Boolean(sessionChatModelsCollapsed.selector);
-      const rows = collapsed ? '' : ids.map((modelId) => {
-        const known = draftModelById(modelId) || catalogModelById(modelId);
-        const name = (known && known.name) || modelId;
-        return `<div class="session-chat-models-row">
-            <label class="model-allowlist-item">
-              <input type="checkbox" value="${escapeHtml(modelId)}" checked onchange="onSelectorDraftCheck(this)" />
-              <span>${escapeHtml(name)} <code>${escapeHtml(modelId)}</code></span>
-            </label>
-          </div>`;
-      }).join('');
-      return `<button type="button" class="model-editor-shelf" data-shelf="selector" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="toggleSessionChatModelShelf('selector')">${collapsed ? '▸' : '▾'} 自動選模<span class="model-editor-shelf-count">${ids.length}</span></button>${rows}`;
-    }
-
-    function renderSessionChatDraft() {
-      const listEl = document.getElementById('sessionChatModelsDraft');
-      if (!listEl) return;
-      const stepShelves = MODEL_WIZARD_STEP_SHELVES[modelWizardStep] || [];
-      const groups = SESSION_CHAT_MODEL_SHELVES.filter((shelf) => stepShelves.includes(shelf.id)).map((shelf) => ({
-        ...shelf,
-        models: (sessionChatModelsDraft.models || []).filter((model) => modelShelf(model) === shelf.id),
-      })).filter((group) => group.models.length);
-      const selectorGroup = modelWizardStep === 4 ? selectorDraftGroupHtml() : '';
-      if (!groups.length && !selectorGroup) {
-        listEl.innerHTML = '<p class="hint">還沒勾選。</p>';
-        return;
-      }
-      listEl.innerHTML = groups.map((group) => {
-        const collapsed = Boolean(sessionChatModelsCollapsed[group.id]);
-        const rows = collapsed ? '' : group.models.map((model) => {
-          const missing = catalogListsModel(model)
-            ? ''
-            : '<span class="session-chat-models-missing">目錄未列出</span>';
-          return `<div class="session-chat-models-row${missing ? ' is-missing' : ''}">
-            <label class="model-allowlist-item">
-              <input type="checkbox" value="${escapeHtml(model.id)}" checked onchange="onSessionChatModelCheck(this)" />
-              <span>${escapeHtml(model.name || model.id)} <code>${escapeHtml(model.id)}</code> ${missing}</span>
-            </label>
-            ${draftModelFields(model)}
-          </div>`;
-        }).join('');
-        return `<button type="button" class="model-editor-shelf" data-shelf="${group.id}" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="toggleSessionChatModelShelf('${group.id}')">${collapsed ? '▸' : '▾'} ${group.label}<span class="model-editor-shelf-count">${group.models.length}</span></button>${rows}`;
-      }).join('') + selectorGroup;
-      listEl.querySelectorAll('[data-field]').forEach((input) => {
-        input.addEventListener('input', onSessionChatModelField);
-        input.addEventListener('change', onSessionChatModelField);
-      });
-    }
-
-    function toggleSessionChatModelShelf(shelf) {
-      sessionChatModelsCollapsed[shelf] = !sessionChatModelsCollapsed[shelf];
-      renderSessionChatDraft();
-    }
-
     // Step 2's screen-only state and its catalog. Neither is stored in the document, and both
     // reset each time the wizard opens.
     function freshModelWizardTextUi() {
@@ -4280,24 +3984,13 @@ snippets:
     // whole lists together; a check puts either on the text shelf.
     async function loadModelWizardTextCatalog() {
       const requestId = ++modelWizardTextCatalogRequest;
-      const fetchOne = (shelf) => api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`)
-        .catch(() => ({ models: [], unavailable: true, failed: true }));
-      const [text, all] = await Promise.all([fetchOne('text'), fetchOne('all')]);
+      const [text, all] = await Promise.all([fetchModelWizardCatalog('text'), fetchModelWizardCatalog('all')]);
       if (requestId !== modelWizardTextCatalogRequest) return;
-      [text, all].forEach((catalog) => {
-        if (Array.isArray(catalog.kind_split_providers)) sessionChatProviderGroups.kindSplit = catalog.kind_split_providers;
-        if (Array.isArray(catalog.all_models_providers)) sessionChatProviderGroups.allModels = catalog.all_models_providers;
-      });
-      const models = [text, all].flatMap((catalog) => (Array.isArray(catalog.models) ? catalog.models : []));
-      const allMissing = all.unavailable || all.failed;
-      const unavailable = !models.length && Boolean(text.unavailable || text.failed)
-        && (allMissing || !(sessionChatProviderGroups.allModels || []).length);
+      const models = [...text.models, ...all.models];
+      const unavailable = !models.length && text.failed
+        && (all.failed || !(sessionChatProviderGroups.allModels || []).length);
       modelWizardTextCatalog = { models, unavailable };
-      setSessionChatModelsMsg(
-        'sessionChatModelsCatalogMsg',
-        unavailable ? '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。' : '',
-        unavailable,
-      );
+      setModelWizardCatalogMsg(unavailable);
     }
 
     function renderModelWizardTextShelf() {
@@ -4335,33 +4028,22 @@ snippets:
 
     function onModelWizardTextCheck(input) {
       const item = (modelWizardTextCatalog.models || []).find((model) => model.id === input.value);
-      checkDraftTextModel(sessionChatModelsDraft, input.value, input.checked, item && item.name);
+      checkDraftShelfModel(sessionChatModelsDraft, input.value, input.checked, item && item.name, 'text');
       renderSessionChatModelsList();
     }
 
-    // Puts a model on the text shelf (restoring what it had before an uncheck) or takes it
-    // off the draft, keeping its settings in draft.removed for a later re-check.
-    function checkDraftTextModel(draft, modelId, checked, name) {
-      draft.removed = draft.removed || {};
-      const existing = draft.models.find((model) => model.id === modelId);
-      if (checked) {
-        const restored = draft.removed[modelId];
-        const next = existing || (restored ? { ...restored } : defaultVcrouterModel(modelId, name || modelId));
-        applyShelf(next, 'text');
-        if (!existing) draft.models.push(next);
-        delete draft.removed[modelId];
-      } else {
-        if (existing) draft.removed[modelId] = { ...existing };
-        draft.models = draft.models.filter((model) => model.id !== modelId);
-      }
-      return draft;
-    }
-
-    // Step 2 (#77): the text shelf. `catalog` is every text model the Upstream Model Catalog
+    // Step 2: the text shelf. `catalog` is every text model the Upstream Model Catalog
     // lists (kind-split providers' text list plus All Models providers' whole list); `ui` is
     // screen-only state { filter, query, collapsed: { provider: true }, chosenCollapsed }.
     function modelWizardTextShelfView(input) {
-      const catalog = (input.catalog || []).filter((item) => item && item.id);
+      const draftModels = (input.draft && input.draft.models) || [];
+      const textModels = draftModels.filter((model) => modelShelf(model) === 'text');
+      const textIds = new Set(textModels.map((model) => model.id));
+      // A model on another shelf cannot go on the text shelf too, so it is neither offered
+      // nor counted here; 已選 x／y then reaches y exactly when the group runs empty.
+      const elsewhere = new Set(draftModels.filter((model) => !textIds.has(model.id)).map((model) => model.id));
+      const listed = new Set((input.catalog || []).filter((item) => item && item.id).map((item) => item.id));
+      const catalog = (input.catalog || []).filter((item) => item && item.id && !elsewhere.has(item.id));
       const ui = input.ui || {};
       const providers = [...(input.providers || [])];
       catalog.forEach((item) => {
@@ -4375,11 +4057,6 @@ snippets:
           provider, label: provider, count: ofProvider(provider).length, active: filter === provider,
         })),
       ];
-      const draftModels = (input.draft && input.draft.models) || [];
-      const taken = new Set(draftModels.map((model) => model.id));
-      const textModels = draftModels.filter((model) => modelShelf(model) === 'text');
-      const textIds = new Set(textModels.map((model) => model.id));
-      const listed = new Set(catalog.map((item) => item.id));
       const chosen = {
         count: textModels.length,
         collapsed: Boolean(ui.chosenCollapsed),
@@ -4396,7 +4073,7 @@ snippets:
       const collapsed = ui.collapsed || {};
       const groups = providers.filter((provider) => !filter || provider === filter).map((provider) => {
         const all = ofProvider(provider);
-        const open = all.filter((item) => !taken.has(item.id));
+        const open = all.filter((item) => !textIds.has(item.id));
         const rows = open.filter(matches).map((item) => ({ id: item.id, name: item.name || item.id, provider }));
         let empty = '';
         if (!rows.length) {
@@ -4465,7 +4142,7 @@ snippets:
         ${groups}`;
     }
 
-    // Steps 4 and 5 (#79): their catalogs and the add list's screen state. Nothing here is
+    // Steps 4 and 5: their catalogs and the add list's screen state. Nothing here is
     // stored in the document; all of it resets each time the wizard opens.
     function freshModelWizardExtraUi() {
       return { open: false, shelf: 'image', vendor: '', query: '' };
@@ -4484,19 +4161,18 @@ snippets:
         .catch(() => ({ models: [], failed: true }));
     }
 
+    const MODEL_WIZARD_CATALOG_FAILED = '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。';
+
     function setModelWizardCatalogMsg(failed) {
-      setSessionChatModelsMsg(
-        'sessionChatModelsCatalogMsg',
-        failed ? '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。' : '',
-        failed,
-      );
+      setSessionChatModelsMsg('sessionChatModelsCatalogMsg', failed ? MODEL_WIZARD_CATALOG_FAILED : '', failed);
     }
 
-    // Step 4 reads the decisions list; Step 5 reads each other-feature list plus the All
-    // Models providers' whole lists. Each loads once per opening.
+    // Step 4 (the selector) and Step 5 (the decision shelf) read the decisions list; Step 5
+    // also reads each other-feature list plus the All Models providers' whole lists. Each
+    // loads once per opening.
     async function loadModelWizardStepCatalog(step) {
       const context = sessionChatModelsContext;
-      if (step === 4 && !modelWizardDecisionCatalog) {
+      if ((step === 4 || step === 5) && !modelWizardDecisionCatalog) {
         const decisions = await fetchModelWizardCatalog('decisions');
         if (context !== sessionChatModelsContext) return;
         modelWizardDecisionCatalog = decisions.models;
@@ -4511,13 +4187,14 @@ snippets:
       }
     }
 
+    // Step 4 shows the selector shelf; Step 5 shows the decision shelf from the same view.
     function renderModelWizardSelector() {
-      if (modelWizardStep !== 4) return;
+      if (modelWizardStep !== 4 && modelWizardStep !== 5) return;
       const view = modelWizardSelectorView({ catalog: modelWizardDecisionCatalog || [], draft: sessionChatModelsDraft });
       const selector = document.getElementById('modelWizardSelector');
-      if (selector) selector.innerHTML = modelWizardSelectorHtml(view);
+      if (selector && modelWizardStep === 4) selector.innerHTML = modelWizardSelectorHtml(view);
       const decision = document.getElementById('modelWizardDecisionShelf');
-      if (decision) decision.innerHTML = modelWizardDecisionShelfHtml(view);
+      if (decision && modelWizardStep === 5) decision.innerHTML = modelWizardDecisionShelfHtml(view);
     }
 
     function onModelWizardSelectorCheck(input) {
@@ -4607,9 +4284,6 @@ snippets:
       renderModelWizardSelector();
       renderModelWizardExtras();
       renderAutoTierBlock();
-      renderSessionDecisionShelf();
-      renderSessionChatCandidates();
-      renderSessionChatDraft();
       renderModelWizardTextShelf();
       refreshModelWizardStatus();
     }
@@ -4627,7 +4301,7 @@ snippets:
           draft: sessionChatModelsDraft,
           mode: sessionChatModelsMode,
           target: modelWizardTarget(),
-          nameOf: (id) => (catalogModelById(id) || {}).name,
+          nameOf: (id) => ((modelWizardDecisionCatalog || []).find((item) => item.id === id) || {}).name,
         }, state);
       }
       const dirty = document.getElementById('modelWizardDirty');
@@ -4668,8 +4342,8 @@ snippets:
       }
     });
 
-    // Shows the current step's panel, parks the shared catalog columns in it, and swaps
-    // Steps 3 and 4 between their settings and the "not used in this mode" note.
+    // Shows the current step's panel and swaps Steps 3 and 4 between their settings and the
+    // "not used in this mode" note.
     function renderModelWizardVisibility() {
       const state = currentModelEditorState();
       document.querySelectorAll('#modelWizard [data-wizard-panel]').forEach((panel) => {
@@ -4687,13 +4361,6 @@ snippets:
       });
       const mode = document.getElementById('modelWizardMode');
       if (mode) mode.innerHTML = modelWizardModeHtml(modelWizardTarget(), sessionChatModelsMode);
-      const columns = document.getElementById('modelWizardColumns');
-      const slot = document.querySelector(`#modelWizard [data-wizard-slot="${modelWizardStep}"]`);
-      if (columns) {
-        if (slot && columns.parentElement !== slot) slot.appendChild(columns);
-        columns.hidden = !slot;
-        columns.classList.toggle('is-draft-only', modelWizardStep === 3);
-      }
       const prev = document.getElementById('modelWizardPrev');
       const next = document.getElementById('modelWizardNext');
       if (prev) prev.disabled = modelWizardStep === 1;
@@ -4714,11 +4381,6 @@ snippets:
         renderSessionChatModelsList();
         await loadModelWizardStepCatalog(step);
         if (modelWizardStep === step) renderSessionChatModelsList();
-        return;
-      }
-      if (MODEL_WIZARD_STEP_SHELVES[modelWizardStep] && modelWizardStep !== 3) {
-        populateSessionChatModelsProviders();
-        await onSessionChatModelsProviderChange();
         return;
       }
       renderSessionChatModelsList();
@@ -4802,37 +4464,9 @@ snippets:
       closeModelWizardMenu();
       setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
       setSessionChatModelsMsg('sessionChatModelsSaveMsg', '', false);
-      const search = document.getElementById('sessionChatModelsSearch');
-      if (search) search.value = '';
-      const shelf = document.getElementById('sessionDecisionShelf');
-      if (shelf) shelf.value = 'text';
-      await Promise.all([loadSessionChatModelsCatalog('text'), loadModelWizardTextCatalog()]);
+      await loadModelWizardTextCatalog();
       renderSessionChatModelsList();
       if (modal) modal.classList.add('show');
-    }
-
-    function onSessionChatModelCheck(input) {
-      const modelId = input.value;
-      if (input.checked) {
-        const existing = draftModelById(modelId);
-        const restored = sessionChatModelsDraft.removed[modelId];
-        const catalog = catalogModelById(modelId);
-        const next = existing
-          ? existing
-          : restored
-            ? { ...restored }
-            : defaultVcrouterModel(modelId, catalog ? catalog.name : modelId);
-        const shelf = assignmentShelf();
-        applyShelf(next, shelf);
-        sessionChatModelsCollapsed[shelf] = false;
-        if (!existing) sessionChatModelsDraft.models.push(next);
-        delete sessionChatModelsDraft.removed[modelId];
-      } else {
-        const current = draftModelById(modelId);
-        if (current) sessionChatModelsDraft.removed[modelId] = { ...current };
-        sessionChatModelsDraft.models = sessionChatModelsDraft.models.filter((model) => model.id !== modelId);
-      }
-      renderSessionChatModelsList();
     }
 
     function onSessionChatModelField(event) {
@@ -4861,7 +4495,6 @@ snippets:
       sessionChatModelsContext = null;
       sessionChatModelsMode = null;
       sessionChatModelsDraft = { models: [], removed: {} };
-      sessionChatModelsCollapsed = {};
       sessionChatModelsLocked = false;
       closeModelWizardMenu();
       setSessionChatModelsMsg('sessionChatModelsUploadMsg', '', false);
@@ -4902,43 +4535,6 @@ snippets:
       closeSessionChatModelsModal();
     }
 
-    async function loadSessionChatModelsCatalog(outputModalities) {
-      const known = ['text', 'decisions', 'image', 'embeddings', 'speech', 'speech_transcription', 'all'];
-      const shelf = known.includes(outputModalities) ? outputModalities : 'text';
-      const requestId = ++sessionChatModelsCatalogRequest;
-      try {
-        const catalog = await api(`/teacher/upstream-model-catalog?output_modalities=${shelf}`);
-        if (requestId !== sessionChatModelsCatalogRequest) return;
-        if (Array.isArray(catalog.kind_split_providers)) {
-          sessionChatProviderGroups.kindSplit = catalog.kind_split_providers;
-        }
-        if (Array.isArray(catalog.all_models_providers)) {
-          sessionChatProviderGroups.allModels = catalog.all_models_providers;
-        }
-        sessionChatModelsCatalog = {
-          providers: Array.isArray(catalog.providers) ? catalog.providers : [],
-          models: Array.isArray(catalog.models) ? catalog.models : [],
-          unavailable: Boolean(catalog.unavailable),
-          shelf,
-        };
-        setSessionChatModelsMsg(
-          'sessionChatModelsCatalogMsg',
-          sessionChatModelsCatalog.unavailable
-            ? '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。'
-            : '',
-          sessionChatModelsCatalog.unavailable,
-        );
-      } catch (err) {
-        if (requestId !== sessionChatModelsCatalogRequest) return;
-        sessionChatModelsCatalog = { providers: [], models: [], unavailable: true, shelf };
-        setSessionChatModelsMsg(
-          'sessionChatModelsCatalogMsg',
-          '無法載入上游模型目錄，仍可編輯已儲存的模型或上傳檔案。',
-          true,
-        );
-      }
-    }
-
     async function beginEditRouterModelTemplate() {
       if (!document.getElementById('editSessionChatModelsModal')) return;
       ensureSessionChatModelsUploadBound();
@@ -4947,7 +4543,6 @@ snippets:
       sessionChatModelsContext = { mode: 'template' };
       sessionChatModelsMode = null;
       sessionChatModelsLocked = false;
-      sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(routerModelTemplate);
       prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
       autoTierRefusal = null;
@@ -4964,7 +4559,6 @@ snippets:
         ? session.classroom_model_choice
         : null;
       sessionChatModelsLocked = false;
-      sessionChatModelsCollapsed = {};
       sessionChatModelsDraft = draftFromDocument(session && session.session_chat_language_models);
       prefillAutoTiers(sessionChatModelsDraft, await loadAutoTierDefaults());
       autoTierRefusal = null;

@@ -44,8 +44,10 @@ const NAMES = [
   "autoTierBlockHtml",
   "modelTierTableHtml",
   "modelEditorIssues",
+  "autoTierLabel",
   "modelEditorState",
   "modelWizardIssueAnchor",
+  "modelWizardJumpAttrs",
   "modelWizardIssuesHtml",
 ];
 

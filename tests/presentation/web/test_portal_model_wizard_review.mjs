@@ -36,7 +36,9 @@ const NAMES = [
   "modelShelf",
   "modelEditorState",
   "modelEditorIssues",
+  "autoTierLabel",
   "modelWizardIssueAnchor",
+  "modelWizardJumpAttrs",
   "modelWizardIssuesHtml",
   "modelWizardSummaryHtml",
   "modelWizardDialogShell",
@@ -49,7 +51,7 @@ function sandbox() {
     ...(portalHtml.match(/const AUTO_TIER_[A-Z_]+ = [^;]+;/g) || []),
     portalHtml.match(/const MODEL_WIZARD_STEPS = \[[\s\S]*?\n {4}\];/)[0],
     portalHtml.match(/const CLASSROOM_MODEL_CHOICE_LABELS = [^;]+;/)[0],
-    portalHtml.match(/const MODEL_WIZARD_EXTRA_LABELS = \{[\s\S]*?\};/)[0],
+    portalHtml.match(/const MODEL_WIZARD_EXTRA_KINDS = \[[\s\S]*?\n {4}\];/)[0],
   ];
   const code = [...constants, ...NAMES.map((name) => extractNamedFunction(portalHtml, name))].join("\n");
   const box = {};
@@ -119,7 +121,7 @@ test("Automatic Models without selection says list order and lists every reason 
   assert.match(said, /自動選模還不會啟用/);
   assert.match(said, /學生還是只看到 vcr-auto，會照清單順序用模型：A → C → B → D/);
   assert.doesNotMatch(said, /會先判斷題目難度/);
-  assert.match(said, /還沒選判斷難度的模型 去第 4 步修正/);
+  assert.match(said, /還沒選自動選模的模型 去第 4 步修正/);
   assert.match(said, /「輕量」還沒有難度說明 要先處理才能儲存 去第 3 步修正/);
   assert.match(html, /data-wizard-jump="3" data-tier-id="light"/);
 });
@@ -131,7 +133,7 @@ test("Picked Models lists the models students see and no selection reasons", () 
   const said = text(summary(box, { draft, mode: "picked", target: "session" }));
   assert.match(said, /學生會在 VS Code 的模型清單看到 4 個模型：A、C、B、D，自己挑/);
   assert.doesNotMatch(said, /vcr-auto/);
-  assert.doesNotMatch(said, /還沒選判斷難度的模型/);
+  assert.doesNotMatch(said, /還沒選自動選模的模型/);
 });
 
 test("Picked Models still lists a save blocker", () => {
@@ -145,7 +147,7 @@ test("Picked Models still lists a save blocker", () => {
 test("no stored mode explains the mixed behavior", () => {
   const box = sandbox();
   const said = text(summary(box, { draft: readyDraft(), mode: null, target: "session" }));
-  assert.match(said, /還沒設定模式/);
+  assert.match(said, /還沒設定模型選擇/);
   assert.match(said, /VS Code 只列出 vcr-auto，但學生也可以直接指定：A、C、B、D/);
   assert.match(said, /去第 1 步/);
 });

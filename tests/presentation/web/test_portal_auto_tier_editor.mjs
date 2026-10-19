@@ -48,7 +48,7 @@ const NAMES = [
   "toggleDraftSelector",
   "draftAutoSnapshot",
   "autoTierBlockHtml",
-  "candidateShelfChoicesHtml",
+  "autoTierLabel",
   "sessionAutoSelectionBadge",
 ];
 
@@ -156,16 +156,9 @@ test("the tier block lists tiers weakest first with limits, defaults, and the ac
   assert.ok(html.indexOf("輕量") < html.indexOf("困難"));
 });
 
-test("an OpenRouter decisions row offers 決策 and 自動選模, either or both", () => {
+test("the selector shelf toggles on its own and keeps the decision shelf as it was", () => {
   const box = sandbox();
   const draft = tieredDraft(box);
-  const html = box.candidateShelfChoicesHtml({ id: JEV, provider: "openrouter" }, "decisions", draft);
-  assert.match(html, /決策/);
-  assert.match(html, /自動選模/);
-  assert.equal((html.match(/checked/g) || []).length, 2);
-  assert.equal(box.candidateShelfChoicesHtml({ id: "x", provider: "openrouter" }, "text", draft), "");
-  assert.equal(box.candidateShelfChoicesHtml({ id: "x", provider: "ollama_cloud" }, "decisions", draft), "");
-
   box.toggleDraftSelector(draft, JEV, false);
   box.toggleDraftSelector(draft, "openrouter@other/judge", true);
   box.toggleDraftSelector(draft, "openrouter@other/judge", true);

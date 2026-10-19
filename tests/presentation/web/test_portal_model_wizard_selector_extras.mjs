@@ -120,9 +120,52 @@ test("checking a selector adds it last as the next 備用; 往前 swaps it with 
 test("each selector row carries a short note; an unmeasured model says so", () => {
   const box = sandbox();
   const notes = Object.fromEntries(selector(box, { models: [] }).selector.map((row) => [row.id, row.note]));
-  assert.match(notes[JEV], /0\.5 秒/);
-  assert.match(notes[LUNA], /準確率最高/);
+  // docs/research/tier-descriptions-bench.md, final (v2) run.
+  assert.match(notes[JEV], /0\.45 秒/);
+  assert.match(notes[JEV], /63 題/);
+  assert.doesNotMatch(notes[JEV], /成本最低/);
+  assert.match(notes[MSD], /成本最低/);
+  assert.match(notes[MSD], /62 題/);
+  assert.match(notes[LUNA], /64 題全部分對/);
+  assert.doesNotMatch(notes[LUNA], /準確率最高/);
   assert.equal(notes[PPLX], "未經過難度實測");
+  // The numbers belong to the measured version only.
+  assert.equal(box.selectorNote("openrouter@typesafe/jev-1.13"), "未經過難度實測");
+});
+
+function panel(n) {
+  return portalHtml.split(`data-wizard-panel="${n}"`)[1].split(`data-wizard-panel="${n + 1}"`)[0];
+}
+
+test("step 4 is titled 自動選模 and states the 1.5 秒 limit for the whole judging walk", () => {
+  const four = panel(4);
+  assert.match(four, /自動選模：誰來判斷難度/);
+  assert.match(four, /1\.5 秒/);
+  assert.doesNotMatch(four, /大約 0\.5 秒/);
+  assert.match(four, /id="modelWizardSelector"/);
+});
+
+test("the decision shelf sits in step 5, beside the other features, not in step 4", () => {
+  assert.doesNotMatch(panel(4), /modelWizardDecisionShelf/);
+  assert.match(panel(5), /id="modelWizardDecisionShelf"/);
+});
+
+test("step 5 loads the decisions list for the decision shelf; step 4 loads it for the selector", async () => {
+  for (const step of [4, 5]) {
+    const fetched = [];
+    const box = {
+      sessionChatModelsContext: { classId: 1 },
+      modelWizardDecisionCatalog: null,
+      modelWizardExtraCatalogs: null,
+      fetchModelWizardCatalog: async (shelf) => { fetched.push(shelf); return { models: [{ id: `${shelf}-m` }], failed: false }; },
+      setModelWizardCatalogMsg: () => {},
+    };
+    const code = [extractConst(portalHtml, "MODEL_WIZARD_EXTRA_KINDS"), `async ${extractNamedFunction(portalHtml, "loadModelWizardStepCatalog")}`];
+    vm.runInNewContext(`${code.join("\n")}\nthis.load = loadModelWizardStepCatalog;`, box);
+    await box.load(step);
+    assert.ok(fetched.includes("decisions"), `step ${step} fetched ${fetched}`);
+    assert.deepEqual(plain(box.modelWizardDecisionCatalog), [{ id: "decisions-m" }]);
+  }
 });
 
 test("a stored selector the decisions list no longer shows stays listed and removable", () => {
