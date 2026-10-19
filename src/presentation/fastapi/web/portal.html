@@ -3089,6 +3089,8 @@ snippets:
     let sessionChatModelsMode = null;
     let modelWizardStep = 1;
     let modelWizardShowIds = false;
+    // Step 3 or 4 whose settings showed on this visit (null when none); cleared on leaving it.
+    let modelWizardRevealedStep = null;
 
     function modelWizardTarget() {
       return sessionChatModelsContext && sessionChatModelsContext.mode === 'template' ? 'template' : 'session';
@@ -3099,7 +3101,9 @@ snippets:
     }
 
     function modelWizardShows(step) {
-      return modelWizardStepContentShown(currentModelEditorState(), step);
+      const shown = modelWizardStepContentShown(currentModelEditorState(), step, modelWizardRevealedStep === step);
+      if (shown && step === modelWizardStep && (step === 3 || step === 4)) modelWizardRevealedStep = step;
+      return shown;
     }
 
     async function loadAutoTierDefaults() {
@@ -3509,10 +3513,11 @@ snippets:
     }
 
     // Steps 3 and 4 keep their settings hidden outside Automatic Models (ADR-0037), except
-    // while a save-blocking issue needs fixing there.
-    function modelWizardStepContentShown(state, step) {
+    // while a save-blocking issue needs fixing there. `revealed`: the settings already showed
+    // on this visit to the step, so they stay put after the teacher fixes the last blocker.
+    function modelWizardStepContentShown(state, step, revealed) {
       if (step !== 3 && step !== 4) return true;
-      return state.automatic || !state.canSave;
+      return state.automatic || !state.canSave || Boolean(revealed);
     }
 
     const CLASSROOM_MODEL_CHOICE_LABELS = { automatic: '自動', picked: '學生自選' };
@@ -3656,7 +3661,7 @@ snippets:
       }
       const blockers = state.issues.filter((issue) => issue.block);
       const items = blockers.map((issue) => {
-        return `<li><button type="button" class="btn-link"${modelWizardJumpAttrs(issue)} onclick="closeModelWizardDialog(); jumpToModelWizardIssue(this)">${escapeHtml(issue.text)}</button>（第 ${issue.step} 步）</li>`;
+        return `<li class="wizard-dialog-item"><button type="button" class="btn-link wizard-dialog-link"${modelWizardJumpAttrs(issue)} onclick="closeModelWizardDialog(); jumpToModelWizardIssue(this)">${escapeHtml(issue.text)}</button><span class="wizard-dialog-step">（第 ${issue.step} 步）</span></li>`;
       }).join('');
       return modelWizardDialogShell('還不能儲存', `<p>有 ${blockers.length} 個地方要先處理：</p><ul class="wizard-dialog-list">${items}</ul>`, ok);
     }
@@ -4306,6 +4311,7 @@ snippets:
       }
       const dirty = document.getElementById('modelWizardDirty');
       if (dirty) dirty.hidden = !isSessionChatModelsDraftDirty();
+      renderModelWizardStepContent();
     }
 
     // The in-page dialog over the wizard; `html` comes from a modelWizard*DialogHtml builder.
@@ -4345,20 +4351,10 @@ snippets:
     // Shows the current step's panel and swaps Steps 3 and 4 between their settings and the
     // "not used in this mode" note.
     function renderModelWizardVisibility() {
-      const state = currentModelEditorState();
       document.querySelectorAll('#modelWizard [data-wizard-panel]').forEach((panel) => {
         panel.hidden = Number(panel.getAttribute('data-wizard-panel')) !== modelWizardStep;
       });
-      [3, 4].forEach((step) => {
-        const shown = modelWizardStepContentShown(state, step);
-        const on = document.querySelector(`#modelWizard [data-wizard-on="${step}"]`);
-        const off = document.querySelector(`#modelWizard [data-wizard-off="${step}"]`);
-        if (on) on.hidden = !shown;
-        if (off) {
-          off.hidden = state.automatic;
-          off.innerHTML = state.automatic ? '' : modelWizardOffNoteHtml(sessionChatModelsMode);
-        }
-      });
+      renderModelWizardStepContent();
       const mode = document.getElementById('modelWizardMode');
       if (mode) mode.innerHTML = modelWizardModeHtml(modelWizardTarget(), sessionChatModelsMode);
       const prev = document.getElementById('modelWizardPrev');
@@ -4367,23 +4363,48 @@ snippets:
       if (next) next.hidden = modelWizardStep === MODEL_WIZARD_STEPS.length;
     }
 
+    // Steps 3 and 4: settings or the "not used" note. Runs on every edit, so a step whose
+    // settings go hidden never keeps their emptied frame on screen.
+    function renderModelWizardStepContent() {
+      const state = currentModelEditorState();
+      [3, 4].forEach((step) => {
+        const shown = modelWizardShows(step);
+        const on = document.querySelector(`#modelWizard [data-wizard-on="${step}"]`);
+        const off = document.querySelector(`#modelWizard [data-wizard-off="${step}"]`);
+        if (on) on.hidden = !shown;
+        if (off) {
+          off.hidden = state.automatic;
+          off.innerHTML = state.automatic ? '' : modelWizardOffNoteHtml(sessionChatModelsMode);
+        }
+      });
+    }
+
+    // At phone width the step list is a horizontal strip; bring the current step into view.
+    function scrollModelWizardStepIntoView() {
+      const strip = document.getElementById('modelWizardSteps');
+      const current = strip && strip.querySelector('.wizard-step.is-current');
+      if (!current || strip.scrollWidth <= strip.clientWidth) return;
+      const stripBox = strip.getBoundingClientRect();
+      const box = current.getBoundingClientRect();
+      const left = strip.scrollLeft + box.left - stripBox.left - (strip.clientWidth - box.width) / 2;
+      if (typeof strip.scrollTo === 'function') strip.scrollTo({ left, behavior: 'smooth' });
+      else strip.scrollLeft = left;
+    }
+
     async function goToModelWizardStep(step) {
       if (!sessionChatModelsContext) return;
-      modelWizardStep = Math.min(Math.max(Number(step) || 1, 1), MODEL_WIZARD_STEPS.length);
+      const next = Math.min(Math.max(Number(step) || 1, 1), MODEL_WIZARD_STEPS.length);
+      if (next !== modelWizardStep) modelWizardRevealedStep = null;
+      modelWizardStep = next;
       const body = document.getElementById('modelWizardBody');
       if (body) body.scrollTop = 0;
-      if (modelWizardStep === 2) {
-        renderSessionChatModelsList();
-        return;
-      }
+      renderSessionChatModelsList();
+      scrollModelWizardStepIntoView();
       if (modelWizardStep === 4 || modelWizardStep === 5) {
         const step = modelWizardStep;
-        renderSessionChatModelsList();
         await loadModelWizardStepCatalog(step);
         if (modelWizardStep === step) renderSessionChatModelsList();
-        return;
       }
-      renderSessionChatModelsList();
     }
 
     function stepModelWizard(delta) {
@@ -4453,6 +4474,7 @@ snippets:
       const banner = document.getElementById('modelWizardTemplateBanner');
       if (banner) banner.hidden = sessionChatModelsContext.mode !== 'template';
       modelWizardStep = 1;
+      modelWizardRevealedStep = null;
       modelWizardShowIds = false;
       modelWizardExtraUi = freshModelWizardExtraUi();
       modelWizardDecisionCatalog = null;

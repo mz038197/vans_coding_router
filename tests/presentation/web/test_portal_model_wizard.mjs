@@ -271,6 +271,16 @@ test("Steps 3 and 4 hide their settings outside Automatic Models unless a blocke
   assert.equal(box.modelWizardStepContentShown(template, 4), true);
 });
 
+test("Steps 3 and 4 keep revealed settings after the last blocker is fixed, while the mark stays —", () => {
+  const box = sandbox();
+  const fixed = box.modelEditorState({ draft: readyDraft(), mode: "picked", target: "session" });
+  assert.equal(box.modelWizardStepContentShown(fixed, 3, true), true);
+  assert.equal(box.modelWizardStepContentShown(fixed, 4, true), true);
+  assert.equal(box.modelWizardStepContentShown(fixed, 3, false), false);
+  assert.equal(fixed.steps.find((step) => step.n === 3).mark, "off");
+  assert.equal(fixed.steps.find((step) => step.n === 4).mark, "off");
+});
+
 test("Step 1 describes the mode; the template is always 自動", () => {
   const box = sandbox();
   assert.match(box.modelWizardModeHtml("template", null), /範本一律是「自動」/);

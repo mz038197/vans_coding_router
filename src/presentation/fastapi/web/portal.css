@@ -1257,7 +1257,11 @@
       background: var(--surface-1);
     }
     .wizard-dialog h3 { margin: 0 0 8px; }
-    .wizard-dialog-list { margin: 6px 0 0; padding-left: 20px; line-height: 1.7; }
+    .wizard-dialog-list { margin: 6px 0 0; padding: 0; list-style: none; line-height: 1.7; }
+    .wizard-dialog-item { display: flex; align-items: baseline; gap: 6px; text-align: left; }
+    .wizard-dialog-item::before { content: '\2022'; flex-shrink: 0; }
+    .wizard-dialog-link { margin: 0; text-align: left; }
+    .wizard-dialog-step { flex-shrink: 0; }
     .wizard-dialog-error { color: var(--danger); white-space: pre-wrap; }
     .wizard-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
@@ -1466,6 +1470,8 @@
     .model-tier-table td { padding: 8px; border-bottom: 1px solid var(--border-strong); text-align: center; }
 
     .model-tier-table th:first-child { text-align: left; font-weight: 400; }
+
+    .model-tier-table tbody th { text-transform: none; letter-spacing: normal; }
 
     .model-tier-table thead th { font-weight: 700; white-space: nowrap; }
 

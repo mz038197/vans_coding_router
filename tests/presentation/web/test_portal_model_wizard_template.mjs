@@ -54,6 +54,8 @@ const REAL = [
   "beginEditSessionChatLanguageModels",
   "openModelWizard",
   "renderModelWizardVisibility",
+  "renderModelWizardStepContent",
+  "modelWizardShows",
   "modelWizardModeHtml",
   "modelWizardOffNoteHtml",
   "modelWizardStepContentShown",
@@ -80,6 +82,7 @@ const STUBS = `
   let routerModelTemplate = [];
   let autoTierRefusal = null;
   let modelWizardStep = 1;
+  let modelWizardRevealedStep = null;
   let modelWizardShowIds = false;
   let modelWizardExtraUi = null;
   let modelWizardDecisionCatalog = null;
