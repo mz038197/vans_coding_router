@@ -201,5 +201,5 @@ test("class list shows 「自動選模」 only when the row says selection runs"
 
 test("a refused save shows the server's reason", () => {
   const save = extractNamedFunction(portalHtml, "saveSessionChatLanguageModels");
-  assert.match(save, /setSessionChatModelsMsg\('sessionChatModelsSaveMsg', err\?\.message/);
+  assert.match(save, /modelWizardSaveDialogHtml\(state, err\?\.message/);
 });
