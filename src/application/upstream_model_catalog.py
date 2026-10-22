@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import traceback
 from typing import Any, Callable
 
+from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
 from src.infrastructure.config import RouterSettings, provider_has_kind_split
 
 logger = logging.getLogger(__name__)
 
 CATALOG_FETCH_TIMEOUT_SEC = 30.0
+CATALOG_FETCH_BUDGET_SEC = 45.0
+CATALOG_RETRY_DELAYS_SEC = (2.0, 5.0)
 CATALOG_REFRESH_INTERVAL_SEC = 30 * 60
+FAILURE_BODY_LIMIT = 500
 
 # Teacher kind → upstream output_modalities query for a provider with a kind split.
 KIND_SPLIT_MODALITIES = {
@@ -34,10 +39,14 @@ class UpstreamModelCatalogMemory:
         gateway: Any | None,
         *,
         fetch_timeout_sec: float = CATALOG_FETCH_TIMEOUT_SEC,
+        fetch_budget_sec: float = CATALOG_FETCH_BUDGET_SEC,
+        retry_delays_sec: tuple[float, ...] = CATALOG_RETRY_DELAYS_SEC,
     ):
         self._settings = settings_fn
         self._gateway = gateway
         self._fetch_timeout_sec = fetch_timeout_sec
+        self._fetch_budget_sec = fetch_budget_sec
+        self._retry_delays_sec = retry_delays_sec
         self._snapshots: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
 
     async def fill(self) -> None:
@@ -59,21 +68,19 @@ class UpstreamModelCatalogMemory:
         updated = dict(self._snapshots)
         failed: list[tuple[str, str]] = []
         seen: set[str] = set()
-        for provider, kind, models, stack in results:
+        for provider, kind, models, reason in results:
             if models is None:
                 if provider not in seen:
                     seen.add(provider)
-                    failed.append((provider, stack))
+                    label = provider if kind is None else f"{provider} {kind}"
+                    failed.append((provider, f"{label}: {reason}"))
                 continue
             updated[(provider, kind)] = models
         self._snapshots = updated
         if failed:
-            names = ", ".join(name for name, _stack in failed)
-            stacks = "\n\n".join(stack for _name, stack in failed if stack)
-            message = f"Upstream Model Catalog round did not update: {names}"
-            if stacks:
-                message = f"{message}\n{stacks}"
-            logger.error(message)
+            names = ", ".join(name for name, _reason in failed)
+            reasons = "\n\n".join(reason for _name, reason in failed)
+            logger.error(f"Upstream Model Catalog round did not update: {names}\n{reasons}")
 
     def read(self, requested: str) -> dict[str, Any]:
         kind_split, all_models_providers = self._provider_groups()
@@ -116,23 +123,39 @@ class UpstreamModelCatalogMemory:
         provider: str,
         kind: str | None,
         modality: str | None,
-    ) -> tuple[str, str | None, list[dict[str, Any]] | None]:
-        try:
-            raw = await asyncio.wait_for(
-                self._fetch_raw(provider, modality),
-                timeout=self._fetch_timeout_sec,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning(
-                "Upstream Model Catalog fetch failed: provider=%s kind=%s",
-                provider,
-                kind or "all",
-                exc_info=True,
-            )
-            return provider, kind, None, traceback.format_exc()
-        return provider, kind, _accepted_models(raw, provider), ""
+    ) -> tuple[str, str | None, list[dict[str, Any]] | None, str]:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._fetch_budget_sec
+        delays = list(self._retry_delays_sec)
+        while True:
+            try:
+                raw = await asyncio.wait_for(
+                    self._fetch_raw(provider, modality),
+                    timeout=min(self._fetch_timeout_sec, deadline - loop.time()),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                retry = (
+                    _is_transient(exc)
+                    and bool(delays)
+                    and loop.time() + delays[0] < deadline
+                )
+                logger.warning(
+                    "Upstream Model Catalog fetch failed: provider=%s kind=%s retry=%s",
+                    provider,
+                    kind or "all",
+                    retry,
+                    exc_info=True,
+                )
+                if retry:
+                    await asyncio.sleep(delays.pop(0))
+                    continue
+                return provider, kind, None, _failure_reason(exc)
+            models = _accepted_models(raw, provider)
+            if models is None:
+                return provider, kind, None, f"unusable model list: {_cut(raw)}"
+            return provider, kind, models, ""
 
     async def _fetch_raw(self, provider: str, modality: str | None) -> Any:
         one = getattr(self._gateway, "provider_models", None)
@@ -144,6 +167,26 @@ class UpstreamModelCatalogMemory:
         if modality:
             return await models_fn(output_modalities=modality)
         return await models_fn()
+
+
+def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, (ServiceUnavailableError, TimeoutError)):
+        return True
+    if isinstance(exc, UpstreamServiceError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
+
+
+def _failure_reason(exc: Exception) -> str:
+    if isinstance(exc, UpstreamServiceError):
+        body = (exc.details or {}).get("body")
+        return f"HTTP {exc.status_code}: {_cut(body)}"
+    return traceback.format_exc()
+
+
+def _cut(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    return text[:FAILURE_BODY_LIMIT]
 
 
 def _accepted_models(raw: Any, provider: str) -> list[dict[str, Any]] | None:

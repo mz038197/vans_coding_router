@@ -102,20 +102,14 @@ class RoutingGateway:
         *,
         output_modalities: str | None = None,
     ) -> dict[str, Any]:
+        """One provider's model list. An upstream failure raises."""
         gateway = self.gateways.get(provider)
         if gateway is None:
-            return {
-                "object": "list",
-                "data": [],
-                "provider_errors": {provider: "unknown provider"},
-            }
-        try:
-            if provider == "openrouter" and output_modalities:
-                models = await gateway.models(output_modalities=output_modalities)
-            else:
-                models = await gateway.models()
-        except Exception as exc:
-            return {"object": "list", "data": [], "provider_errors": {provider: str(exc)}}
+            raise ValueError(f"未知 provider：{provider}")
+        if provider == "openrouter" and output_modalities:
+            models = await gateway.models(output_modalities=output_modalities)
+        else:
+            models = await gateway.models()
         data: list[dict[str, Any]] = []
         for item in models.get("data", []):
             if not isinstance(item, dict):
@@ -136,9 +130,12 @@ class RoutingGateway:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}
         for name in self.gateways:
-            portion = await self.provider_models(name, output_modalities=output_modalities)
+            try:
+                portion = await self.provider_models(name, output_modalities=output_modalities)
+            except Exception as exc:
+                errors[name] = str(exc)
+                continue
             data.extend(portion.get("data") or [])
-            errors.update(portion.get("provider_errors") or {})
         result: dict[str, Any] = {"object": "list", "data": data}
         if errors:
             result["provider_errors"] = errors

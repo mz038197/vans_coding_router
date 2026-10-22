@@ -346,3 +346,27 @@ def test_routing_gateway_pool_status_limited_only(monkeypatch):
     limited._pool.quarantine(0, "extra usage balance is empty")
     assert gateway.is_key_quarantined("ollama_cloud", 0) is True
     assert gateway.is_key_quarantined("ollama_cloud", 1) is False
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_models_lists_the_rest_when_one_provider_fails(gateway: RoutingGateway):
+    async def down(*, output_modalities: str | None = None) -> dict[str, Any]:
+        raise RuntimeError("ollama down")
+
+    gateway.gateways["ollama_cloud"].models = down
+
+    listed = await gateway.models()
+
+    assert listed["provider_errors"] == {"ollama_cloud": "ollama down"}
+    assert {item["provider"] for item in listed["data"]} == {"openrouter"}
+
+
+@pytest.mark.asyncio
+async def test_routing_gateway_provider_models_raises_the_upstream_failure(gateway: RoutingGateway):
+    async def down(*, output_modalities: str | None = None) -> dict[str, Any]:
+        raise RuntimeError("ollama down")
+
+    gateway.gateways["ollama_cloud"].models = down
+
+    with pytest.raises(RuntimeError, match="ollama down"):
+        await gateway.provider_models("ollama_cloud")

@@ -10,6 +10,7 @@ from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.application.upstream_model_catalog import (
     CATALOG_FETCH_TIMEOUT_SEC,
+    CATALOG_RETRY_DELAYS_SEC,
     KIND_SPLIT_MODALITIES,
     UpstreamModelCatalogMemory,
 )
@@ -60,6 +61,7 @@ class PortalUseCase:
         base_settings: RouterSettings,
         llm_gateway: Any | None = None,
         catalog_fetch_timeout_sec: float = CATALOG_FETCH_TIMEOUT_SEC,
+        catalog_retry_delays_sec: tuple[float, ...] = CATALOG_RETRY_DELAYS_SEC,
     ):
         self.repo = repo
         self._base_settings = base_settings
@@ -70,6 +72,7 @@ class PortalUseCase:
             lambda: self.settings,
             llm_gateway,
             fetch_timeout_sec=catalog_fetch_timeout_sec,
+            retry_delays_sec=catalog_retry_delays_sec,
         )
 
     async def fill_upstream_model_catalog(self) -> None:
