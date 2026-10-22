@@ -5,7 +5,7 @@ import logging
 
 from fakes import FakeLLMGateway
 from src.application.upstream_model_catalog import UpstreamModelCatalogMemory
-from src.domain.errors import UpstreamServiceError
+from src.domain.errors import ServiceUnavailableError, UpstreamServiceError, UpstreamTransportError
 from src.infrastructure.config import ProviderSettings, RouterSettings
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
@@ -172,3 +172,23 @@ def test_a_failure_without_an_http_status_keeps_its_stack(caplog):
     (error,) = _errors(caplog)
     assert "openai: Traceback (most recent call last):" in error
     assert "RuntimeError: openai broke" in error
+
+
+def test_a_transport_failure_is_tried_again():
+    models = _ScriptedModels("openai", UpstreamTransportError("openai unavailable: connect failed"))
+    memory = _memory(models)
+
+    asyncio.run(memory.fill())
+
+    assert models.calls == [None, None]
+    assert _model_ids(memory) == ["openai@openai-model"]
+
+
+def test_a_configuration_failure_is_not_tried_again():
+    models = _ScriptedModels("openai", ServiceUnavailableError("openai unavailable: missing base_url"))
+    memory = _memory(models)
+
+    asyncio.run(memory.fill())
+
+    assert models.calls == [None]
+    assert memory.read("all")["unavailable"] is True

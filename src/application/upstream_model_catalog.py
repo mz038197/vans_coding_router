@@ -8,7 +8,7 @@ import logging
 import traceback
 from typing import Any, Callable
 
-from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
+from src.domain.errors import UpstreamServiceError, UpstreamTransportError
 from src.infrastructure.config import RouterSettings, provider_has_kind_split
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ class UpstreamModelCatalogMemory:
 
 
 def _is_transient(exc: Exception) -> bool:
-    if isinstance(exc, (ServiceUnavailableError, TimeoutError)):
+    if isinstance(exc, (UpstreamTransportError, TimeoutError)):
         return True
     if isinstance(exc, UpstreamServiceError):
         return exc.status_code == 429 or exc.status_code >= 500

@@ -172,6 +172,10 @@ class ServiceUnavailableError(AppError):
         )
 
 
+class UpstreamTransportError(ServiceUnavailableError):
+    """The upstream could not be reached: a connect, read, or timeout failure."""
+
+
 class MissingTargetError(AppError):
     def __init__(self, message: str):
         super().__init__(
