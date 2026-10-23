@@ -99,6 +99,7 @@ def _client(
     providers=None,
     api_gateway=None,
     catalog_fetch_timeout_sec: float = 30.0,
+    catalog_retry_delays_sec: tuple[float, ...] = (0.0, 0.0),
 ):
     settings = _settings(tmp_path, providers=providers)
     repo = SqliteRouterRepository(settings.database.path, settings)
@@ -107,6 +108,7 @@ def _client(
         settings,
         llm_gateway=llm_gateway,
         catalog_fetch_timeout_sec=catalog_fetch_timeout_sec,
+        catalog_retry_delays_sec=catalog_retry_delays_sec,
     )
 
     @asynccontextmanager

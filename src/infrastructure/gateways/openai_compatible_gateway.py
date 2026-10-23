@@ -14,6 +14,7 @@ from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
     ServiceUnavailableError,
     UpstreamServiceError,
+    UpstreamTransportError,
     extract_upstream_error_text,
 )
 from src.domain.extra_usage import (
@@ -452,6 +453,7 @@ class OpenAICompatibleGateway:
     ) -> httpx.Response:
         await self.startup()
         assert self._client is not None
+        self._require_base_url()
         pool = self._ensure_pool() if use_pool else None
         if pool is None:
             index: int | None = None
@@ -464,7 +466,7 @@ class OpenAICompatibleGateway:
                     **kwargs,
                 )
             except httpx.RequestError as exc:
-                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
 
         tried: set[int] = set()
         last_error: UpstreamServiceError | None = None
@@ -508,7 +510,7 @@ class OpenAICompatibleGateway:
                     )
                 return response
             except httpx.RequestError as exc:
-                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
 
@@ -522,6 +524,7 @@ class OpenAICompatibleGateway:
     ) -> AsyncGenerator[bytes, None]:
         await self.startup()
         assert self._client is not None
+        self._require_base_url()
         pool = self._ensure_pool() if use_pool else None
         if pool is None:
             index: int | None = None
@@ -544,7 +547,7 @@ class OpenAICompatibleGateway:
                         async for chunk in response.aiter_bytes():
                             yield chunk
                 except httpx.RequestError as exc:
-                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                    raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
             return
@@ -603,7 +606,7 @@ class OpenAICompatibleGateway:
                                 yield chunk
                             return
                 except httpx.RequestError as exc:
-                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                    raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
             if not failover:
@@ -617,6 +620,10 @@ class OpenAICompatibleGateway:
         if response.status_code >= 400:
             raise UpstreamServiceError(status_code=response.status_code, backend=self.provider.name, body=body)
         return body if isinstance(body, dict) else {"data": body}
+
+    def _require_base_url(self) -> None:
+        if not self.provider.base_url:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
 
     def _headers(self, *, api_key: str | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json", **self.provider.extra_headers}
