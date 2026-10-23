@@ -475,6 +475,19 @@ paths:
                     urgent:
                       type: noul
                       instructions: 這則訊息急迫嗎？
+              image:
+                summary: Text plus image
+                value:
+                  model: openrouter@typesafe/jev-1.14
+                  state:
+                    - 學生上傳的商品照片
+                    - type: image_url
+                      image_url:
+                        url: data:image/png;base64,iVBORw0KGgo=
+                  questions:
+                    has_product:
+                      type: noul
+                      instructions: 照片裡有商品嗎？
       responses:
         "200":
           description: Upstream decision body for this call.
@@ -1102,7 +1115,28 @@ components:
             - openrouter@typesafe/jev-1.13
             - vcr-auto
         state:
-          description: State for this call only. Not stored on the Class Session.
+          description: |
+            State for this call only. Not stored on the Class Session.
+
+            To send an image, make `state` an array of plain text strings and
+            content parts, and put each image in it as an `image_url` part whose
+            `url` is a base64 data URL (`data:image/png;base64,...` or
+            `data:image/jpeg;base64,...`). The router forwards that part
+            unchanged; whether the image is read is up to the Decision Model.
+            OpenRouter lists the decision models that accept images at
+            `/api/v1/models?output_modalities=decisions&input_modalities=image`.
+
+            These are not read as an image: a top-level `images` field (the
+            router drops it), an `http(s)` URL (the upstream does not fetch it),
+            raw base64 without the `data:` prefix, a Responses `input_image`
+            part, and a data URL inside a plain string. A wrong part type is not
+            refused; the upstream reads it as text.
+          examples:
+            - 付款失敗三天了
+            - - 學生上傳的商品照片
+              - type: image_url
+                image_url:
+                  url: data:image/png;base64,iVBORw0KGgo=
         questions:
           description: |
             Typed questions for this call only. A typical value is an object
