@@ -817,6 +817,7 @@ class RouterRepositoryBase(ABC):
                     """
                     SELECT k.*, u.email, u.name, u.role, u.status AS user_status,
                            s.class_id, s.expires_at AS session_expires_at, s.status AS session_status,
+                           s.session_at AS session_starts_at,
                            c.status AS class_status, c.ends_at AS class_ends_at
                     FROM api_keys k
                     JOIN users u ON u.id = k.user_id
@@ -841,6 +842,9 @@ class RouterRepositoryBase(ABC):
             # Session lifecycle is expires_at (status is a derived/legacy field).
             if row["session_id"] and session_expires_at and now >= session_expires_at:
                 return None, "expired"
+            session_starts_at = parse_dt(row["session_starts_at"])
+            if row["session_id"] and session_starts_at and now < session_starts_at:
+                return None, "not_started"
             if row["session_id"] and (
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
             ):
@@ -1499,6 +1503,9 @@ class RouterRepositoryBase(ABC):
         expires = parse_dt(session["expires_at"])
         if expires is None or utc_now() >= expires:
             raise ValueError("expired invite")
+        starts = parse_dt(session["session_at"])
+        if starts is not None and utc_now() < starts:
+            raise ValueError(f"課堂尚未開始，開始時間 {dt(starts)}，請在開始後再領取")
         return dict(session)
 
     def _synthetic_nickname_email(self, class_id: int, nickname: str) -> str:

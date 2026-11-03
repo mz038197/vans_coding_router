@@ -115,6 +115,15 @@ class ApiKeyExpiredError(AppError):
         )
 
 
+class ApiKeyNotStartedError(AppError):
+    def __init__(self, message: str = "課堂尚未開始，請在開始時間後再使用"):
+        super().__init__(
+            message=message,
+            status_code=403,
+            code="api_key_not_started",
+        )
+
+
 class WrongCredentialTypeError(AppError):
     def __init__(
         self,

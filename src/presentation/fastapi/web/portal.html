@@ -746,7 +746,7 @@
         course: { active: ['active', '進行中'], ended: ['ended', '已結束'] },
         user: { active: ['active', '有效'], inactive: ['ended', '停用'] },
         prompt: { ok: ['active', '成功'], rejected: ['rejected', '拒絕'] },
-        key: { valid: ['active', '有效'], active: ['active', '進行中'], expired: ['expired', '已過期'], ended: ['ended', '已結束'] },
+        key: { valid: ['active', '有效'], active: ['active', '進行中'], upcoming: ['upcoming', '未開始'], expired: ['expired', '已過期'], ended: ['ended', '已結束'] },
       };
       const entry = map[kind]?.[value];
       if (!entry) return escapeHtml(value || '—');
@@ -779,6 +779,13 @@
       return '（未命名）';
     }
 
+    // ADR 0039: a Class Session opens at session_at; before then it is not usable.
+    function isSessionUpcoming(sessionAt) {
+      if (!sessionAt) return false;
+      const date = new Date(sessionAt);
+      return !Number.isNaN(date.getTime()) && date > new Date();
+    }
+
     function isSessionActive(session, courseStatus) {
       if (courseStatus === 'ended') return false;
       return !isSessionExpired(session.expires_at);
@@ -798,8 +805,9 @@
 
     function sessionStatusCell(classId, session, courseStatus) {
       const active = isSessionActive(session, courseStatus);
-      const label = active ? '進行中' : '已結束';
-      const cls = active ? 'tag-active' : 'tag-ended';
+      const upcoming = active && isSessionUpcoming(session.session_at);
+      const label = upcoming ? '未開始' : active ? '進行中' : '已結束';
+      const cls = upcoming ? 'tag-upcoming' : active ? 'tag-active' : 'tag-ended';
       if (courseStatus === 'ended') {
         return `<span class="tag ${cls}">${label}</span>`;
       }
@@ -812,6 +820,7 @@
     function keyStatusTag(key) {
       if (!key.session_id) return renderStatusTag('key', 'valid');
       if (isSessionExpired(key.expires_at)) return renderStatusTag('key', 'ended');
+      if (isSessionUpcoming(key.session_at)) return renderStatusTag('key', 'upcoming');
       return renderStatusTag('key', 'active');
     }
 

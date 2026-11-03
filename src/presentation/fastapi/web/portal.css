@@ -1658,6 +1658,7 @@
 
     .tag-active { background: rgba(52, 211, 153, 0.15); color: var(--success); }
     .tag-ended { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); }
+    .tag-upcoming { background: var(--accent-soft); color: var(--accent-text); }
     .tag-expired { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
     .tag-rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
     .tag-success { background: rgba(52, 211, 153, 0.15); color: var(--success); }
