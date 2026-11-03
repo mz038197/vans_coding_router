@@ -519,6 +519,53 @@ def test_create_session_with_session_at_sets_expires_at(tmp_path):
     assert session["expires_at"] == datetime(2026, 6, 21, 17, 0, tzinfo=UTC).isoformat()
 
 
+def _class_with_session_starting_at(tmp_path, session_at: datetime):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(
+        klass["id"], teacher["id"], "第一堂", ttl_hours=3, session_at=session_at.isoformat()
+    )
+    return repo, session
+
+
+def test_classroom_api_key_is_not_started_before_session_at(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    student = repo.upsert_google_user("student@example.com", "Student")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_at = ? WHERE id = ?",
+            ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), session["id"]),
+        )
+
+    assert repo.verify_api_key_with_reason(key) == (None, "not_started")
+    assert repo.verify_api_key_context(key) is None
+
+
+def test_invite_cannot_be_redeemed_before_session_at(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) + timedelta(hours=1))
+    student = repo.upsert_google_user("student@example.com", "Student")
+
+    with pytest.raises(ValueError, match="尚未開始"):
+        repo.redeem_invite(session["invite_code"], student["id"])
+    with pytest.raises(ValueError, match="尚未開始"):
+        repo.redeem_invite_with_nickname(session["invite_code"], "小明")
+
+
+def test_classroom_api_key_works_once_session_at_has_passed(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=1))
+    student = repo.upsert_google_user("student@example.com", "Student")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+
+    context, failure = repo.verify_api_key_with_reason(key)
+    assert failure is None
+    assert context is not None
+
+
 def test_create_session_requires_name(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from src.domain.errors import (
     AdminBusinessError,
     ApiKeyExpiredError,
+    ApiKeyNotStartedError,
     AppError,
     AuthenticationError,
     EmbeddingsDisabledError,
@@ -104,7 +105,10 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ApiKeyExpiredError)
-    async def handle_api_key_expired_error(request: Request, exc: ApiKeyExpiredError):
+    @app.exception_handler(ApiKeyNotStartedError)
+    async def handle_api_key_outside_session_window(
+        request: Request, exc: ApiKeyExpiredError | ApiKeyNotStartedError
+    ):
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 exc.status_code,

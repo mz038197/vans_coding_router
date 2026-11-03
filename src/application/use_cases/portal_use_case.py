@@ -5,7 +5,7 @@ from typing import Any
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import PortalSessionContext
-from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
+from src.domain.errors import ApiKeyExpiredError, ApiKeyNotStartedError, MissingTargetError, QuarantineReleaseCooldownError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.application.upstream_model_catalog import (
@@ -668,6 +668,8 @@ class PortalUseCase:
         _, failure = self.repo.verify_api_key_with_reason(api_key)
         if failure == "expired":
             raise ApiKeyExpiredError()
+        if failure == "not_started":
+            raise ApiKeyNotStartedError()
         if failure in {"invalid", "disabled", "missing"}:
             raise PermissionError("無效的 Classroom API Key")
 

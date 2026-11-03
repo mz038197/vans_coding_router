@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -467,6 +468,56 @@ def test_v1_chat_still_fails_after_session_end(tmp_path):
     )
     assert chat.status_code == 401
     assert chat.json()["error"]["code"] == "api_key_expired"
+
+
+def test_key_is_refused_before_session_starts(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    # A key redeemed before this rule shipped, on a sitting scheduled later.
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_at = ? WHERE id = ?",
+            ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), session["id"]),
+        )
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    chat = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert chat.status_code == 403
+    assert chat.json()["error"]["code"] == "api_key_not_started"
+
+    catalog = client.get("/extension/course-catalog", headers=headers)
+    assert catalog.status_code == 403
+    assert catalog.json()["detail"] == "課堂尚未開始，請在開始時間後再使用"
+
+    models = client.get("/extension/chat-language-models", headers=headers)
+    assert models.status_code == 403
+    assert models.json()["detail"] == "課堂尚未開始，請在開始時間後再使用"
+
+
+def test_nickname_redeem_is_refused_before_session_starts(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(
+        klass["id"],
+        teacher["id"],
+        "Week 1",
+        session_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+    )
+
+    redeem = client.post(
+        "/extension/sessions/nickname-redeem",
+        json={"invite_code": session["invite_code"], "nickname": "小明"},
+    )
+    assert redeem.status_code == 400
+    assert "課堂尚未開始" in redeem.json()["detail"]
 
 
 def test_disabled_key_fails_extension_gets(tmp_path):
