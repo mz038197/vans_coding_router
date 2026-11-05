@@ -566,6 +566,10 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: {"items": portal_use_case.list_classes(current_user_id(session_user_id))}
         )
 
+    @router.patch("/teacher/classes/{class_id}")
+    async def end_my_class(class_id: int, data: ClassPatchRequest, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+        return portal_call(lambda: portal_use_case.teacher_end_class(current_user_id(session_user_id), class_id, data.status))
+
     @router.get("/teacher/classes/{class_id}/sessions")
     async def list_sessions(class_id: int, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
         return portal_call(

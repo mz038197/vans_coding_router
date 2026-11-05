@@ -1847,7 +1847,7 @@
           <span>${escapeHtml(course.name)}</span>
           ${renderStatusTag('course', course.status)}
           <span class="hint hint-inline">${course.member_count ?? 0} 位成員</span>
-          ${currentRoles.includes('admin') && !ended ? `<button type="button" class="btn-danger end-course-btn" onclick="disableClass(${course.id})">結束課程</button>` : ''}
+          ${endCourseButtonHtml(course)}
         </div>
         ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
           <div class="session-form session-form-compact">
@@ -4991,15 +4991,26 @@ snippets:
       });
     }
 
-    async function disableClass(id) {
+    // 結束課程: shown to the course owner and to admins. The owner ends it through
+    // PATCH /teacher/classes/{id}; an admin ending someone else's course uses the admin endpoint.
+    // Only an admin can reopen a course.
+    function endCourseButtonHtml(course) {
+      if (!course || course.status === 'ended') return '';
+      const isOwner = course.teacher_id === currentUserId;
+      if (!isOwner && !currentRoles.includes('admin')) return '';
+      return `<button type="button" class="btn-danger end-course-btn" onclick="endCourse(${course.id})">結束課程</button>`;
+    }
+
+    async function endCourse(id) {
       const course = teacherClasses.find(c => c.id === id);
       const courseName = course?.name || `#${id}`;
       const ok = window.confirm(
         `確定要結束課程「${courseName}」嗎？\n\n` +
-        `結束後將無法新增課堂、學生無法領取邀請碼，既有 key 也會失效。此操作無法從 Portal 還原。`
+        `結束後學生無法再用邀請碼加入，只有管理員能重新開啟。`
       );
       if (!ok) return;
-      await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})});
+      const path = course?.teacher_id === currentUserId ? `/teacher/classes/${id}` : `/admin/classes/${id}`;
+      await api(path, {method:'PATCH', body: JSON.stringify({status:'ended'})});
       await refresh();
     }
 
