@@ -39,6 +39,14 @@ _ARCHIVE_BATCH_SIZE = 20
 
 
 class RouterRepositoryBase(ABC):
+    # Every write into token_usage (live recording and both dialects' backfills) uses this
+    # column list, in this order.
+    TOKEN_USAGE_INSERT = (
+        "INSERT INTO token_usage("
+        "user_id, class_id, session_id, model, api_endpoint, "
+        "prompt_tokens, completion_tokens, total_tokens, created_at)"
+    )
+
     def __init__(self, settings: RouterSettings):
         self.settings = settings
 
@@ -1766,15 +1774,7 @@ class RouterRepositoryBase(ABC):
             return
         with self._connect() as conn:
             conn.execute(
-                self._sql(
-                    """
-                    INSERT INTO token_usage(
-                        user_id, class_id, session_id, model, api_endpoint,
-                        prompt_tokens, completion_tokens, total_tokens, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                ),
+                self._sql(f"{self.TOKEN_USAGE_INSERT} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
                 (
                     auth.user_id,
                     auth.class_id,
@@ -1794,11 +1794,8 @@ class RouterRepositoryBase(ABC):
         Copies every successful live Prompt Log. Each dialect copies its archive separately.
         """
         conn.execute(
-            """
-            INSERT INTO token_usage(
-                user_id, class_id, session_id, model, api_endpoint,
-                prompt_tokens, completion_tokens, total_tokens, created_at
-            )
+            f"""
+            {self.TOKEN_USAGE_INSERT}
             SELECT user_id, class_id, session_id, model, COALESCE(api_endpoint, ''),
                    COALESCE(prompt_tokens, 0), COALESCE(completion_tokens, 0),
                    COALESCE(total_tokens, 0), created_at

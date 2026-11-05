@@ -53,12 +53,22 @@ test("with nothing in progress, the most recent Class Session's card opens", () 
   assert.deepEqual(openIds([lastWeek, older]), [12]);
 });
 
-test("an upcoming sitting counts as the most recent when nothing is in progress", () => {
-  assert.deepEqual(openIds([tomorrow, lastWeek, older]), [14]);
+test("with nothing in progress, the most recent sitting that has started opens, not an upcoming one", () => {
+  assert.deepEqual(openIds([tomorrow, lastWeek, older]), [12]);
 });
 
-test("nothing is in progress once the course has ended", () => {
-  assert.deepEqual(openIds([tomorrow, live, lastWeek], { courseStatus: "ended" }), [14]);
+test("a sitting without session_at has started at its created_at", () => {
+  const unscheduled = { id: 15, session_at: null, created_at: "2026-11-01T08:00:00Z", expires_at: "2026-11-01T09:00:00Z" };
+  assert.deepEqual(openIds([tomorrow, unscheduled, lastWeek]), [15]);
+});
+
+test("when every sitting is upcoming, the top card opens", () => {
+  const nextWeek = { id: 15, session_at: "2026-11-12T09:00:00Z", expires_at: "2026-11-12T11:00:00Z" };
+  assert.deepEqual(openIds([nextWeek, tomorrow]), [15]);
+});
+
+test("once the course has ended nothing is in progress, so the most recent started sitting opens", () => {
+  assert.deepEqual(openIds([tomorrow, live, lastWeek], { courseStatus: "ended" }), [13]);
 });
 
 test("cards saved in localStorage stay open alongside the default", () => {

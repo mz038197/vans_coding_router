@@ -1300,18 +1300,14 @@ class ApiUseCase:
         api_endpoint: str = "",
         selection: TierSelection | None = None,
     ) -> None:
-        """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty."""
+        """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty.
+
+        Token Usage is recorded first and independently of whether a Prompt Log is stored.
+        """
+        if status == "ok":
+            self._record_token_usage(auth_context, model, usage, api_endpoint)
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
-        if status == "ok" and auth_context is not None and hasattr(self.api_key_repo, "record_token_usage"):
-            self.api_key_repo.record_token_usage(
-                auth=auth_context,
-                model=model,
-                api_endpoint=api_endpoint,
-                prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
-                completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
-                total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
-            )
         if auth_context and auth_context.session_id and hasattr(
             self.api_key_repo, "is_prompt_logging_enabled"
         ):
@@ -1328,14 +1324,29 @@ class ApiUseCase:
             model=model,
             status=status,
             client_ip=client_ip,
-            prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
-            completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
-            total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
+            **_token_counts(usage),
             message_preview=build_message_preview(logged_request),
             response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
             api_endpoint=api_endpoint,
             tier=selection,
+        )
+
+    def _record_token_usage(
+        self,
+        auth_context: AuthContext | None,
+        model: str,
+        usage: dict[str, int] | None,
+        api_endpoint: str,
+    ) -> None:
+        """One Token Usage row per successful request, whether or not prompt logging is on."""
+        if auth_context is None or not hasattr(self.api_key_repo, "record_token_usage"):
+            return
+        self.api_key_repo.record_token_usage(
+            auth=auth_context,
+            model=model,
+            api_endpoint=api_endpoint,
+            **_token_counts(usage),
         )
 
     def _log_images_request(
@@ -1496,6 +1507,15 @@ def _message_to_log_dict(m: ChatMessage) -> dict[str, Any]:
     if m.tool_name:
         d["tool_name"] = m.tool_name
     return d
+
+
+def _token_counts(usage: dict[str, int] | None) -> dict[str, int]:
+    """prompt/completion/total tokens from an upstream usage block; missing or null counts are 0."""
+    usage = usage or {}
+    return {
+        name: int(usage.get(name, 0) or 0)
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+    }
 
 
 def _messages_to_text(messages: list[dict[str, Any]]) -> str:

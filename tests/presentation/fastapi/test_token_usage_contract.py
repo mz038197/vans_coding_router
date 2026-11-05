@@ -21,7 +21,7 @@ CHAT_BODY = {
 
 
 class World:
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, api_repo=lambda repo: repo):
         settings = RouterSettings(
             path=str(tmp_path / "router.yaml"),
             public_url="http://testserver",
@@ -39,7 +39,7 @@ class World:
         app = FastAPI()
         register_error_handlers(app)
         app.add_middleware(ApiKeyMiddleware, auth_use_case=AuthUseCase(api_key_repo=repo))
-        app.include_router(create_api_router(ApiUseCase(gateway=gateway, api_key_repo=repo, logger=FakeRequestLogger())))
+        app.include_router(create_api_router(ApiUseCase(gateway=gateway, api_key_repo=api_repo(repo), logger=FakeRequestLogger())))
         app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
         self.client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -100,6 +100,29 @@ def test_usage_grows_when_prompt_logging_is_off_and_no_prompt_log_is_stored(tmp_
     row = world.usage()[student["id"]]
     assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (11, 22, 33)
     assert row["sessions"][0]["total_tokens"] == 33
+    assert world.prompt_logs() == []
+
+
+class _RepoWithoutPromptLog:
+    """The router repository minus `log_prompt`: Token Usage must not depend on prompt logging."""
+
+    def __init__(self, repo):
+        self._repo = repo
+
+    def __getattr__(self, name):
+        if name == "log_prompt":
+            raise AttributeError(name)
+        return getattr(self._repo, name)
+
+
+def test_usage_is_recorded_by_a_repository_that_cannot_store_prompt_logs(tmp_path):
+    world = World(tmp_path, api_repo=_RepoWithoutPromptLog)
+    student, key = world.student("student@gmail.com")
+
+    assert world.chat(key) == 200
+
+    row = world.usage()[student["id"]]
+    assert (row["total_tokens"], row["request_count"]) == (33, 1)
     assert world.prompt_logs() == []
 
 
