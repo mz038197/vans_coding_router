@@ -842,6 +842,88 @@ def test_admin_update_class_endpoint(tmp_path):
     assert response.json()["status"] == "ended"
 
 
+def _teacher_class_status(client, repo, teacher, class_id):
+    response = client.get("/teacher/classes", cookies=_portal_cookie(repo, teacher))
+    assert response.status_code == 200
+    return next(item["status"] for item in response.json()["items"] if item["id"] == class_id)
+
+
+def test_teacher_ends_own_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ended"
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_teacher_cannot_end_another_teachers_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    owner = repo.upsert_google_user("owner@example.com", "Owner")
+    repo.update_user(owner["id"], role="teacher")
+    other = repo.upsert_google_user("other@example.com", "Other")
+    repo.update_user(other["id"], role="teacher")
+    klass = repo.create_class(owner["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, other),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 404
+    assert _teacher_class_status(client, repo, owner, klass["id"]) == "active"
+
+
+@pytest.mark.parametrize("status", ["active", "archived"])
+def test_teacher_end_course_accepts_only_ended(tmp_path, status):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    repo.set_class_status(klass["id"], "ended")
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": status},
+    )
+
+    assert response.status_code == 400
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_admin_still_reopens_course_a_teacher_ended(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    response = client.patch(
+        f"/admin/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, admin),
+        json={"status": "active"},
+    )
+
+    assert response.status_code == 200
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "active"
+
+
 def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     from src.domain.entities.auth import AuthContext
 

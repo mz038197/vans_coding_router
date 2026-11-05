@@ -157,7 +157,7 @@ The decorative animated atmosphere on the Portal login hero only. It is not navi
 _Avoid_: Neural Grid, particle background, login animation, constellation, Shader Lines
 
 **Class**:
-A teacher-owned classroom grouping that outlives one sitting. Class Sessions belong to a Class; a Classroom Nickname is unique within one Class, not across Classes.
+A teacher-owned classroom grouping that outlives one sitting. Class Sessions belong to a Class; a Classroom Nickname is unique within one Class, not across Classes. Its owning teacher (or an admin) can end it; only an admin can reopen an ended Class.
 _Avoid_: Class Session, Course Catalog as the class itself
 
 **Classroom Nickname**:

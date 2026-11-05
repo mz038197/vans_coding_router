@@ -755,6 +755,18 @@ class PortalUseCase:
         self._assert_admin(user_id)
         return self.repo.set_class_status(class_id, status)
 
+    def teacher_end_class(self, teacher_id: int, class_id: int, status: str) -> dict[str, Any] | None:
+        """The owner ends their own course. Reopening stays admin-only (admin_update_class).
+
+        Anyone but the owner sees the course as missing, so the endpoint does not reveal it exists.
+        """
+        klass = self.repo.get_class(class_id)
+        if not klass or klass["teacher_id"] != teacher_id:
+            raise MissingTargetError("找不到課程")
+        if status != "ended":
+            raise ValueError("老師只能結束課程；重新開啟請找管理員")
+        return self.repo.set_class_status(class_id, status)
+
     def admin_settings(self, user_id: int) -> dict[str, Any]:
         self._assert_admin(user_id)
         return settings_summary(self.settings)
