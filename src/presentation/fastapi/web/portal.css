@@ -2601,6 +2601,8 @@
     .session-redemptions .roster-nowrap { white-space: nowrap; }
 
     /* 我的課程: one card per Class Session, settings left and usage right (layout F, ADR 0041). */
+    .course-totals { display: flex; flex-wrap: wrap; gap: 18px; margin: 10px 0; font-size: .9rem; color: var(--text-muted); }
+    .course-totals b { margin-left: 4px; font-size: 1.15rem; font-variant-numeric: tabular-nums; color: var(--text-primary); }
     .course-totals:empty { display: none; }
     .course-card {
       margin: 0;

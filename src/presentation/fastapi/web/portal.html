@@ -2495,9 +2495,30 @@
       return courseUsageCache[classId];
     }
 
-    // Fan the course usage out to the cards. The course totals row (#88) renders into
-    // #courseTotals from these same items.
+    // Course-wide Token Usage from the usage endpoint's items (one per class member, zeros
+    // included), so sittings with Prompt Logs off still count.
+    function courseUsageTotals(items) {
+      const members = items || [];
+      return {
+        totalTokens: members.reduce((sum, m) => sum + (Number(m.total_tokens) || 0), 0),
+        requestCount: members.reduce((sum, m) => sum + (Number(m.request_count) || 0), 0),
+        activeStudents: members.filter((m) => (Number(m.total_tokens) || 0) > 0).length,
+        memberCount: members.length,
+      };
+    }
+
+    function renderCourseTotals(classId, items) {
+      const box = document.getElementById('courseTotals');
+      if (!box || String(selectedCourseId) !== String(classId)) return;
+      const t = courseUsageTotals(items);
+      box.innerHTML = `<span>整門課 Token Usage<b>${formatTokenCount(t.totalTokens)}</b></span>
+        <span>請求數<b>${t.requestCount}</b></span>
+        <span>有使用的學生<b>${t.activeStudents} / ${t.memberCount}</b></span>`;
+    }
+
+    // Fan the course usage out to the course totals row and the cards.
     function applyCourseUsage(classId, items) {
+      renderCourseTotals(classId, items);
       for (const session of courseCardSessions[classId] || []) {
         const rows = courseCardUsageRows(items, session.id);
         const tokens = document.getElementById(`course-card-tokens-${session.id}`);
