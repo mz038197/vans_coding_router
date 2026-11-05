@@ -193,3 +193,32 @@ def test_a_personal_api_key_request_is_recorded_without_a_class(tmp_path):
     )
     assert deleted.status_code == 200
     assert deleted.json()["deleted_token_usage"] == 1
+
+
+def test_a_students_course_total_sums_every_sitting_including_one_with_prompt_logging_off(tmp_path):
+    # The course totals row (#88) adds up these per-student totals.
+    world = World(tmp_path)
+    student, first_key = world.student("student@gmail.com")
+    world.student("idle@gmail.com")
+    second = world.repo.create_class_session(world.klass["id"], world.teacher["id"], "第二堂")
+    with world.repo._connect() as conn:
+        conn.execute(
+            world.repo._sql("UPDATE class_sessions SET classroom_model_choice = NULL WHERE id = ?"),
+            (second["id"],),
+        )
+    second_key = world.repo.redeem_invite(second["invite_code"], student["id"])["api_key"]
+    off = world.client.patch(
+        f"/teacher/classes/{world.klass['id']}/sessions/{second['id']}",
+        cookies=world.cookie(world.teacher),
+        json={"prompt_logging_enabled": False},
+    )
+    assert off.status_code == 200, off.text
+
+    assert world.chat(first_key) == 200
+    assert world.chat(second_key) == 200
+    assert world.chat(second_key) == 200
+
+    row = world.usage()[student["id"]]
+    by_sitting = {s["session_id"]: (s["total_tokens"], s["request_count"]) for s in row["sessions"]}
+    assert by_sitting == {world.session["id"]: (33, 1), second["id"]: (66, 2)}
+    assert (row["total_tokens"], row["request_count"]) == (99, 3)
