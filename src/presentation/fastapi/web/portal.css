@@ -1946,7 +1946,6 @@
       font-variant-numeric: tabular-nums;
       color: var(--text-primary);
     }
-    .upstream-kpi .val small { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
     .upstream-kpi .val.val-muted { font-size: 0.95rem; font-weight: 500; color: var(--text-muted); }
     .upstream-kpi .sub {
       font-size: 0.76rem;
@@ -1971,16 +1970,6 @@
       white-space: nowrap;
     }
     .upstream-kpi .sub .upstream-quarantine-release { margin: 0; padding: 1px 10px; font-size: 0.74rem; }
-    .upstream-kpi svg.spark { width: 100%; height: 26px; display: block; }
-    .upstream-kpi svg.spark polyline {
-      fill: none;
-      stroke: var(--text-muted);
-      stroke-width: 2;
-      stroke-linejoin: round;
-      stroke-linecap: round;
-      opacity: 0.6;
-    }
-    .upstream-kpi svg.spark polyline.now { stroke: var(--accent); stroke-width: 3; opacity: 1; }
 
     @media (max-width: 640px) {
       .nav-user { justify-content: flex-end; max-width: 60%; }
