@@ -10,7 +10,7 @@ The teacher portal course screen uses layout D for Class Sessions, plus the full
 - Narrow pane: one summary row per sitting; expand for the same settings. Collapsing a row stays collapsed. The same sitting stays selected across the switch.
 - Chat models show display names. Classroom Model Choice sits on that same header with the edit control.
 - Teacher or admin: menu is a left rail under the top bar. Below 900px it is a hamburger drawer (backdrop, Escape, choosing a section, or Agent Lobby closes it). Students keep the previous centered page.
-- Course toolbar: search, status, course select, and ＋ 課程 (name field, Enter creates, Escape closes). New sitting is one row: name, time, hours, button. 結束課程 is on the course title row and stays admin-only (`PATCH /admin/classes/{id}`).
+- Course toolbar: search, status, course select, and ＋ 課程 (name field, Enter creates, Escape closes). New sitting is one row: name, time, hours, button. 結束課程 is on the course title row for the course owner (`PATCH /teacher/classes/{id}`, `status=ended` only) and for admins; reopening stays admin-only (`PATCH /admin/classes/{id}`).
 
 Do not reopen A/B/C as the product layout unless the user asks.
 
