@@ -107,7 +107,8 @@ test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and 
   assert.match(ollama, /Ollama #0/);
   assert.match(ollama, /\$12\.40 of \$60 used/);
   assert.match(ollama, /<div class="meter"><i style="width:21%"><\/i><\/div>/);
-  assert.match(ollama, /Resets in 9 days\. · 併發 1\/3/);
+  assert.match(ollama, /Resets in 9 days · 併發 1\/3/);
+  assert.doesNotMatch(ollama, /\. ·/);
   assert.doesNotMatch(ollama, /\d%<|月用量 \d|天後重置/);
   assert.doesNotMatch(ollama, /upstream-kpi-status/);
   assert.doesNotMatch(ollama, /meter warn/);
@@ -128,7 +129,7 @@ test("an Ollama key at 90% of Included Monthly Usage shows 快用完 with an ico
 
   assert.deepEqual(statuses(ollama), ["快用完"]);
   assert.match(ollama, /\$54 of \$60 used/);
-  assert.match(ollama, /Resets in 9 days\./);
+  assert.match(ollama, /Resets in 9 days</);
   assert.match(ollama, /meter warn/);
 });
 

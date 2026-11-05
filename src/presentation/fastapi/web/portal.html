@@ -1430,7 +1430,8 @@
     // Included Monthly Usage label pieces: `$X of $Y used` and `Resets in …` (or unavailable).
     function upstreamKpiMonthlyUsageParts(key) {
       const [summary, resets = ''] = formatIncludedMonthlyUsage(key?.included_monthly_usage).split('\n');
-      return { summary, resets };
+      // The tile joins resets with "· 併發 …", so drop the sentence's closing period.
+      return { summary, resets: resets.replace(/\.$/, '') };
     }
 
     function upstreamKpiCredit(keys) {
