@@ -159,6 +159,7 @@
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
         <div id="classTab" class="hidden">
+          <section id="upstreamKpi" class="upstream-kpi-board" aria-label="上游狀態"></section>
           <div class="course-toolbar">
             <input id="courseSearch" placeholder="搜尋課程" oninput="onCourseFilterChange()" />
             <select id="courseStatusFilter" aria-label="課程狀態" onchange="onCourseFilterChange()">
@@ -1290,12 +1291,10 @@
       });
       setTeacherMenuOpen(false);
       syncClassroomInviteCard();
-      if (id === 'monitorTab') {
-        syncMonitorCourseSelect();
-        startUpstreamPoolsPoll();
-      } else {
-        stopUpstreamPoolsPoll();
-      }
+      if (id === 'monitorTab') syncMonitorCourseSelect();
+      // One poll feeds both upstream views; only the visible tab keeps it running.
+      if (id === 'monitorTab' || id === 'classTab') startUpstreamPoolsPoll();
+      else stopUpstreamPoolsPoll();
       if (id === 'classTab') syncCourseSelect();
       if (id === 'probeTab') syncProbeApiKey();
     }
@@ -1397,11 +1396,162 @@
       return '餘額無法取得';
     }
 
+    // Upstream KPI tiles on 我的課程 (prototype F). Pure: data in, HTML out.
+    function upstreamKpiDaysUntil(iso, nowMs) {
+      const at = Date.parse(iso);
+      if (!Number.isFinite(at)) return null;
+      return Math.max(0, Math.ceil((at - nowMs) / 86400000));
+    }
+
+    function upstreamKpiSparkline(values) {
+      const samples = (values || []).map(Number).filter(Number.isFinite);
+      if (samples.length < 2) return '';
+      const max = Math.max(1, ...samples);
+      const w = 100;
+      const h = 26;
+      const points = samples.map((v, i) => [i / (samples.length - 1) * (w - 4) + 2, h - 3 - v / max * (h - 6)]);
+      const line = (pts) => pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
+      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="${line(points)}" vector-effect="non-scaling-stroke"/>
+          <polyline class="now" points="${line(points.slice(-2))}" vector-effect="non-scaling-stroke"/></svg>`;
+    }
+
+    // A tile status is always an icon plus text, never colour alone.
+    function upstreamKpiStatus(icon, text) {
+      return `<span class="upstream-kpi-status"><i class="fas ${icon}" aria-hidden="true"></i>${escapeHtml(text)}</span>`;
+    }
+
+    function upstreamKpiQuarantineMinutes(key) {
+      return Math.ceil(Math.max(0, Number(key.quarantine_remaining_sec) || 0) / 60);
+    }
+
+    function upstreamKpiUsedFraction(key) {
+      const usage = key?.included_monthly_usage;
+      if (!usage || usage.used_usd == null || usage.included_usd == null) return null;
+      const used = Number(usage.used_usd);
+      const included = Number(usage.included_usd);
+      return Number.isFinite(used) && Number.isFinite(included) && included > 0 ? used / included : null;
+    }
+
+    function upstreamKpiCredit(keys) {
+      const value = (keys || [])
+        .map(key => key.account_credit_remaining)
+        .find(v => typeof v === 'number' && Number.isFinite(v));
+      return value ?? null;
+    }
+
+    function upstreamKpiLineHtml(providers, nowMs) {
+      const status = upstreamKpiStatus;
+      const warnIcon = 'fa-triangle-exclamation';
+      const items = [];
+      const warnings = [];
+      for (const key of providers?.ollama_cloud?.pool?.keys || []) {
+        const fraction = upstreamKpiUsedFraction(key);
+        const name = `Ollama #${Number(key.index)}`;
+        items.push(`${name} ${fraction == null ? '—' : `${Math.round(fraction * 100)}%`}`);
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
+        else if (fraction != null && fraction >= 0.9) warnings.push(status(warnIcon, `${name} 快用完`));
+      }
+      const openrouterKeys = providers?.openrouter?.pool?.keys || [];
+      if (openrouterKeys.length) {
+        const credit = upstreamKpiCredit(openrouterKeys);
+        items.push(`OpenRouter ${credit == null ? '—' : `$${credit.toFixed(2)}`}`);
+        for (const key of openrouterKeys) {
+          if (key.quarantined) {
+            warnings.push(status('fa-ban', `OpenRouter #${Number(key.index)} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
+          }
+        }
+        if (credit != null && credit < 5) warnings.push(status(warnIcon, '餘額偏低'));
+      }
+      const pools = [providers?.ollama_cloud?.pool, providers?.openrouter?.pool].filter(Boolean);
+      if (pools.length) {
+        const inFlight = pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0);
+        const capacity = pools.reduce((sum, pool) => sum + Number(pool.capacity ?? 0), 0);
+        const waiting = pools.reduce((sum, pool) => sum + Number(pool.waiting ?? 0), 0);
+        items.push(`併發 ${inFlight}/${capacity}`);
+        if (waiting > 0) warnings.push(status('fa-hourglass-half', `排隊 ${waiting}`));
+      }
+      return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
+    }
+
+    function readUpstreamKpiCollapsed(storage) {
+      try {
+        return storage?.getItem('vcr_upstream_kpi_collapsed') === '1';
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function writeUpstreamKpiCollapsed(storage, collapsed) {
+      try {
+        storage?.setItem('vcr_upstream_kpi_collapsed', collapsed ? '1' : '0');
+      } catch (_) {}
+    }
+
+    function upstreamKpiTilesHtml(providers, history, nowMs) {
+      const status = upstreamKpiStatus;
+      const warnIcon = 'fa-triangle-exclamation';
+      const quarantine = (provider, key, prefix) => {
+        const minutes = upstreamKpiQuarantineMinutes(key);
+        return `${status('fa-ban', `${prefix}隔離中 ${minutes} 分`)}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
+      };
+      const ollamaKeys = providers?.ollama_cloud?.pool?.keys || [];
+      const ollamaTile = (key) => {
+        const usage = key.included_monthly_usage || {};
+        const used = Number(usage.used_usd);
+        const included = Number(usage.included_usd);
+        const usedFraction = upstreamKpiUsedFraction(key);
+        const known = usedFraction != null;
+        const fraction = known ? usedFraction : 0;
+        const percent = Math.round(fraction * 100);
+        const warn = known && fraction >= 0.9;
+        const days = upstreamKpiDaysUntil(usage.resets_at, nowMs);
+        const resets = days == null ? '' : `${days} 天後重置`;
+        const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+        const sub = key.quarantined
+          ? quarantine('ollama_cloud', key, '')
+          : warn
+          ? `${status(warnIcon, '快用完')}${resets ? `<span>${resets}</span>` : ''}`
+          : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
+        const figures = known
+          ? `<div class="val">$${used.toFixed(1)}<small>/ $${included}</small></div>
+          <div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, percent)}%"></i></div>`
+          : '<div class="val val-muted">月用量無法取得</div>';
+        return `<div class="upstream-kpi">
+          <div class="lbl"><span>Ollama #${Number(key.index)} 月用量</span><span>${known ? `${percent}%` : ''}</span></div>
+          ${figures}
+          <div class="sub">${sub}</div>
+        </div>`;
+      };
+      const openrouterKeys = providers?.openrouter?.pool?.keys || [];
+      const credit = upstreamKpiCredit(openrouterKeys);
+      const openrouterTile = openrouterKeys.length ? `<div class="upstream-kpi">
+          <div class="lbl"><span>OpenRouter 餘額</span><span>${openrouterKeys.length} 把 key</span></div>
+          <div class="val">${credit == null ? '—' : `$${credit.toFixed(2)}`}</div>
+          <div class="sub">${credit != null && credit < 5 ? status(warnIcon, '餘額偏低') : '<span>帳號共用額度</span>'}
+            ${openrouterKeys.filter(key => key.quarantined).map(key => quarantine('openrouter', key, `#${Number(key.index)} `)).join('')}</div>
+        </div>` : '';
+      const pools = [['Ollama', providers?.ollama_cloud?.pool], ['OpenRouter', providers?.openrouter?.pool]]
+        .filter(([, pool]) => pool);
+      const inFlight = (pool) => Number(pool.in_flight_total ?? 0);
+      const totalInFlight = pools.reduce((sum, [, pool]) => sum + inFlight(pool), 0);
+      const totalCapacity = pools.reduce((sum, [, pool]) => sum + Number(pool.capacity ?? 0), 0);
+      const waiting = pools.reduce((sum, [, pool]) => sum + Number(pool.waiting ?? 0), 0);
+      const concurrencyTile = pools.length ? `<div class="upstream-kpi">
+          <div class="lbl"><span>併發</span><span>${waiting > 0 ? status('fa-hourglass-half', `排隊 ${waiting}`) : '無排隊'}</span></div>
+          <div class="val">${totalInFlight}<small>/ ${totalCapacity}</small></div>
+          ${upstreamKpiSparkline(history)}
+          <div class="sub"><span>${pools.map(([label, pool]) => `${label} ${inFlight(pool)}/${pool.capacity ?? '—'}`).join(' · ')}</span></div>
+        </div>` : '';
+      return ollamaKeys.map(ollamaTile).join('') + openrouterTile + concurrencyTile;
+    }
+
     async function loadUpstreamPools() {
       const host = document.getElementById('upstreamPoolsBody');
       if (!host) return;
       try {
         const data = await api('/teacher/upstream-pools');
+        renderUpstreamKpi(data);
         renderUpstreamPools(data);
         host.querySelectorAll('.upstream-quarantine-release').forEach((btn) => {
           btn.addEventListener('click', async () => {
@@ -1422,7 +1572,68 @@
         });
       } catch (err) {
         host.innerHTML = `<p class="hint">無法載入上游負載：${escapeHtml(err.message || err)}</p>`;
+        const board = document.getElementById('upstreamKpi');
+        if (board) board.innerHTML = `<p class="hint">無法載入上游狀態：${escapeHtml(err.message || err)}</p>`;
       }
+    }
+
+    let upstreamKpiData = null;
+    const upstreamKpiHistory = [];
+
+    function renderUpstreamKpi(data) {
+      const board = document.getElementById('upstreamKpi');
+      if (!board) return;
+      if (data !== undefined) {
+        upstreamKpiData = data;
+        const pools = Object.values(data?.providers || {}).map(p => p?.pool).filter(Boolean);
+        upstreamKpiHistory.push(pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0));
+        if (upstreamKpiHistory.length > 12) upstreamKpiHistory.shift();
+      }
+      bindUpstreamKpiBoard(board);
+      const providers = upstreamKpiData?.providers || {};
+      if (!Object.keys(providers).length) {
+        board.innerHTML = '<p class="hint">目前沒有設定併發上限的上游</p>';
+        return;
+      }
+      const collapsed = readUpstreamKpiCollapsed(upstreamKpiStorage());
+      const toggle = `<button type="button" class="upstream-kpi-toggle" data-upstream-kpi-toggle aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展開儀表板 <i class="fas fa-chevron-down" aria-hidden="true"></i>' : '收合成一行 <i class="fas fa-chevron-up" aria-hidden="true"></i>'}</button>`;
+      board.classList.toggle('is-collapsed', collapsed);
+      board.innerHTML = collapsed
+        ? `<div class="upstream-kpi-line"><span class="upstream-kpi-line-title">上游狀態</span>${upstreamKpiLineHtml(providers, Date.now())}${toggle}</div>`
+        : `<div class="upstream-kpi-head"><span>上游狀態</span>${toggle}</div>
+          <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers, upstreamKpiHistory, Date.now())}</div>`;
+    }
+
+    function upstreamKpiStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+
+    function bindUpstreamKpiBoard(board) {
+      if (board.dataset.bound) return;
+      board.dataset.bound = '1';
+      board.addEventListener('click', async (event) => {
+        if (event.target.closest('[data-upstream-kpi-toggle]')) {
+          const storage = upstreamKpiStorage();
+          writeUpstreamKpiCollapsed(storage, !readUpstreamKpiCollapsed(storage));
+          renderUpstreamKpi();
+          return;
+        }
+        const btn = event.target.closest('.upstream-quarantine-release');
+        if (!btn) return;
+        const provider = btn.getAttribute('data-provider');
+        const index = btn.getAttribute('data-index');
+        if (provider == null || index == null) return;
+        btn.disabled = true;
+        try {
+          await api(`/teacher/upstream-pools/${encodeURIComponent(provider)}/keys/${encodeURIComponent(index)}/quarantine-release`, {
+            method: 'POST',
+          });
+          await loadUpstreamPools();
+        } catch (err) {
+          btn.disabled = false;
+          alert(err.message || err);
+        }
+      });
     }
 
     function syncProbeApiKey() {
