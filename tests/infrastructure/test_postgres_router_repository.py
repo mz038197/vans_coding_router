@@ -33,7 +33,7 @@ def postgres_repo():
     with repo._connect() as conn:
         conn.execute(
             """
-            TRUNCATE prompt_logs_archive, prompt_logs, api_keys, session_redemptions,
+            TRUNCATE token_usage, prompt_logs_archive, prompt_logs, api_keys, session_redemptions,
             class_members, class_sessions, classes, user_roles, users
             RESTART IDENTITY CASCADE
             """
@@ -240,3 +240,46 @@ def test_postgres_sitting_filled_from_the_starter_gets_no_auto_tiers(postgres_re
         document = sittings[session_id]["session_chat_language_models"]
         assert template_model_ids(document) == template_model_ids(load_vans_template())
         assert not _carries_auto_tiers(document)
+
+
+def _usage_world(repo):
+    teacher, klass, context = _student_context(repo)
+    return teacher, context.user_id, klass, context
+
+
+def test_postgres_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(postgres_repo):
+    repo = postgres_repo
+    teacher, student_id, klass, context = _usage_world(repo)
+    repo.log_prompt(context, "archived ok", "archived ok", "m", "ok", None, 4, 4, 8)
+    repo.log_prompt(context, "live ok", "live ok", "m", "ok", None, 1, 2, 3)
+    repo.log_prompt(context, "live rejected", "live rejected", "m", "rejected", None, 5, 5, 10)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = %s WHERE raw_prompt = %s", ("2026-05-01T00:00:00+00:00", "archived ok"))
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 1
+    # A database from before Token Usage existed.
+    with repo._connect() as conn:
+        conn.execute("DROP TABLE token_usage")
+
+    upgraded = build_router_repository(_settings())
+    build_router_repository(_settings())  # a later restart
+
+    row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (5, 6, 11)
+    assert row["request_count"] == 2
+    assert row["sessions"][0]["request_count"] == 2
+
+
+def test_postgres_token_usage_is_recorded_queried_and_deleted_per_user(postgres_repo):
+    repo = postgres_repo
+    teacher, student_id, klass, context = _usage_world(repo)
+    repo.record_token_usage(context, "m", "/v1/chat/completions", 1, 2, 3)
+    repo.record_token_usage(context, "m", "/v1/responses", 10, 20, 30)
+    personal = context.__class__(user_id=student_id, email=None, name=None)
+    repo.record_token_usage(personal, "m", "/v1/chat/completions", 100, 100, 200)
+
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"], row["request_count"]) == (11, 22, 33, 2)
+
+    assert repo.delete_prompt_logs_for_users([student_id])["deleted_token_usage"] == 3
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
+    assert (row["total_tokens"], row["request_count"]) == (0, 0)

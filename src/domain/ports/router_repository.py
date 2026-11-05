@@ -272,7 +272,23 @@ class RouterRepositoryPort(Protocol):
         """
         ...
 
+    def record_token_usage(
+        self,
+        auth: AuthContext,
+        model: str,
+        api_endpoint: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        """Record Token Usage for one successful request, whether or not prompt logging is on.
+
+        A Personal API Key request has no class or session. Never archived or auto-purged.
+        """
+        ...
+
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
+        """Token Usage per class member: tokens, request_count, and a per-session breakdown."""
         ...
 
     def list_prompt_logs(

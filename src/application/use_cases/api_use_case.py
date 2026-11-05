@@ -1303,6 +1303,15 @@ class ApiUseCase:
         """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty."""
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
+        if status == "ok" and auth_context is not None and hasattr(self.api_key_repo, "record_token_usage"):
+            self.api_key_repo.record_token_usage(
+                auth=auth_context,
+                model=model,
+                api_endpoint=api_endpoint,
+                prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
+                completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
+                total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
+            )
         if auth_context and auth_context.session_id and hasattr(
             self.api_key_repo, "is_prompt_logging_enabled"
         ):

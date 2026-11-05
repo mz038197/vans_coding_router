@@ -785,7 +785,7 @@ def test_admin_prompt_log_usage_and_delete_by_user(tmp_path):
         json={"user_ids": [user_a["id"]]},
     )
     assert delete_response.status_code == 200
-    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0}
+    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0, "deleted_token_usage": 0}
 
     remaining = repo.list_prompt_logs(teacher["id"], klass["id"])
     assert [row["raw_prompt"] for row in remaining] == ["b log"]

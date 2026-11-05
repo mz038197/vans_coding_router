@@ -1753,19 +1753,75 @@ class RouterRepositoryBase(ABC):
                 ),
             )
 
+    def record_token_usage(
+        self,
+        auth: AuthContext,
+        model: str,
+        api_endpoint: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        if auth.user_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                self._sql(
+                    """
+                    INSERT INTO token_usage(
+                        user_id, class_id, session_id, model, api_endpoint,
+                        prompt_tokens, completion_tokens, total_tokens, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                ),
+                (
+                    auth.user_id,
+                    auth.class_id,
+                    auth.session_id,
+                    model,
+                    api_endpoint,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    dt(utc_now()),
+                ),
+            )
+
+    def _backfill_token_usage_from_prompt_logs(self, conn: Any) -> None:
+        """Run once, when the token_usage table is first created.
+
+        Copies every successful live Prompt Log. Each dialect copies its archive separately.
+        """
+        conn.execute(
+            """
+            INSERT INTO token_usage(
+                user_id, class_id, session_id, model, api_endpoint,
+                prompt_tokens, completion_tokens, total_tokens, created_at
+            )
+            SELECT user_id, class_id, session_id, model, COALESCE(api_endpoint, ''),
+                   COALESCE(prompt_tokens, 0), COALESCE(completion_tokens, 0),
+                   COALESCE(total_tokens, 0), created_at
+            FROM prompt_logs
+            WHERE status = 'ok' AND user_id IS NOT NULL
+            ORDER BY created_at, id
+            """
+        )
+
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 self._sql(
                     """
                     SELECT u.id AS user_id, u.name, u.email,
-                           COALESCE(SUM(l.prompt_tokens), 0) AS prompt_tokens,
-                           COALESCE(SUM(l.completion_tokens), 0) AS completion_tokens,
-                           COALESCE(SUM(l.total_tokens), 0) AS total_tokens
+                           COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
+                           COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
+                           COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                           COUNT(t.id) AS request_count
                     FROM class_members m
                     JOIN users u ON u.id = m.user_id
                     JOIN classes c ON c.id = m.class_id
-                    LEFT JOIN prompt_logs l ON l.user_id = u.id AND l.class_id = m.class_id AND l.status = 'ok'
+                    LEFT JOIN token_usage t ON t.user_id = u.id AND t.class_id = m.class_id
                     WHERE m.class_id = ? AND c.teacher_id = ?
                     GROUP BY u.id, u.name, u.email
                     ORDER BY total_tokens DESC, u.name
@@ -1775,16 +1831,17 @@ class RouterRepositoryBase(ABC):
             ).fetchall()
             result = []
             for row in rows:
-                item = dict(row)
+                item = _usage_ints(dict(row))
                 sessions = conn.execute(
                     self._sql(
                         """
                         SELECT s.id AS session_id, s.invite_code,
-                               COALESCE(SUM(l.prompt_tokens), 0) AS prompt_tokens,
-                               COALESCE(SUM(l.completion_tokens), 0) AS completion_tokens,
-                               COALESCE(SUM(l.total_tokens), 0) AS total_tokens
+                               COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
+                               COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
+                               COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                               COUNT(t.id) AS request_count
                         FROM class_sessions s
-                        LEFT JOIN prompt_logs l ON l.session_id = s.id AND l.user_id = ? AND l.status = 'ok'
+                        LEFT JOIN token_usage t ON t.session_id = s.id AND t.user_id = ?
                         WHERE s.class_id = ?
                         GROUP BY s.id, s.invite_code
                         ORDER BY s.created_at DESC
@@ -1792,7 +1849,7 @@ class RouterRepositoryBase(ABC):
                     ),
                     (item["user_id"], class_id),
                 ).fetchall()
-                item["sessions"] = [dict(session) for session in sessions]
+                item["sessions"] = [_usage_ints(dict(session)) for session in sessions]
                 result.append(item)
             return result
 
@@ -2016,7 +2073,7 @@ class RouterRepositoryBase(ABC):
     def delete_prompt_logs_for_users(self, user_ids: list[int]) -> dict[str, Any]:
         ids = sorted({int(user_id) for user_id in user_ids})
         if not ids:
-            return {"deleted_live": 0, "deleted_archive": 0}
+            return {"deleted_live": 0, "deleted_archive": 0, "deleted_token_usage": 0}
         placeholders = ", ".join("?" for _ in ids)
         with self._connect() as conn:
             cur = conn.execute(
@@ -2024,10 +2081,19 @@ class RouterRepositoryBase(ABC):
                 tuple(ids),
             )
             deleted_live = int(cur.rowcount or 0)
+            cur = conn.execute(
+                self._sql(f"DELETE FROM token_usage WHERE user_id IN ({placeholders})"),
+                tuple(ids),
+            )
+            deleted_token_usage = int(cur.rowcount or 0)
         deleted_archive = self._delete_archived_for_users(ids)
         if deleted_live > 0:
             self._after_user_prompt_delete(deleted_live)
-        return {"deleted_live": deleted_live, "deleted_archive": deleted_archive}
+        return {
+            "deleted_live": deleted_live,
+            "deleted_archive": deleted_archive,
+            "deleted_token_usage": deleted_token_usage,
+        }
 
     def _archived_counts_by_user(self) -> dict[int, int]:
         raise NotImplementedError
@@ -2046,3 +2112,9 @@ class RouterRepositoryBase(ABC):
 
     def _after_archive(self, archived_count: int) -> None:
         return
+
+
+def _usage_ints(item: dict[str, Any]) -> dict[str, Any]:
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens", "request_count"):
+        item[key] = int(item[key] or 0)
+    return item

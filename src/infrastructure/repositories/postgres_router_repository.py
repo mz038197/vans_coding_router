@@ -182,6 +182,31 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_name TEXT")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_confidence DOUBLE PRECISION")
+            token_usage_is_new = (
+                conn.execute("SELECT to_regclass('token_usage') AS t").fetchone()["t"] is None
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    class_id INTEGER,
+                    session_id INTEGER,
+                    model TEXT NOT NULL,
+                    api_endpoint TEXT NOT NULL DEFAULT '',
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_class_user ON token_usage(class_id, user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_session_user ON token_usage(session_id, user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_user ON token_usage(user_id)")
+            if token_usage_is_new:
+                self._backfill_token_usage_from_prompt_logs(conn)
+                self._backfill_token_usage_from_archive(conn)
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
@@ -316,6 +341,24 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 """
             )
             self._backfill_router_model_templates(conn)
+
+    def _backfill_token_usage_from_archive(self, conn: Any) -> None:
+        """Copy successful archived Prompt Logs; skip a row still in the live table."""
+        conn.execute(
+            """
+            INSERT INTO token_usage(
+                user_id, class_id, session_id, model, api_endpoint,
+                prompt_tokens, completion_tokens, total_tokens, created_at
+            )
+            SELECT a.user_id, a.class_id, a.session_id, a.model, COALESCE(a.api_endpoint, ''),
+                   COALESCE(a.prompt_tokens, 0), COALESCE(a.completion_tokens, 0),
+                   COALESCE(a.total_tokens, 0), a.created_at
+            FROM prompt_logs_archive a
+            WHERE a.status = 'ok' AND a.user_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM prompt_logs l WHERE l.id = a.id)
+            ORDER BY a.created_at, a.id
+            """
+        )
 
     def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:
