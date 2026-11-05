@@ -233,6 +233,27 @@ def test_portal_course_toolbar_matches_the_compact_prototype(tmp_path):
     assert "新課堂名稱" in html
 
 
+def test_portal_my_courses_shows_one_card_per_class_session(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    css = client.get("/portal/static/portal.css").text
+    class_tab = html.split('id="classTab"', 1)[1].split('id="monitorTab"', 1)[0]
+    assert class_tab.index('id="upstreamKpi"') < class_tab.index('class="course-toolbar"') < class_tab.index('id="courseDetail"')
+    panel = html[html.index("function renderCourseDetailPanel("):html.index("function monitorSessionOptionLabel(")]
+    assert panel.index("endCourseButtonHtml(course)") < panel.index('id="courseTotals"') < panel.index("session-form-compact") < panel.index('id="sessions-panel"')
+    loader = html[html.index("async function loadClassSessions("):html.index("function sessionLayoutState(")]
+    assert "renderCourseCards(" in loader
+    assert "renderSessionTable(" not in loader
+    card = html[html.index("function courseCardHtml("):html.index("function renderCourseCards(")]
+    assert "sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })" in card
+    assert "學生用量" in card
+    assert "最新紀錄" in card
+    assert "此課堂未記錄 Prompt 內容" in html
+    assert "showPromptDetail" not in card
+    assert ".course-card-body" in css
+    assert "@container (max-width: 760px)" in css
+
+
 def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
@@ -261,10 +282,10 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert "seat_limit" in html
     assert '{"seat_limit"' in html or "{ seat_limit" in html
     assert "該席仍佔用課堂座位" in html
-    fields = html[html.index("const fields = (session)"):html.index("const rowButton")]
-    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox(session)}") < fields.index('session-kicker">安裝清單')
+    fields = html[html.index("function sessionFieldsHtml("):html.index("function renderSessionTable(")]
+    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox}") < fields.index('session-kicker">安裝清單')
     assert "${sessionSeatLimitCell(classId, session)}</div>" in fields
-    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}" not in html
+    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox}" not in html
     assert 'class="session-field session-field-wide session-redemptions hidden"' in html
     assert 'class="roster-nowrap"' in html
     css = client.get("/portal/static/portal.css").text
