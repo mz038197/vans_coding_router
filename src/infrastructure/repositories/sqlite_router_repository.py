@@ -309,13 +309,7 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     """
                 ).fetchall()
             conn.executemany(
-                """
-                INSERT INTO token_usage(
-                    user_id, class_id, session_id, model, api_endpoint,
-                    prompt_tokens, completion_tokens, total_tokens, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                f"{self.TOKEN_USAGE_INSERT} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [tuple(row[1:]) for row in rows if row[0] not in live_ids],
             )
 

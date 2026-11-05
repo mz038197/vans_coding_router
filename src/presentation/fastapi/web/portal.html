@@ -1397,12 +1397,6 @@
     }
 
     // Upstream KPI tiles on 我的課程 (prototype F). Pure: data in, HTML out.
-    function upstreamKpiDaysUntil(iso, nowMs) {
-      const at = Date.parse(iso);
-      if (!Number.isFinite(at)) return null;
-      return Math.max(0, Math.ceil((at - nowMs) / 86400000));
-    }
-
     function upstreamKpiSparkline(values) {
       const samples = (values || []).map(Number).filter(Number.isFinite);
       if (samples.length < 2) return '';
@@ -1433,6 +1427,12 @@
       return Number.isFinite(used) && Number.isFinite(included) && included > 0 ? used / included : null;
     }
 
+    // Included Monthly Usage label pieces: `$X of $Y used` and `Resets in …` (or unavailable).
+    function upstreamKpiMonthlyUsageParts(key) {
+      const [summary, resets = ''] = formatIncludedMonthlyUsage(key?.included_monthly_usage).split('\n');
+      return { summary, resets };
+    }
+
     function upstreamKpiCredit(keys) {
       const value = (keys || [])
         .map(key => key.account_credit_remaining)
@@ -1448,14 +1448,14 @@
       for (const key of providers?.ollama_cloud?.pool?.keys || []) {
         const fraction = upstreamKpiUsedFraction(key);
         const name = `Ollama #${Number(key.index)}`;
-        items.push(`${name} ${fraction == null ? '—' : `${Math.round(fraction * 100)}%`}`);
+        items.push(`${name} ${upstreamKpiMonthlyUsageParts(key).summary}`);
         if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
         else if (fraction != null && fraction >= 0.9) warnings.push(status(warnIcon, `${name} 快用完`));
       }
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
       if (openrouterKeys.length) {
         const credit = upstreamKpiCredit(openrouterKeys);
-        items.push(`OpenRouter ${credit == null ? '—' : `$${credit.toFixed(2)}`}`);
+        items.push(`OpenRouter ${formatAccountCreditRemaining(credit)}`);
         for (const key of openrouterKeys) {
           if (key.quarantined) {
             warnings.push(status('fa-ban', `OpenRouter #${Number(key.index)} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
@@ -1488,6 +1488,20 @@
       } catch (_) {}
     }
 
+    // The collapsed state lives in memory for the page; storage only seeds it and is written
+    // best-effort, so the toggle still works when localStorage is blocked or full.
+    function upstreamKpiCollapseState(storage) {
+      let collapsed = readUpstreamKpiCollapsed(storage);
+      return {
+        get collapsed() { return collapsed; },
+        toggle() {
+          collapsed = !collapsed;
+          writeUpstreamKpiCollapsed(storage, collapsed);
+          return collapsed;
+        },
+      };
+    }
+
     function upstreamKpiTilesHtml(providers, history, nowMs) {
       const status = upstreamKpiStatus;
       const warnIcon = 'fa-triangle-exclamation';
@@ -1497,37 +1511,31 @@
       };
       const ollamaKeys = providers?.ollama_cloud?.pool?.keys || [];
       const ollamaTile = (key) => {
-        const usage = key.included_monthly_usage || {};
-        const used = Number(usage.used_usd);
-        const included = Number(usage.included_usd);
+        const { summary, resets } = upstreamKpiMonthlyUsageParts(key);
         const usedFraction = upstreamKpiUsedFraction(key);
         const known = usedFraction != null;
-        const fraction = known ? usedFraction : 0;
-        const percent = Math.round(fraction * 100);
-        const warn = known && fraction >= 0.9;
-        const days = upstreamKpiDaysUntil(usage.resets_at, nowMs);
-        const resets = days == null ? '' : `${days} 天後重置`;
+        const warn = known && usedFraction >= 0.9;
         const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
         const sub = key.quarantined
           ? quarantine('ollama_cloud', key, '')
           : warn
-          ? `${status(warnIcon, '快用完')}${resets ? `<span>${resets}</span>` : ''}`
+          ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
           : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
-        const figures = known
-          ? `<div class="val">$${used.toFixed(1)}<small>/ $${included}</small></div>
-          <div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, percent)}%"></i></div>`
-          : '<div class="val val-muted">月用量無法取得</div>';
+        const meter = known
+          ? `<div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, Math.round(usedFraction * 100))}%"></i></div>`
+          : '';
         return `<div class="upstream-kpi">
-          <div class="lbl"><span>Ollama #${Number(key.index)} 月用量</span><span>${known ? `${percent}%` : ''}</span></div>
-          ${figures}
+          <div class="lbl"><span>Ollama #${Number(key.index)}</span></div>
+          <div class="val${known ? '' : ' val-muted'}">${escapeHtml(summary)}</div>
+          ${meter}
           <div class="sub">${sub}</div>
         </div>`;
       };
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
       const credit = upstreamKpiCredit(openrouterKeys);
       const openrouterTile = openrouterKeys.length ? `<div class="upstream-kpi">
-          <div class="lbl"><span>OpenRouter 餘額</span><span>${openrouterKeys.length} 把 key</span></div>
-          <div class="val">${credit == null ? '—' : `$${credit.toFixed(2)}`}</div>
+          <div class="lbl"><span>OpenRouter</span><span>${openrouterKeys.length} 把 key</span></div>
+          <div class="val${credit == null ? ' val-muted' : ''}">${escapeHtml(formatAccountCreditRemaining(credit))}</div>
           <div class="sub">${credit != null && credit < 5 ? status(warnIcon, '餘額偏低') : '<span>帳號共用額度</span>'}
             ${openrouterKeys.filter(key => key.quarantined).map(key => quarantine('openrouter', key, `#${Number(key.index)} `)).join('')}</div>
         </div>` : '';
@@ -1595,7 +1603,7 @@
         board.innerHTML = '<p class="hint">目前沒有設定併發上限的上游</p>';
         return;
       }
-      const collapsed = readUpstreamKpiCollapsed(upstreamKpiStorage());
+      const collapsed = upstreamKpiCollapse().collapsed;
       const toggle = `<button type="button" class="upstream-kpi-toggle" data-upstream-kpi-toggle aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展開儀表板 <i class="fas fa-chevron-down" aria-hidden="true"></i>' : '收合成一行 <i class="fas fa-chevron-up" aria-hidden="true"></i>'}</button>`;
       board.classList.toggle('is-collapsed', collapsed);
       board.innerHTML = collapsed
@@ -1608,13 +1616,18 @@
       try { return window.localStorage; } catch (_) { return null; }
     }
 
+    let upstreamKpiCollapseStateForPage = null;
+    function upstreamKpiCollapse() {
+      if (!upstreamKpiCollapseStateForPage) upstreamKpiCollapseStateForPage = upstreamKpiCollapseState(upstreamKpiStorage());
+      return upstreamKpiCollapseStateForPage;
+    }
+
     function bindUpstreamKpiBoard(board) {
       if (board.dataset.bound) return;
       board.dataset.bound = '1';
       board.addEventListener('click', async (event) => {
         if (event.target.closest('[data-upstream-kpi-toggle]')) {
-          const storage = upstreamKpiStorage();
-          writeUpstreamKpiCollapsed(storage, !readUpstreamKpiCollapsed(storage));
+          upstreamKpiCollapse().toggle();
           renderUpstreamKpi();
           return;
         }
@@ -2342,15 +2355,27 @@
       return true;
     }
 
-    // Which cards open: the in-progress sittings, else the most recent one (sessions come newest
-    // first), plus the ids saved in localStorage and a sitting just created. Order follows `sessions`.
+    // Which cards open: the in-progress sittings, else the most recent sitting that has already
+    // started (session_at, or created_at when unscheduled, at or before now), else the top card;
+    // plus the ids saved in localStorage and a sitting just created. Order follows `sessions`.
     function courseCardDefaultOpenIds(sessions, { courseStatus, now, saved = [], createdId = null } = {}) {
       const list = sessions || [];
       const known = new Set(list.map((session) => session.id));
       const open = new Set();
       const live = list.filter((session) => sessionInProgressAt(session, courseStatus, now));
       if (live.length) live.forEach((session) => open.add(session.id));
-      else if (list.length) open.add(list[0].id);
+      else if (list.length) {
+        let latest = null;
+        let latestAt = -Infinity;
+        for (const session of list) {
+          const at = Date.parse(session.session_at || session.created_at || '');
+          if (Number.isFinite(at) && at <= now && at > latestAt) {
+            latest = session;
+            latestAt = at;
+          }
+        }
+        open.add((latest || list[0]).id);
+      }
       for (const id of saved || []) {
         if (known.has(Number(id))) open.add(Number(id));
       }
@@ -2511,7 +2536,7 @@
       const box = document.getElementById('courseTotals');
       if (!box || String(selectedCourseId) !== String(classId)) return;
       const t = courseUsageTotals(items);
-      box.innerHTML = `<span>整門課 Token Usage<b>${formatTokenCount(t.totalTokens)}</b></span>
+      box.innerHTML = `<span>整門課用量<b>${formatTokenCount(t.totalTokens)}</b></span>
         <span>請求數<b>${t.requestCount}</b></span>
         <span>有使用的學生<b>${t.activeStudents} / ${t.memberCount}</b></span>`;
     }

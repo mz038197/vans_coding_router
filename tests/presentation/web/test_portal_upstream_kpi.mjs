@@ -27,16 +27,19 @@ function extractNamedFunction(source, name) {
 function loadKpi() {
   const names = [
     "escapeHtml",
-    "upstreamKpiDaysUntil",
+    "formatIncludedMonthlyUsage",
+    "formatAccountCreditRemaining",
     "upstreamKpiStatus",
     "upstreamKpiQuarantineMinutes",
     "upstreamKpiUsedFraction",
+    "upstreamKpiMonthlyUsageParts",
     "upstreamKpiCredit",
     "upstreamKpiSparkline",
     "upstreamKpiTilesHtml",
     "upstreamKpiLineHtml",
     "readUpstreamKpiCollapsed",
     "writeUpstreamKpiCollapsed",
+    "upstreamKpiCollapseState",
   ];
   const context = {};
   vm.createContext(context);
@@ -47,6 +50,18 @@ function loadKpi() {
 const NOW = Date.parse("2026-11-05T00:00:00Z");
 const IN_9_DAYS = "2026-11-14T00:00:00Z";
 
+// Included Monthly Usage as the pool status reports it (src/domain/extra_usage.py).
+function monthlyUsage(used, included) {
+  const dollars = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+  return {
+    used_usd: used,
+    included_usd: included,
+    resets_at: IN_9_DAYS,
+    summary: `$${dollars(used)} of $${dollars(included)} used`,
+    resets: "Resets in 9 days.",
+  };
+}
+
 function ollamaKey(overrides = {}) {
   return {
     index: 0,
@@ -55,7 +70,7 @@ function ollamaKey(overrides = {}) {
     in_flight: 1,
     quarantined: false,
     quarantine_remaining_sec: null,
-    included_monthly_usage: { used_usd: 12.4, included_usd: 60, resets_at: IN_9_DAYS },
+    included_monthly_usage: monthlyUsage(12.4, 60),
     ...overrides,
   };
 }
@@ -84,15 +99,16 @@ function tiles(html) {
   return html.split('<div class="upstream-kpi').slice(1);
 }
 
-test("a healthy Ollama key tile shows used / included, reset days and its concurrency", () => {
+test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and its concurrency", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const html = upstreamKpiTilesHtml(providers(), [], NOW);
   const ollama = tiles(html)[0];
 
-  assert.match(ollama, /Ollama #0 月用量/);
-  assert.match(ollama, /\$12\.4<small>\/ \$60<\/small>/);
-  assert.match(ollama, /21%/);
-  assert.match(ollama, /9 天後重置 · 併發 1\/3/);
+  assert.match(ollama, /Ollama #0/);
+  assert.match(ollama, /\$12\.40 of \$60 used/);
+  assert.match(ollama, /<div class="meter"><i style="width:21%"><\/i><\/div>/);
+  assert.match(ollama, /Resets in 9 days\. · 併發 1\/3/);
+  assert.doesNotMatch(ollama, /\d%<|月用量 \d|天後重置/);
   assert.doesNotMatch(ollama, /upstream-kpi-status/);
   assert.doesNotMatch(ollama, /meter warn/);
 });
@@ -107,17 +123,18 @@ function statuses(tile) {
 
 test("an Ollama key at 90% of Included Monthly Usage shows 快用完 with an icon and reset days", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const key = ollamaKey({ included_monthly_usage: { used_usd: 54, included_usd: 60, resets_at: IN_9_DAYS } });
+  const key = ollamaKey({ included_monthly_usage: monthlyUsage(54, 60) });
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
 
   assert.deepEqual(statuses(ollama), ["快用完"]);
-  assert.match(ollama, /9 天後重置/);
+  assert.match(ollama, /\$54 of \$60 used/);
+  assert.match(ollama, /Resets in 9 days\./);
   assert.match(ollama, /meter warn/);
 });
 
 test("an Ollama key just under 90% has no warning", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const key = ollamaKey({ included_monthly_usage: { used_usd: 53.9, included_usd: 60, resets_at: IN_9_DAYS } });
+  const key = ollamaKey({ included_monthly_usage: monthlyUsage(53.9, 60) });
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
 
   assert.deepEqual(statuses(ollama), []);
@@ -148,7 +165,7 @@ test("a quarantined Ollama key shows 隔離中 N 分 with an icon and a Quaranti
     index: 1,
     quarantined: true,
     quarantine_remaining_sec: 1840,
-    included_monthly_usage: { used_usd: 58, included_usd: 60, resets_at: IN_9_DAYS },
+    included_monthly_usage: monthlyUsage(58, 60),
   });
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
 
@@ -170,10 +187,19 @@ test("OpenRouter Account Credit Remaining at $5 or more is shared credit with no
   const keys = [openrouterKey({ account_credit_remaining: 5 }), openrouterKey({ index: 1, account_credit_remaining: 5 })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
 
-  assert.match(openrouter, /\$5\.00/);
+  assert.match(openrouter, /餘額 \$5\.00/);
   assert.match(openrouter, /2 把 key/);
   assert.match(openrouter, /帳號共用額度/);
   assert.deepEqual(statuses(openrouter), []);
+});
+
+test("an OpenRouter tile with no Account Credit Remaining says it is unavailable", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [openrouterKey({ account_credit_remaining: null })];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
+
+  assert.match(openrouter, /餘額無法取得/);
+  assert.doesNotMatch(openrouter, /NaN|null|undefined|—/);
 });
 
 test("OpenRouter Account Credit Remaining below $5 shows 餘額偏低 with an icon", () => {
@@ -181,7 +207,7 @@ test("OpenRouter Account Credit Remaining below $5 shows 餘額偏低 with an ic
   const keys = [openrouterKey({ account_credit_remaining: 4.3 })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
 
-  assert.match(openrouter, /\$4\.30/);
+  assert.match(openrouter, /餘額 \$4\.30/);
   assert.deepEqual(statuses(openrouter), ["餘額偏低"]);
 });
 
@@ -226,8 +252,9 @@ test("the collapsed line summarizes usage, credit and concurrency with no warnin
   const { upstreamKpiLineHtml } = loadKpi();
   const line = upstreamKpiLineHtml(providers(), NOW);
 
-  assert.match(line, /Ollama #0 21%/);
-  assert.match(line, /OpenRouter \$23\.50/);
+  assert.match(line, /Ollama #0 \$12\.40 of \$60 used/);
+  assert.doesNotMatch(line, /\d%/);
+  assert.match(line, /OpenRouter 餘額 \$23\.50/);
   assert.match(line, /併發 1\/14/);
   assert.deepEqual(statuses(line), []);
 });
@@ -238,7 +265,7 @@ test("the collapsed line keeps every warning as an icon plus text", () => {
     providers({
       waiting: 2,
       ollamaKeys: [
-        ollamaKey({ included_monthly_usage: { used_usd: 57, included_usd: 60, resets_at: IN_9_DAYS } }),
+        ollamaKey({ included_monthly_usage: monthlyUsage(57, 60) }),
         ollamaKey({ index: 1, quarantined: true, quarantine_remaining_sec: 600 }),
       ],
       openrouterKeys: [openrouterKey({ account_credit_remaining: 1 })],
@@ -275,4 +302,33 @@ test("a failing storage leaves the dashboard expanded and does not throw", () =>
   assert.equal(readUpstreamKpiCollapsed(broken), false);
   assert.equal(readUpstreamKpiCollapsed(undefined), false);
   assert.doesNotThrow(() => writeUpstreamKpiCollapsed(broken, true));
+});
+
+test("the collapse toggle still works for the session when storage writes fail", () => {
+  const { upstreamKpiCollapseState } = loadKpi();
+  const broken = {
+    getItem() {
+      throw new Error("SecurityError");
+    },
+    setItem() {
+      throw new Error("QuotaExceededError");
+    },
+  };
+  const state = upstreamKpiCollapseState(broken);
+
+  assert.equal(state.collapsed, false);
+  assert.equal(state.toggle(), true);
+  assert.equal(state.collapsed, true);
+  assert.equal(state.toggle(), false);
+});
+
+test("the collapse state starts from storage and writes each toggle back", () => {
+  const { upstreamKpiCollapseState } = loadKpi();
+  const store = new Map([["vcr_upstream_kpi_collapsed", "1"]]);
+  const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+  const state = upstreamKpiCollapseState(storage);
+
+  assert.equal(state.collapsed, true);
+  state.toggle();
+  assert.equal(store.get("vcr_upstream_kpi_collapsed"), "0");
 });
