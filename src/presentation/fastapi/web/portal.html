@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=model-wizard-step45-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=course-cards-f-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -159,6 +159,7 @@
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
         <div id="classTab" class="hidden">
+          <section id="upstreamKpi" class="upstream-kpi-board" aria-label="上游狀態"></section>
           <div class="course-toolbar">
             <input id="courseSearch" placeholder="搜尋課程" oninput="onCourseFilterChange()" />
             <select id="courseStatusFilter" aria-label="課程狀態" onchange="onCourseFilterChange()">
@@ -997,7 +998,7 @@
       const decisionOn = sessionHasShelf(session, 'decisionShelf');
       const chip = (name, on, title) => `<span class="capability-chip ${on ? 'is-on' : 'is-off'}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(name)} ${on ? '開' : '關'}</span>`;
       const prompt = allowOwnerActions
-        ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 與 token 用量', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
+        ? capabilityToggleHtml('session-prompt-toggle', '關閉後不記錄 prompt 內容；Token 用量照常記錄', promptOn, `toggleSessionPromptLogging(${classId}, ${session.id}, this.checked, this)`, `Prompt ${promptOn ? '開' : '關'}`)
         : chip('Prompt', promptOn, '');
       const searchOn = sessionWebSearchEnabled(session);
       const search = allowOwnerActions
@@ -1290,12 +1291,10 @@
       });
       setTeacherMenuOpen(false);
       syncClassroomInviteCard();
-      if (id === 'monitorTab') {
-        syncMonitorCourseSelect();
-        startUpstreamPoolsPoll();
-      } else {
-        stopUpstreamPoolsPoll();
-      }
+      if (id === 'monitorTab') syncMonitorCourseSelect();
+      // One poll feeds both upstream views; only the visible tab keeps it running.
+      if (id === 'monitorTab' || id === 'classTab') startUpstreamPoolsPoll();
+      else stopUpstreamPoolsPoll();
       if (id === 'classTab') syncCourseSelect();
       if (id === 'probeTab') syncProbeApiKey();
     }
@@ -1397,11 +1396,171 @@
       return '餘額無法取得';
     }
 
+    // Upstream KPI tiles on 我的課程 (prototype F). Pure: data in, HTML out.
+    function upstreamKpiSparkline(values) {
+      const samples = (values || []).map(Number).filter(Number.isFinite);
+      if (samples.length < 2) return '';
+      const max = Math.max(1, ...samples);
+      const w = 100;
+      const h = 26;
+      const points = samples.map((v, i) => [i / (samples.length - 1) * (w - 4) + 2, h - 3 - v / max * (h - 6)]);
+      const line = (pts) => pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
+      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="${line(points)}" vector-effect="non-scaling-stroke"/>
+          <polyline class="now" points="${line(points.slice(-2))}" vector-effect="non-scaling-stroke"/></svg>`;
+    }
+
+    // A tile status is always an icon plus text, never colour alone.
+    function upstreamKpiStatus(icon, text) {
+      return `<span class="upstream-kpi-status"><i class="fas ${icon}" aria-hidden="true"></i>${escapeHtml(text)}</span>`;
+    }
+
+    function upstreamKpiQuarantineMinutes(key) {
+      return Math.ceil(Math.max(0, Number(key.quarantine_remaining_sec) || 0) / 60);
+    }
+
+    function upstreamKpiUsedFraction(key) {
+      const usage = key?.included_monthly_usage;
+      if (!usage || usage.used_usd == null || usage.included_usd == null) return null;
+      const used = Number(usage.used_usd);
+      const included = Number(usage.included_usd);
+      return Number.isFinite(used) && Number.isFinite(included) && included > 0 ? used / included : null;
+    }
+
+    // Included Monthly Usage label pieces: `$X of $Y used` and `Resets in …` (or unavailable).
+    function upstreamKpiMonthlyUsageParts(key) {
+      const [summary, resets = ''] = formatIncludedMonthlyUsage(key?.included_monthly_usage).split('\n');
+      // The tile joins resets with "· 併發 …", so drop the sentence's closing period.
+      return { summary, resets: resets.replace(/\.$/, '') };
+    }
+
+    function upstreamKpiCredit(keys) {
+      const value = (keys || [])
+        .map(key => key.account_credit_remaining)
+        .find(v => typeof v === 'number' && Number.isFinite(v));
+      return value ?? null;
+    }
+
+    function upstreamKpiLineHtml(providers, nowMs) {
+      const status = upstreamKpiStatus;
+      const warnIcon = 'fa-triangle-exclamation';
+      const items = [];
+      const warnings = [];
+      for (const key of providers?.ollama_cloud?.pool?.keys || []) {
+        const fraction = upstreamKpiUsedFraction(key);
+        const name = `Ollama #${Number(key.index)}`;
+        items.push(`${name} ${upstreamKpiMonthlyUsageParts(key).summary}`);
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
+        else if (fraction != null && fraction >= 0.9) warnings.push(status(warnIcon, `${name} 快用完`));
+      }
+      const openrouterKeys = providers?.openrouter?.pool?.keys || [];
+      if (openrouterKeys.length) {
+        const credit = upstreamKpiCredit(openrouterKeys);
+        items.push(`OpenRouter ${formatAccountCreditRemaining(credit)}`);
+        for (const key of openrouterKeys) {
+          if (key.quarantined) {
+            warnings.push(status('fa-ban', `OpenRouter #${Number(key.index)} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
+          }
+        }
+        if (credit != null && credit < 5) warnings.push(status(warnIcon, '餘額偏低'));
+      }
+      const pools = [providers?.ollama_cloud?.pool, providers?.openrouter?.pool].filter(Boolean);
+      if (pools.length) {
+        const inFlight = pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0);
+        const capacity = pools.reduce((sum, pool) => sum + Number(pool.capacity ?? 0), 0);
+        const waiting = pools.reduce((sum, pool) => sum + Number(pool.waiting ?? 0), 0);
+        items.push(`併發 ${inFlight}/${capacity}`);
+        if (waiting > 0) warnings.push(status('fa-hourglass-half', `排隊 ${waiting}`));
+      }
+      return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
+    }
+
+    function readUpstreamKpiCollapsed(storage) {
+      try {
+        return storage?.getItem('vcr_upstream_kpi_collapsed') === '1';
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function writeUpstreamKpiCollapsed(storage, collapsed) {
+      try {
+        storage?.setItem('vcr_upstream_kpi_collapsed', collapsed ? '1' : '0');
+      } catch (_) {}
+    }
+
+    // The collapsed state lives in memory for the page; storage only seeds it and is written
+    // best-effort, so the toggle still works when localStorage is blocked or full.
+    function upstreamKpiCollapseState(storage) {
+      let collapsed = readUpstreamKpiCollapsed(storage);
+      return {
+        get collapsed() { return collapsed; },
+        toggle() {
+          collapsed = !collapsed;
+          writeUpstreamKpiCollapsed(storage, collapsed);
+          return collapsed;
+        },
+      };
+    }
+
+    function upstreamKpiTilesHtml(providers, history, nowMs) {
+      const status = upstreamKpiStatus;
+      const warnIcon = 'fa-triangle-exclamation';
+      const quarantine = (provider, key, prefix) => {
+        const minutes = upstreamKpiQuarantineMinutes(key);
+        return `${status('fa-ban', `${prefix}隔離中 ${minutes} 分`)}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
+      };
+      const ollamaKeys = providers?.ollama_cloud?.pool?.keys || [];
+      const ollamaTile = (key) => {
+        const { summary, resets } = upstreamKpiMonthlyUsageParts(key);
+        const usedFraction = upstreamKpiUsedFraction(key);
+        const known = usedFraction != null;
+        const warn = known && usedFraction >= 0.9;
+        const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+        const sub = key.quarantined
+          ? quarantine('ollama_cloud', key, '')
+          : warn
+          ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
+          : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
+        const meter = known
+          ? `<div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, Math.round(usedFraction * 100))}%"></i></div>`
+          : '';
+        return `<div class="upstream-kpi">
+          <div class="lbl"><span>Ollama #${Number(key.index)}</span></div>
+          <div class="val${known ? '' : ' val-muted'}">${escapeHtml(summary)}</div>
+          ${meter}
+          <div class="sub">${sub}</div>
+        </div>`;
+      };
+      const openrouterKeys = providers?.openrouter?.pool?.keys || [];
+      const credit = upstreamKpiCredit(openrouterKeys);
+      const openrouterTile = openrouterKeys.length ? `<div class="upstream-kpi">
+          <div class="lbl"><span>OpenRouter</span><span>${openrouterKeys.length} 把 key</span></div>
+          <div class="val${credit == null ? ' val-muted' : ''}">${escapeHtml(formatAccountCreditRemaining(credit))}</div>
+          <div class="sub">${credit != null && credit < 5 ? status(warnIcon, '餘額偏低') : '<span>帳號共用額度</span>'}
+            ${openrouterKeys.filter(key => key.quarantined).map(key => quarantine('openrouter', key, `#${Number(key.index)} `)).join('')}</div>
+        </div>` : '';
+      const pools = [['Ollama', providers?.ollama_cloud?.pool], ['OpenRouter', providers?.openrouter?.pool]]
+        .filter(([, pool]) => pool);
+      const inFlight = (pool) => Number(pool.in_flight_total ?? 0);
+      const totalInFlight = pools.reduce((sum, [, pool]) => sum + inFlight(pool), 0);
+      const totalCapacity = pools.reduce((sum, [, pool]) => sum + Number(pool.capacity ?? 0), 0);
+      const waiting = pools.reduce((sum, [, pool]) => sum + Number(pool.waiting ?? 0), 0);
+      const concurrencyTile = pools.length ? `<div class="upstream-kpi">
+          <div class="lbl"><span>併發</span><span>${waiting > 0 ? status('fa-hourglass-half', `排隊 ${waiting}`) : '無排隊'}</span></div>
+          <div class="val">${totalInFlight}<small>/ ${totalCapacity}</small></div>
+          ${upstreamKpiSparkline(history)}
+          <div class="sub"><span>${pools.map(([label, pool]) => `${label} ${inFlight(pool)}/${pool.capacity ?? '—'}`).join(' · ')}</span></div>
+        </div>` : '';
+      return ollamaKeys.map(ollamaTile).join('') + openrouterTile + concurrencyTile;
+    }
+
     async function loadUpstreamPools() {
       const host = document.getElementById('upstreamPoolsBody');
       if (!host) return;
       try {
         const data = await api('/teacher/upstream-pools');
+        renderUpstreamKpi(data);
         renderUpstreamPools(data);
         host.querySelectorAll('.upstream-quarantine-release').forEach((btn) => {
           btn.addEventListener('click', async () => {
@@ -1422,7 +1581,73 @@
         });
       } catch (err) {
         host.innerHTML = `<p class="hint">無法載入上游負載：${escapeHtml(err.message || err)}</p>`;
+        const board = document.getElementById('upstreamKpi');
+        if (board) board.innerHTML = `<p class="hint">無法載入上游狀態：${escapeHtml(err.message || err)}</p>`;
       }
+    }
+
+    let upstreamKpiData = null;
+    const upstreamKpiHistory = [];
+
+    function renderUpstreamKpi(data) {
+      const board = document.getElementById('upstreamKpi');
+      if (!board) return;
+      if (data !== undefined) {
+        upstreamKpiData = data;
+        const pools = Object.values(data?.providers || {}).map(p => p?.pool).filter(Boolean);
+        upstreamKpiHistory.push(pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0));
+        if (upstreamKpiHistory.length > 12) upstreamKpiHistory.shift();
+      }
+      bindUpstreamKpiBoard(board);
+      const providers = upstreamKpiData?.providers || {};
+      if (!Object.keys(providers).length) {
+        board.innerHTML = '<p class="hint">目前沒有設定併發上限的上游</p>';
+        return;
+      }
+      const collapsed = upstreamKpiCollapse().collapsed;
+      const toggle = `<button type="button" class="upstream-kpi-toggle" data-upstream-kpi-toggle aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展開儀表板 <i class="fas fa-chevron-down" aria-hidden="true"></i>' : '收合成一行 <i class="fas fa-chevron-up" aria-hidden="true"></i>'}</button>`;
+      board.classList.toggle('is-collapsed', collapsed);
+      board.innerHTML = collapsed
+        ? `<div class="upstream-kpi-line"><span class="upstream-kpi-line-title">上游狀態</span>${upstreamKpiLineHtml(providers, Date.now())}${toggle}</div>`
+        : `<div class="upstream-kpi-head"><span>上游狀態</span>${toggle}</div>
+          <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers, upstreamKpiHistory, Date.now())}</div>`;
+    }
+
+    function upstreamKpiStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+
+    let upstreamKpiCollapseStateForPage = null;
+    function upstreamKpiCollapse() {
+      if (!upstreamKpiCollapseStateForPage) upstreamKpiCollapseStateForPage = upstreamKpiCollapseState(upstreamKpiStorage());
+      return upstreamKpiCollapseStateForPage;
+    }
+
+    function bindUpstreamKpiBoard(board) {
+      if (board.dataset.bound) return;
+      board.dataset.bound = '1';
+      board.addEventListener('click', async (event) => {
+        if (event.target.closest('[data-upstream-kpi-toggle]')) {
+          upstreamKpiCollapse().toggle();
+          renderUpstreamKpi();
+          return;
+        }
+        const btn = event.target.closest('.upstream-quarantine-release');
+        if (!btn) return;
+        const provider = btn.getAttribute('data-provider');
+        const index = btn.getAttribute('data-index');
+        if (provider == null || index == null) return;
+        btn.disabled = true;
+        try {
+          await api(`/teacher/upstream-pools/${encodeURIComponent(provider)}/keys/${encodeURIComponent(index)}/quarantine-release`, {
+            method: 'POST',
+          });
+          await loadUpstreamPools();
+        } catch (err) {
+          btn.disabled = false;
+          alert(err.message || err);
+        }
+      });
     }
 
     function syncProbeApiKey() {
@@ -1636,8 +1861,9 @@
           <span>${escapeHtml(course.name)}</span>
           ${renderStatusTag('course', course.status)}
           <span class="hint hint-inline">${course.member_count ?? 0} 位成員</span>
-          ${currentRoles.includes('admin') && !ended ? `<button type="button" class="btn-danger end-course-btn" onclick="disableClass(${course.id})">結束課程</button>` : ''}
+          ${endCourseButtonHtml(course)}
         </div>
+        <div id="courseTotals" class="course-totals" aria-live="polite"></div>
         ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
           <div class="session-form session-form-compact">
             <input type="text" id="sessionName" class="session-name-input" placeholder="新課堂名稱" aria-label="課堂名稱" />
@@ -1963,10 +2189,11 @@
       if (box) box.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
     }
 
-    async function loadClassSessions(classId) {
+    async function loadClassSessions(classId, options = {}) {
       const payload = await api(`/teacher/classes/${classId}/sessions`);
       redemptionsCache[classId] = (await api(`/teacher/classes/${classId}/redemptions`)).items || [];
-      renderSessionTable(classId, payload.items || []);
+      renderCourseCards(classId, payload.items || [], options);
+      await loadCourseActivity(classId);
     }
 
     function sessionLayoutState(classId) {
@@ -2021,6 +2248,24 @@
       observer.observe(box);
     }
 
+    // The full Class Session settings: the admin list's inspector and the left half of a 我的課程 card.
+    function sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions, showRedemptions }) {
+      const redemptionBox = showRedemptions
+        ? `<div id="redemption-row-${classId}-${session.id}" class="session-field session-field-wide session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
+        : '';
+      return `
+        <div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>
+        <div class="session-fields">
+          <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
+          <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}</div>
+          <div class="session-field"><span class="session-kicker">Key 到期</span>${sessionExpiresCell(classId, session)}</div>
+          ${redemptionBox}
+          ${allowOwnerActions ? `<div class="session-field"><span class="session-kicker">安裝清單</span>${sessionCatalogCell(classId, session)}</div>` : ''}
+          <div class="session-field session-field-wide">${sessionModelAllowlistCell(classId, session)}</div>
+          <div class="session-field session-field-wide"><span class="session-kicker">能力</span>${sessionCapabilitiesCell(classId, session, allowOwnerActions)}</div>
+        </div>`;
+    }
+
     function renderSessionTable(classId, sessions, options = {}) {
       const course = teacherClasses.find(c => c.id === classId);
       const courseStatus = options.courseStatus || course?.status || 'active';
@@ -2053,20 +2298,7 @@
         const active = isSessionActive(session, courseStatus);
         return `<span class="tag ${active ? 'tag-active' : 'tag-ended'}">${active ? '進行中' : '已結束'}</span>`;
       };
-      const redemptionBox = (session) => showRedemptions
-        ? `<div id="redemption-row-${classId}-${session.id}" class="session-field session-field-wide session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
-        : '';
-      const fields = (session) => `
-        <div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>
-        <div class="session-fields">
-          <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
-          <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}</div>
-          <div class="session-field"><span class="session-kicker">Key 到期</span>${sessionExpiresCell(classId, session)}</div>
-          ${redemptionBox(session)}
-          ${allowOwnerActions ? `<div class="session-field"><span class="session-kicker">安裝清單</span>${sessionCatalogCell(classId, session)}</div>` : ''}
-          <div class="session-field session-field-wide">${sessionModelAllowlistCell(classId, session)}</div>
-          <div class="session-field session-field-wide"><span class="session-kicker">能力</span>${sessionCapabilitiesCell(classId, session, allowOwnerActions)}</div>
-        </div>`;
+      const fields = (session) => sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions, showRedemptions });
       const rowButton = (session) => {
         const current = session.id === state.selectedId ? ' is-current' : '';
         const when = formatLocalDateTime(session.session_at || session.created_at);
@@ -2100,6 +2332,345 @@
           ${open ? `<div class="session-band-body">${fields(session)}</div>` : ''}
         </section>`;
       }).join('')}</div>`;
+    }
+
+    // ---------- 我的課程: one card per Class Session (layout F, ADR 0041) ----------
+    // Left half: the full session settings. Right half: this sitting's Token Usage per student
+    // and its latest Prompt Logs. Several cards may be open; open, in-progress cards poll.
+
+    const COURSE_CARD_REFRESH_MS = 10000;
+    const COURSE_CARD_LOG_LIMIT = 5;
+    let courseCardSessions = {};      // classId -> sessions, newest first
+    let courseCardOpen = {};          // classId -> Set of open session ids (this page load)
+    let courseCardFilter = {};        // sessionId -> { email, name } student filter on the latest logs
+    let courseUsageCache = {};        // classId -> items[] from GET /teacher/classes/{id}/usage
+    let courseCardTimer = null;
+
+    // Started (session_at reached or unset), not expired, and the course not ended.
+    function sessionInProgressAt(session, courseStatus, now) {
+      if (courseStatus === 'ended') return false;
+      const startAt = session.session_at ? Date.parse(session.session_at) : NaN;
+      if (Number.isFinite(startAt) && startAt > now) return false;
+      const expiresAt = session.expires_at ? Date.parse(session.expires_at) : NaN;
+      if (Number.isFinite(expiresAt) && expiresAt <= now) return false;
+      return true;
+    }
+
+    // Which cards open: the in-progress sittings, else the most recent sitting that has already
+    // started (session_at, or created_at when unscheduled, at or before now), else the top card;
+    // plus the ids saved in localStorage and a sitting just created. Order follows `sessions`.
+    function courseCardDefaultOpenIds(sessions, { courseStatus, now, saved = [], createdId = null } = {}) {
+      const list = sessions || [];
+      const known = new Set(list.map((session) => session.id));
+      const open = new Set();
+      const live = list.filter((session) => sessionInProgressAt(session, courseStatus, now));
+      if (live.length) live.forEach((session) => open.add(session.id));
+      else if (list.length) {
+        let latest = null;
+        let latestAt = -Infinity;
+        for (const session of list) {
+          const at = Date.parse(session.session_at || session.created_at || '');
+          if (Number.isFinite(at) && at <= now && at > latestAt) {
+            latest = session;
+            latestAt = at;
+          }
+        }
+        open.add((latest || list[0]).id);
+      }
+      for (const id of saved || []) {
+        if (known.has(Number(id))) open.add(Number(id));
+      }
+      if (createdId != null && known.has(Number(createdId))) open.add(Number(createdId));
+      return list.filter((session) => open.has(session.id)).map((session) => session.id);
+    }
+
+    // Only open, in-progress cards poll, and not while the teacher is typing in a field.
+    function shouldAutoRefreshCourseCard({ open, inProgress, focusedTag }) {
+      if (!open || !inProgress) return false;
+      const tag = String(focusedTag || '').toUpperCase();
+      return tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA';
+    }
+
+    function courseCardStorageKey(classId) {
+      return `vcr.courseCards.open.${classId}`;
+    }
+
+    function readSavedCourseCards(classId) {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(courseCardStorageKey(classId)) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function writeSavedCourseCards(classId) {
+      try {
+        localStorage.setItem(courseCardStorageKey(classId), JSON.stringify([...(courseCardOpen[classId] || [])]));
+      } catch (_) {
+        /* storage may be unavailable */
+      }
+    }
+
+    function formatTokenCount(value) {
+      const n = Number(value) || 0;
+      if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+      if (n >= 10000) return `${Math.round(n / 1000)}k`;
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+      return String(n);
+    }
+
+    function courseCardStatusTag(session, courseStatus) {
+      const now = Date.now();
+      const label = sessionInProgressAt(session, courseStatus, now)
+        ? '進行中'
+        : (courseStatus !== 'ended' && isSessionActive(session, courseStatus) ? '未開始' : '已結束');
+      const cls = label === '進行中' ? 'tag-active' : label === '未開始' ? 'tag-upcoming' : 'tag-ended';
+      return `<span class="tag ${cls}">${label}</span>`;
+    }
+
+    // This sitting's rows from the course usage payload: students with requests, most tokens first.
+    function courseCardUsageRows(items, sessionId) {
+      return (items || [])
+        .map((item) => {
+          const entry = (item.sessions || []).find((s) => s.session_id === sessionId);
+          return entry && entry.request_count
+            ? { user_id: item.user_id, name: item.name, email: item.email, total_tokens: entry.total_tokens || 0, request_count: entry.request_count || 0 }
+            : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.total_tokens - a.total_tokens);
+    }
+
+    function courseCardHtml(classId, session, courseStatus, open) {
+      const when = formatLocalDateTime(session.session_at || session.created_at);
+      const body = open ? `<div class="course-card-body">
+          <div class="course-card-settings">
+            <h4>設定</h4>
+            ${sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })}
+          </div>
+          <div class="course-card-activity">
+            <h4>學生用量</h4>
+            <div id="course-card-usage-${session.id}" class="course-card-usage"><p class="hint">載入中…</p></div>
+            <h4 class="course-card-logs-head" id="course-card-logs-head-${session.id}">最新紀錄</h4>
+            <div id="course-card-logs-${session.id}" class="course-card-logs"><p class="hint">載入中…</p></div>
+          </div>
+        </div>` : '';
+      return `<section class="course-card${open ? ' is-open' : ''}" id="course-card-${session.id}">
+        <button type="button" class="course-card-summary" aria-expanded="${open ? 'true' : 'false'}" onclick="toggleCourseCard(${classId}, ${session.id})">
+          <span class="sl-name">${escapeHtml(sessionDisplayName(session))}</span>
+          ${courseCardStatusTag(session, courseStatus)}
+          <span class="session-name-sub">${escapeHtml(when)}</span>
+          <span class="sl-seats">${sessionRedemptionCount(session)} / ${sessionSeatLimit(session)}</span>
+          <span class="sl-tokens" id="course-card-tokens-${session.id}"></span>
+          <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+        </button>
+        ${body}
+      </section>`;
+    }
+
+    function renderCourseCards(classId, sessions, { createdId = null } = {}) {
+      const box = document.getElementById('sessions-panel');
+      if (!box) return;
+      const course = teacherClasses.find(c => c.id === classId);
+      const courseStatus = course?.status || 'active';
+      courseCardSessions[classId] = sessions;
+      window.__sessionById = window.__sessionById || {};
+      sessions.forEach((s) => { window.__sessionById[s.id] = s; });
+      if (!courseCardOpen[classId]) {
+        courseCardOpen[classId] = new Set(courseCardDefaultOpenIds(sessions, {
+          courseStatus,
+          now: Date.now(),
+          saved: readSavedCourseCards(classId),
+          createdId,
+        }));
+      } else if (createdId != null) {
+        courseCardOpen[classId].add(createdId);
+      }
+      if (createdId != null) writeSavedCourseCards(classId);
+      const open = courseCardOpen[classId];
+      if (!sessions.length) {
+        box.innerHTML = '<p class="hint">尚無課堂，用上面的表單新增第一堂。</p>';
+        return;
+      }
+      box.innerHTML = sessions.map((session) => courseCardHtml(classId, session, courseStatus, open.has(session.id))).join('');
+      if (courseUsageCache[classId]) applyCourseUsage(classId, courseUsageCache[classId]);
+      ensureCourseCardTimer();
+    }
+
+    function toggleCourseCard(classId, sessionId) {
+      const open = courseCardOpen[classId] || (courseCardOpen[classId] = new Set());
+      const opening = !open.has(sessionId);
+      if (opening) open.add(sessionId);
+      else open.delete(sessionId);
+      writeSavedCourseCards(classId);
+      const session = (courseCardSessions[classId] || []).find((s) => s.id === sessionId);
+      const card = document.getElementById(`course-card-${sessionId}`);
+      if (!session || !card) return;
+      const course = teacherClasses.find(c => c.id === classId);
+      card.outerHTML = courseCardHtml(classId, session, course?.status || 'active', opening);
+      if (courseUsageCache[classId]) applyCourseUsage(classId, courseUsageCache[classId]);
+      if (opening) loadCourseActivity(classId, [sessionId]).catch(() => {});
+    }
+
+    // One usage fetch per course feeds every card (and, in #88, the course totals row).
+    async function loadCourseUsage(classId) {
+      const payload = await api(`/teacher/classes/${classId}/usage`);
+      courseUsageCache[classId] = payload.items || [];
+      applyCourseUsage(classId, courseUsageCache[classId]);
+      return courseUsageCache[classId];
+    }
+
+    // Course-wide Token Usage from the usage endpoint's items (one per class member, zeros
+    // included), so sittings with Prompt Logs off still count.
+    function courseUsageTotals(items) {
+      const members = items || [];
+      return {
+        totalTokens: members.reduce((sum, m) => sum + (Number(m.total_tokens) || 0), 0),
+        requestCount: members.reduce((sum, m) => sum + (Number(m.request_count) || 0), 0),
+        activeStudents: members.filter((m) => (Number(m.total_tokens) || 0) > 0).length,
+        memberCount: members.length,
+      };
+    }
+
+    function renderCourseTotals(classId, items) {
+      const box = document.getElementById('courseTotals');
+      if (!box || String(selectedCourseId) !== String(classId)) return;
+      const t = courseUsageTotals(items);
+      box.innerHTML = `<span>整門課用量<b>${formatTokenCount(t.totalTokens)}</b></span>
+        <span>請求數<b>${t.requestCount}</b></span>
+        <span>有使用的學生<b>${t.activeStudents} / ${t.memberCount}</b></span>`;
+    }
+
+    // Fan the course usage out to the course totals row and the cards.
+    function applyCourseUsage(classId, items) {
+      renderCourseTotals(classId, items);
+      for (const session of courseCardSessions[classId] || []) {
+        const rows = courseCardUsageRows(items, session.id);
+        const tokens = document.getElementById(`course-card-tokens-${session.id}`);
+        if (tokens) tokens.textContent = rows.length ? formatTokenCount(rows.reduce((sum, r) => sum + r.total_tokens, 0)) : '';
+        const box = document.getElementById(`course-card-usage-${session.id}`);
+        if (box) box.innerHTML = renderCourseCardUsage(classId, session, rows);
+      }
+    }
+
+    function renderCourseCardUsage(classId, session, rows) {
+      if (!rows.length) return '<p class="hint">尚無用量</p>';
+      const logging = sessionPromptLoggingEnabled(session);
+      const selected = courseCardFilter[session.id]?.email || '';
+      const max = Math.max(1, ...rows.map((r) => r.total_tokens));
+      return rows.map((row) => {
+        const filterKey = row.email || row.name || '';
+        const cells = `<span class="course-card-usage-name">${escapeHtml(row.name || row.email || '-')}</span>
+          <span class="course-card-bar-track"><span class="course-card-bar" style="width:${Math.round(row.total_tokens / max * 100)}%"></span></span>
+          <span class="num" title="${row.request_count} 次請求">${formatTokenCount(row.total_tokens)}</span>`;
+        if (!logging || !filterKey) return `<div class="course-card-usage-row">${cells}</div>`;
+        const on = selected && selected === filterKey;
+        return `<button type="button" class="course-card-usage-row${on ? ' is-sel' : ''}" title="只看這位學生的紀錄" aria-pressed="${on ? 'true' : 'false'}"
+          data-filter-key="${escapeHtml(filterKey)}" data-filter-name="${escapeHtml(row.name || filterKey)}"
+          onclick="filterCourseCardByStudent(${classId}, ${session.id}, this)">${cells}</button>`;
+      }).join('');
+    }
+
+    function filterCourseCardByStudent(classId, sessionId, buttonEl) {
+      const email = buttonEl?.dataset?.filterKey || '';
+      const name = buttonEl?.dataset?.filterName || email;
+      if (!email) return;
+      if (courseCardFilter[sessionId]?.email === email) delete courseCardFilter[sessionId];
+      else courseCardFilter[sessionId] = { email, name };
+      if (courseUsageCache[classId]) applyCourseUsage(classId, courseUsageCache[classId]);
+      loadCourseCardLogs(classId, sessionId).catch(() => {});
+    }
+
+    function clearCourseCardFilter(classId, sessionId) {
+      delete courseCardFilter[sessionId];
+      if (courseUsageCache[classId]) applyCourseUsage(classId, courseUsageCache[classId]);
+      loadCourseCardLogs(classId, sessionId).catch(() => {});
+    }
+
+    function renderCourseCardLogsHead(classId, sessionId) {
+      const head = document.getElementById(`course-card-logs-head-${sessionId}`);
+      if (!head) return;
+      const filter = courseCardFilter[sessionId];
+      head.innerHTML = filter
+        ? `最新紀錄 · ${escapeHtml(filter.name)} <button type="button" class="btn-secondary btn-sm" onclick="clearCourseCardFilter(${classId}, ${sessionId})">清除</button>`
+        : '最新紀錄';
+    }
+
+    // With a student filter the name is dropped, except on a log whose prompt merely mentions that Gmail.
+    function renderCourseCardLogs(items, filterKey) {
+      if (!items.length) return '<p class="hint">沒有紀錄</p>';
+      return items.slice(0, COURSE_CARD_LOG_LIMIT).map((item) => {
+        const own = filterKey && (item.user_email === filterKey || (!item.user_email && item.user_name === filterKey));
+        const who = own ? '' : `<strong>${escapeHtml(item.user_name || item.user_email || '-')}</strong> `;
+        const rejected = item.status === 'rejected' ? ' · <span class="course-card-rejected">rejected</span>' : '';
+        return `<div class="course-card-log">
+          <div class="course-card-log-text">${who}${escapeHtml(formatLogPreview(item))}</div>
+          <div class="meta">${escapeHtml(formatLocalDateTime(item.created_at))} · ${renderLogEndpointTag(item)} · ${formatTokenCount(item.total_tokens)}${rejected}</div>
+        </div>`;
+      }).join('');
+    }
+
+    async function loadCourseCardLogs(classId, sessionId) {
+      const box = document.getElementById(`course-card-logs-${sessionId}`);
+      if (!box) return;
+      const session = (courseCardSessions[classId] || []).find((s) => s.id === sessionId);
+      if (session && !sessionPromptLoggingEnabled(session)) {
+        delete courseCardFilter[sessionId];
+        renderCourseCardLogsHead(classId, sessionId);
+        box.innerHTML = '<p class="hint course-card-no-logs">此課堂未記錄 Prompt 內容</p>';
+        return;
+      }
+      renderCourseCardLogsHead(classId, sessionId);
+      const filter = courseCardFilter[sessionId];
+      const params = new URLSearchParams({ session_id: String(sessionId) });
+      if (filter) params.set('keyword', filter.email);
+      try {
+        const payload = await api(`/teacher/classes/${classId}/prompt-logs?${params.toString()}`);
+        const target = document.getElementById(`course-card-logs-${sessionId}`);
+        if (target) target.innerHTML = renderCourseCardLogs(payload.items || [], filter ? filter.email : '');
+      } catch (err) {
+        const target = document.getElementById(`course-card-logs-${sessionId}`);
+        if (target) target.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // Usage once for the course, then the latest logs of each listed card that is open.
+    async function loadCourseActivity(classId, sessionIds) {
+      const open = courseCardOpen[classId] || new Set();
+      const ids = (sessionIds || [...open]).filter((id) => open.has(id));
+      try {
+        await loadCourseUsage(classId);
+      } catch (err) {
+        ids.forEach((id) => {
+          const box = document.getElementById(`course-card-usage-${id}`);
+          if (box) box.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        });
+      }
+      await Promise.all(ids.map((id) => loadCourseCardLogs(classId, id)));
+    }
+
+    function ensureCourseCardTimer() {
+      if (courseCardTimer != null) return;
+      courseCardTimer = setInterval(() => { tickCourseCards().catch(() => {}); }, COURSE_CARD_REFRESH_MS);
+    }
+
+    async function tickCourseCards() {
+      if (document.hidden) return;
+      const tab = document.getElementById('classTab');
+      if (!tab || tab.classList.contains('hidden')) return;
+      const course = getSelectedCourse();
+      if (!course) return;
+      const open = courseCardOpen[course.id] || new Set();
+      const now = Date.now();
+      const focusedTag = document.activeElement?.tagName || null;
+      const due = (courseCardSessions[course.id] || []).filter((session) => shouldAutoRefreshCourseCard({
+        open: open.has(session.id),
+        inProgress: sessionInProgressAt(session, course.status, now),
+        focusedTag,
+      }));
+      if (!due.length) return;
+      await loadCourseActivity(course.id, due.map((session) => session.id));
     }
 
     const COURSE_CATALOG_TEMPLATE_YAML = `# Course Catalog 範本（與擴充 classroom-installs.yaml 同形）
@@ -2787,6 +3358,10 @@ snippets:
           body: JSON.stringify({ prompt_logging_enabled: enabled }),
         });
         if (label) label.textContent = enabled ? 'Prompt 開' : 'Prompt 關';
+        const session = window.__sessionById && window.__sessionById[sessionId];
+        if (session) session.prompt_logging_enabled = enabled;
+        if (courseUsageCache[classId]) applyCourseUsage(classId, courseUsageCache[classId]);
+        await loadCourseCardLogs(classId, sessionId);
       } catch (err) {
         if (inputEl) inputEl.checked = previous;
         throw err;
@@ -2887,12 +3462,12 @@ snippets:
       if (!name) throw new Error('請輸入課堂名稱');
       const sessionAt = datetimeLocalToUtcIso(document.getElementById('sessionAt').value);
       const ttlHours = Number(document.getElementById('sessionTtl').value) || 2;
-      await api(`/teacher/classes/${classId}/sessions`, {
+      const created = await api(`/teacher/classes/${classId}/sessions`, {
         method: 'POST',
         body: JSON.stringify({name, session_at: sessionAt, ttl_hours: ttlHours}),
       });
       if (nameInput) nameInput.value = '';
-      await loadClassSessions(classId);
+      await loadClassSessions(classId, { createdId: created?.id ?? null });
     }
 
     function beginEditSessionName(classId, sessionId, buttonEl) {
@@ -4780,15 +5355,26 @@ snippets:
       });
     }
 
-    async function disableClass(id) {
+    // 結束課程: shown to the course owner and to admins. The owner ends it through
+    // PATCH /teacher/classes/{id}; an admin ending someone else's course uses the admin endpoint.
+    // Only an admin can reopen a course.
+    function endCourseButtonHtml(course) {
+      if (!course || course.status === 'ended') return '';
+      const isOwner = course.teacher_id === currentUserId;
+      if (!isOwner && !currentRoles.includes('admin')) return '';
+      return `<button type="button" class="btn-danger end-course-btn" onclick="endCourse(${course.id})">結束課程</button>`;
+    }
+
+    async function endCourse(id) {
       const course = teacherClasses.find(c => c.id === id);
       const courseName = course?.name || `#${id}`;
       const ok = window.confirm(
         `確定要結束課程「${courseName}」嗎？\n\n` +
-        `結束後將無法新增課堂、學生無法領取邀請碼，既有 key 也會失效。此操作無法從 Portal 還原。`
+        `結束後學生無法再用邀請碼加入，只有管理員能重新開啟。`
       );
       if (!ok) return;
-      await api(`/admin/classes/${id}`, {method:'PATCH', body: JSON.stringify({status:'ended'})});
+      const path = course?.teacher_id === currentUserId ? `/teacher/classes/${id}` : `/admin/classes/${id}`;
+      await api(path, {method:'PATCH', body: JSON.stringify({status:'ended'})});
       await refresh();
     }
 

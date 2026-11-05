@@ -233,6 +233,27 @@ def test_portal_course_toolbar_matches_the_compact_prototype(tmp_path):
     assert "新課堂名稱" in html
 
 
+def test_portal_my_courses_shows_one_card_per_class_session(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    css = client.get("/portal/static/portal.css").text
+    class_tab = html.split('id="classTab"', 1)[1].split('id="monitorTab"', 1)[0]
+    assert class_tab.index('id="upstreamKpi"') < class_tab.index('class="course-toolbar"') < class_tab.index('id="courseDetail"')
+    panel = html[html.index("function renderCourseDetailPanel("):html.index("function monitorSessionOptionLabel(")]
+    assert panel.index("endCourseButtonHtml(course)") < panel.index('id="courseTotals"') < panel.index("session-form-compact") < panel.index('id="sessions-panel"')
+    loader = html[html.index("async function loadClassSessions("):html.index("function sessionLayoutState(")]
+    assert "renderCourseCards(" in loader
+    assert "renderSessionTable(" not in loader
+    card = html[html.index("function courseCardHtml("):html.index("function renderCourseCards(")]
+    assert "sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })" in card
+    assert "學生用量" in card
+    assert "最新紀錄" in card
+    assert "此課堂未記錄 Prompt 內容" in html
+    assert "showPromptDetail" not in card
+    assert ".course-card-body" in css
+    assert "@container (max-width: 760px)" in css
+
+
 def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
@@ -261,10 +282,10 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert "seat_limit" in html
     assert '{"seat_limit"' in html or "{ seat_limit" in html
     assert "該席仍佔用課堂座位" in html
-    fields = html[html.index("const fields = (session)"):html.index("const rowButton")]
-    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox(session)}") < fields.index('session-kicker">安裝清單')
+    fields = html[html.index("function sessionFieldsHtml("):html.index("function renderSessionTable(")]
+    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox}") < fields.index('session-kicker">安裝清單')
     assert "${sessionSeatLimitCell(classId, session)}</div>" in fields
-    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}" not in html
+    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox}" not in html
     assert 'class="session-field session-field-wide session-redemptions hidden"' in html
     assert 'class="roster-nowrap"' in html
     css = client.get("/portal/static/portal.css").text
@@ -785,7 +806,7 @@ def test_admin_prompt_log_usage_and_delete_by_user(tmp_path):
         json={"user_ids": [user_a["id"]]},
     )
     assert delete_response.status_code == 200
-    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0}
+    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0, "deleted_token_usage": 0}
 
     remaining = repo.list_prompt_logs(teacher["id"], klass["id"])
     assert [row["raw_prompt"] for row in remaining] == ["b log"]
@@ -840,6 +861,88 @@ def test_admin_update_class_endpoint(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ended"
+
+
+def _teacher_class_status(client, repo, teacher, class_id):
+    response = client.get("/teacher/classes", cookies=_portal_cookie(repo, teacher))
+    assert response.status_code == 200
+    return next(item["status"] for item in response.json()["items"] if item["id"] == class_id)
+
+
+def test_teacher_ends_own_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ended"
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_teacher_cannot_end_another_teachers_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    owner = repo.upsert_google_user("owner@example.com", "Owner")
+    repo.update_user(owner["id"], role="teacher")
+    other = repo.upsert_google_user("other@example.com", "Other")
+    repo.update_user(other["id"], role="teacher")
+    klass = repo.create_class(owner["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, other),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 404
+    assert _teacher_class_status(client, repo, owner, klass["id"]) == "active"
+
+
+@pytest.mark.parametrize("status", ["active", "archived"])
+def test_teacher_end_course_accepts_only_ended(tmp_path, status):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    repo.set_class_status(klass["id"], "ended")
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": status},
+    )
+
+    assert response.status_code == 400
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_admin_still_reopens_course_a_teacher_ended(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    response = client.patch(
+        f"/admin/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, admin),
+        json={"status": "active"},
+    )
+
+    assert response.status_code == 200
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "active"
 
 
 def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):

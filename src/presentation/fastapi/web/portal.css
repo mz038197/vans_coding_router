@@ -1887,6 +1887,101 @@
       min-height: 0;
     }
 
+    /* Upstream KPI dashboard on 我的課程 (prototype F) */
+    .upstream-kpi-board { margin-bottom: 14px; }
+    .upstream-kpi-board:empty { display: none; }
+    .upstream-kpi-head,
+    .upstream-kpi-line {
+      display: flex;
+      align-items: center;
+      gap: 6px 16px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .upstream-kpi-head { justify-content: space-between; margin-bottom: 6px; }
+    .upstream-kpi-line {
+      flex-wrap: wrap;
+      padding: 6px 2px 8px;
+      border-bottom: 1px solid var(--border-glass);
+    }
+    .upstream-kpi-line-title { font-weight: 600; color: var(--text-primary); }
+    .upstream-kpi-line-item { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .upstream-kpi-toggle {
+      margin: 0 0 0 auto;
+      padding: 0 6px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    .upstream-kpi-toggle:hover { color: var(--text-primary); background: transparent; }
+    .upstream-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+    }
+    .upstream-kpi {
+      padding: 12px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 104px;
+      min-width: 0;
+    }
+    .upstream-kpi .lbl {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .upstream-kpi .val {
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-primary);
+    }
+    .upstream-kpi .val small { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+    .upstream-kpi .val.val-muted { font-size: 0.95rem; font-weight: 500; color: var(--text-muted); }
+    .upstream-kpi .sub {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: auto;
+    }
+    .upstream-kpi .meter { height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; }
+    .upstream-kpi .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+    .upstream-kpi .meter.warn { background: color-mix(in srgb, var(--warning) 18%, transparent); }
+    .upstream-kpi .meter.warn i { background: var(--warning); }
+    .upstream-kpi-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: var(--warning);
+      white-space: nowrap;
+    }
+    .upstream-kpi .sub .upstream-quarantine-release { margin: 0; padding: 1px 10px; font-size: 0.74rem; }
+    .upstream-kpi svg.spark { width: 100%; height: 26px; display: block; }
+    .upstream-kpi svg.spark polyline {
+      fill: none;
+      stroke: var(--text-muted);
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      opacity: 0.6;
+    }
+    .upstream-kpi svg.spark polyline.now { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+
     @media (max-width: 640px) {
       .nav-user { justify-content: flex-end; max-width: 60%; }
       .profile-line > span:first-child { font-size: 0.82rem; }
@@ -2504,3 +2599,95 @@
     .session-redemptions .subtable { width: 100%; margin: 0; }
 
     .session-redemptions .roster-nowrap { white-space: nowrap; }
+
+    /* 我的課程: one card per Class Session, settings left and usage right (layout F, ADR 0041). */
+    .course-totals { display: flex; flex-wrap: wrap; gap: 18px; margin: 10px 0; font-size: .9rem; color: var(--text-muted); }
+    .course-totals b { margin-left: 4px; font-size: 1.15rem; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+    .course-totals:empty { display: none; }
+    .course-card {
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+    }
+    .course-card + .course-card { margin-top: 8px; }
+    button.course-card-summary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      margin: 0;
+      padding: 10px 12px;
+      border: 0;
+      border-radius: 12px;
+      box-shadow: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-weight: 500;
+      text-align: left;
+    }
+    button.course-card-summary:hover { background: var(--surface-2); color: var(--text-primary); }
+    .course-card.is-open button.course-card-summary { border-radius: 12px 12px 0 0; }
+    button.course-card-summary .sl-name { flex: 1 1 160px; font-weight: 700; }
+    button.course-card-summary .session-name-sub { display: inline; margin: 0; }
+    .sl-tokens { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--accent-text); font-weight: 700; }
+    .course-card-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border-glass);
+    }
+    .course-card-activity { border-left: 1px solid var(--border-glass); padding-left: 16px; min-width: 0; }
+    .course-card-body h4 {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 6px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .course-card-body h4 .btn-sm { margin: 0; }
+    .course-card-settings .session-fields { margin-top: 8px; }
+    h4.course-card-logs-head { margin-top: 12px; }
+    .course-card-usage { max-height: 240px; overflow: auto; }
+    .course-card-usage-row {
+      display: grid;
+      grid-template-columns: minmax(5.5rem, 34%) 1fr 3.6rem;
+      gap: 6px;
+      align-items: center;
+      width: 100%;
+      margin: 0;
+      padding: 3px 4px;
+      border: 0;
+      border-radius: 6px;
+      box-shadow: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.84rem;
+      font-weight: 400;
+      text-align: left;
+    }
+    button.course-card-usage-row { cursor: pointer; }
+    button.course-card-usage-row:hover,
+    .course-card-usage-row.is-sel { background: var(--accent-soft); color: var(--text-primary); }
+    .course-card-usage-row.is-sel { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
+    .course-card-usage-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .course-card-usage-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .course-card-bar-track { display: block; min-width: 0; }
+    .course-card-bar { display: block; height: 8px; min-width: 2px; border-radius: 4px; background: var(--accent); }
+    .course-card-log { padding: 6px 4px; border-bottom: 1px solid var(--border-glass); font-size: 0.83rem; }
+    .course-card-log:last-child { border-bottom: 0; }
+    .course-card-log-text { overflow-wrap: anywhere; }
+    .course-card-log .meta { margin-top: 2px; color: var(--text-muted); font-size: 0.76rem; }
+    .course-card-log .meta .tag { font-size: 0.7rem; padding: 0 6px; }
+    .course-card-rejected { color: var(--danger); }
+    /* Stack the halves when the card itself is narrow (laptop with the rail open, tablet, phone). */
+    .course-card { container-type: inline-size; }
+    @container (max-width: 760px) {
+      .course-card-body { grid-template-columns: 1fr; }
+      .course-card-activity { border-left: 0; padding-left: 0; border-top: 1px solid var(--border-glass); padding-top: 12px; }
+    }

@@ -439,9 +439,9 @@ def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
     assert usage[user_b["id"]]["live_count"] == 1
     assert usage[user_b["id"]]["archive_count"] == 1
 
-    assert repo.delete_prompt_logs_for_users([]) == {"deleted_live": 0, "deleted_archive": 0}
+    assert repo.delete_prompt_logs_for_users([]) == {"deleted_live": 0, "deleted_archive": 0, "deleted_token_usage": 0}
     result = repo.delete_prompt_logs_for_users([user_a["id"]])
-    assert result == {"deleted_live": 1, "deleted_archive": 1}
+    assert result == {"deleted_live": 1, "deleted_archive": 1, "deleted_token_usage": 0}
 
     remaining = repo.list_prompt_logs(teacher["id"], live_class["id"])
     assert [row["raw_prompt"] for row in remaining] == ["b-again"]
@@ -863,3 +863,53 @@ def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
         document = sittings[session_id]["session_chat_language_models"]
         assert template_model_ids(document) == template_model_ids(load_vans_template())
         assert not _carries_auto_tiers(document)
+
+
+def _usage_world(repo):
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Usage", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    assert context is not None
+    return teacher, student, klass, context
+
+
+def test_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    teacher, student, klass, context = _usage_world(repo)
+    repo.log_prompt(context, "archived ok", "archived ok", "m", "ok", None, 4, 4, 8)
+    repo.log_prompt(context, "live ok", "live ok", "m", "ok", None, 1, 2, 3)
+    repo.log_prompt(context, "live rejected", "live rejected", "m", "rejected", None, 5, 5, 10)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-05-01T00:00:00+00:00", "archived ok"))
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 1
+    # A database from before Token Usage existed.
+    with repo._connect() as conn:
+        conn.execute("DROP TABLE token_usage")
+
+    upgraded = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))  # a later restart
+
+    row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    # The SQLite archive never stored token counts, so an archived log adds a request but no tokens.
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (1, 2, 3)
+    assert row["request_count"] == 2
+    assert row["sessions"][0]["request_count"] == 2
+
+
+def test_token_usage_is_recorded_queried_and_deleted_per_user(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    teacher, student, klass, context = _usage_world(repo)
+    repo.record_token_usage(context, "m", "/v1/chat/completions", 1, 2, 3)
+    repo.record_token_usage(context, "m", "/v1/responses", 10, 20, 30)
+    personal = context.__class__(user_id=student["id"], email=None, name=None)
+    repo.record_token_usage(personal, "m", "/v1/chat/completions", 100, 100, 200)
+
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"], row["request_count"]) == (11, 22, 33, 2)
+
+    assert repo.delete_prompt_logs_for_users([student["id"]])["deleted_token_usage"] == 3
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    assert (row["total_tokens"], row["request_count"]) == (0, 0)

@@ -82,7 +82,8 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
 
     usage = repo.class_usage(teacher["id"], klass["id"])
     student_usage = next(row for row in usage if row["user_id"] == student["id"])
-    assert student_usage["total_tokens"] == 33
+    # Token Usage is recorded whether or not prompt logging is on.
+    assert student_usage["total_tokens"] == 66
 
     repo.update_class_session(klass["id"], session["id"], prompt_logging_enabled=True)
 

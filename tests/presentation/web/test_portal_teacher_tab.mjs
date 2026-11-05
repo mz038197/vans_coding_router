@@ -270,7 +270,7 @@ test("課堂設定 has a 網路搜尋 switch that patches web_search_enabled", (
 });
 
 test("我的課程 mutations do not hard-switch to personal API Key", () => {
-  for (const name of ["createClass", "createSession", "disableClass", "disableClassMember"]) {
+  for (const name of ["createClass", "createSession", "endCourse", "disableClassMember"]) {
     const source = extractNamedFunction(portalHtml, name);
     assert.doesNotMatch(source, /showTab\s*\(\s*['"]keyTab['"]\s*\)/);
   }
