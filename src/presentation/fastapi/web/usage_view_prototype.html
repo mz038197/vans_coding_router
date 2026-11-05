@@ -1,0 +1,1117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROTOTYPE — 用量與監控</title>
+  <!--
+    PROTOTYPE — throwaway. Not production. Fixture data only, nothing hits the server.
+    Question: how can a teacher see usage and prompt logs without switching between 我的課程 and Prompt 監控?
+    Three variants on /portal/prototype/usage-view, switchable via ?variant=A|B|C (or ← →):
+      A 檢視窗分頁   — session inspector gets tabs 設定 / 用量 / Prompt 紀錄
+      B 課程儀表板   — student × session heat map; click → log drawer
+      C 常駐監控欄   — left: session bands that expand to settings; right: monitor rail (upstream strip + usage + prompts)
+                       following the last session you touched
+      D 上游置頂・兩欄等高 — C, but upstream is a full-width bar on top and both columns fill the viewport, scrolling on their own
+      E 課堂分頁・整寬儀表板 — sessions as a tab strip; below, usage | prompts side by side; settings in a ⚙ drawer
+      F 課堂卡・卡內左右 — every session is a card; an open card holds settings on the left and usage + latest prompts on the right
+    Shared across variants: one selection kept in the URL hash (#/class/1/session/13/usage?student=s3),
+    and the 即時監控 page (cross-course live feed; upstream pools moved out).
+  -->
+  <script>
+    (function () {
+      var stored = null;
+      try { stored = localStorage.getItem('portal-theme'); } catch (e) {}
+      document.documentElement.setAttribute('data-theme', (stored === 'dark' || stored === 'light') ? stored : 'dark');
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=usage-view-prototype-1" />
+  <style>
+    html, body { height: 100%; overflow: hidden; }
+    .proto-shell { display: flex; position: fixed; top: 68px; right: 0; bottom: 0; left: 0; }
+    .proto-menu { width: 220px; flex-shrink: 0; overflow: auto; border-right: 1px solid var(--border-strong); background: var(--surface-1); padding: 12px 0; }
+    .proto-main { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 96px; background: var(--bg-base); }
+    .proto-panel h2 { margin: 0 0 8px; }
+    .nav-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-left: 6px; animation: pulse 1.6s infinite; }
+    @keyframes pulse { 50% { opacity: .3; } }
+
+    /* summary strip */
+    .uv-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 14px; }
+    .uv-stat { text-align: left; margin: 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-1); color: var(--text-primary); box-shadow: none; font-weight: 500; }
+    button.uv-stat:hover { background: var(--surface-2); color: var(--text-primary); }
+    .uv-stat .k { font-size: .78rem; color: var(--text-muted); display: block; }
+    .uv-stat .v { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .uv-stat.is-warn .v { color: var(--warning); }
+
+    /* tabs */
+    .uv-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong); margin: 10px 0 12px; }
+    .uv-tabs button { margin: 0; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-muted); box-shadow: none; font-weight: 600; }
+    .uv-tabs button:hover { color: var(--text-primary); background: transparent; }
+    .uv-tabs button.is-on { color: var(--accent-text); border-bottom-color: var(--accent); }
+    .uv-tabs .badge { margin-left: 6px; font-size: .72rem; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
+
+    /* tables */
+    .uv-table { width: 100%; }
+    .uv-table tr.is-click { cursor: pointer; }
+    .uv-table tr.is-click:hover td { background: var(--surface-2); }
+    .uv-table td.num, .uv-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .uv-table th.sortable { cursor: pointer; user-select: none; }
+    .uv-bar { display: inline-block; height: 8px; border-radius: 4px; background: var(--accent); vertical-align: middle; margin-right: 6px; min-width: 2px; }
+    .uv-bar-cell { width: 34%; white-space: nowrap; }
+    .uv-flag { color: var(--warning); font-size: .78rem; margin-left: 6px; }
+    .uv-muted { color: var(--text-muted); }
+    tr.is-fresh td { animation: fresh 2.5s ease-out; }
+    @keyframes fresh { from { background: var(--accent-soft-strong); } to { background: transparent; } }
+    .uv-preview { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .uv-detail td { background: var(--surface-2); white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: .82rem; }
+
+    .uv-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .uv-filterbar input, .uv-filterbar select { margin: 0; width: auto; }
+    .uv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: .82rem; border: 1px solid var(--accent-border); }
+    .uv-chip button { margin: 0; padding: 0 2px; background: transparent; border: 0; box-shadow: none; color: inherit; }
+    .uv-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+    .uv-seg button { margin: 0; border: 0; border-radius: 0; padding: 4px 10px; background: var(--surface-1); color: var(--text-muted); box-shadow: none; font-weight: 500; }
+    .uv-seg button.is-on { background: var(--accent-soft); color: var(--accent-text); }
+
+    /* session list addon */
+    .sl-tokens { font-variant-numeric: tabular-nums; font-size: .85rem; color: var(--accent-text); font-weight: 700; }
+    button.session-layout-row.is-all { border-style: dashed; }
+    .uv-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 8px 12px; margin-top: 8px; }
+    .uv-kv .k { color: var(--text-muted); }
+    .uv-pill { display: inline-block; padding: 2px 8px; margin: 0 4px 4px 0; border-radius: 999px; border: 1px solid var(--border-strong); font-size: .8rem; }
+
+    /* B: heat map + drawer */
+    .uv-matrix { border-collapse: separate; border-spacing: 3px; width: auto; }
+    .uv-matrix th, .uv-matrix td { border: 0; padding: 6px 8px; }
+    .uv-matrix th.col { font-size: .78rem; font-weight: 600; max-width: 9rem; cursor: pointer; vertical-align: bottom; }
+    .uv-matrix th.col:hover, .uv-matrix th.rowh:hover { color: var(--accent-text); }
+    .uv-matrix th.rowh { text-align: left; cursor: pointer; white-space: nowrap; }
+    .uv-matrix td.cell { min-width: 64px; text-align: right; border-radius: 6px; cursor: pointer; font-variant-numeric: tabular-nums; font-size: .82rem; }
+    .uv-matrix td.cell:hover { outline: 2px solid var(--accent); }
+    .uv-matrix td.cell.is-sel { outline: 2px solid var(--brand-yellow); }
+    .uv-matrix td.total { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+    .uv-drawer { position: fixed; top: 68px; right: 0; bottom: 0; width: min(560px, 92vw); background: var(--surface-1); border-left: 1px solid var(--border-strong); box-shadow: -12px 0 32px rgba(0,0,0,.3); padding: 16px 18px 90px; overflow: auto; z-index: 150; transform: translateX(105%); transition: transform .2s ease; }
+    .uv-drawer.is-open { transform: translateX(0); }
+    .uv-drawer-head { display: flex; align-items: center; gap: 8px; }
+    .uv-drawer-head h3 { margin: 0; flex: 1; }
+
+    /* C: rail */
+    .uv-c { display: grid; grid-template-columns: minmax(180px, 24%) minmax(0, 1fr) minmax(300px, 34%); gap: 12px; align-items: start; }
+    .uv-c.rail-closed { grid-template-columns: minmax(180px, 28%) minmax(0, 1fr) 44px; }
+    .uv-rail { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-1); padding: 12px; position: sticky; top: 0; max-height: calc(100vh - 110px); overflow: auto; }
+    .uv-rail h4 { margin: 12px 0 6px; font-size: .85rem; color: var(--text-muted); }
+    .uv-rail-head { display: flex; align-items: center; gap: 6px; }
+    .uv-rail-head strong { flex: 1; }
+    .uv-mini { display: grid; grid-template-columns: 5.5rem 1fr 3.6rem; gap: 6px; align-items: center; font-size: .84rem; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+    .uv-mini:hover, .uv-mini.is-sel { background: var(--accent-soft); }
+    .uv-mini .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .uv-feed-item { padding: 6px 4px; border-bottom: 1px solid var(--border-glass); font-size: .83rem; cursor: pointer; }
+    .uv-feed-item:hover { background: var(--surface-2); }
+    .uv-feed-item.is-fresh { animation: fresh 2.5s ease-out; }
+    .uv-feed-item .meta { color: var(--text-muted); font-size: .76rem; }
+    .uv-rail-collapsed { writing-mode: vertical-rl; margin: 0; padding: 12px 8px; width: 44px; }
+
+    /* C v2: bands + upstream strip */
+    .uv-c2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 38%); gap: 12px; align-items: start; margin-top: 12px; }
+    .uv-c2.rail-closed { grid-template-columns: minmax(0, 1fr) 44px; }
+    .uv-band { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-1); margin-bottom: 8px; }
+    .uv-band.is-focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .uv-band > button { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; margin: 0; padding: 10px 12px; background: transparent; border: 0; box-shadow: none; color: var(--text-primary); text-align: left; font-weight: 500; }
+    .uv-band > button:hover { background: var(--surface-2); color: var(--text-primary); }
+    .uv-band .sl-name { flex: 1 1 160px; font-weight: 700; }
+    .uv-band .focus-mark { font-size: .72rem; color: var(--accent-text); }
+    .uv-band-body { padding: 0 14px 12px; border-top: 1px solid var(--border-glass); }
+    .uv-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .uv-kpi { position: relative; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-1); display: flex; flex-direction: column; gap: 6px; min-height: 104px; }
+    .uv-kpi .lbl { font-size: .76rem; color: var(--text-muted); display: flex; justify-content: space-between; gap: 6px; }
+    .uv-kpi .val { font-size: 1.6rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+    .uv-kpi .val small { font-size: .85rem; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+    .uv-kpi .sub { font-size: .76rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+    .uv-kpi .meter { height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; }
+    .uv-kpi .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+    .uv-kpi .meter.warn { background: color-mix(in srgb, var(--warning) 18%, transparent); }
+    .uv-kpi .meter.warn i { background: var(--warning); }
+    .uv-kpi .status { display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; font-weight: 600; color: var(--warning); }
+    .uv-kpi .sub button { margin: 0; padding: 1px 10px; font-size: .74rem; }
+    .uv-kpi svg.spark { width: 100%; height: 26px; display: block; }
+    .uv-kpi svg.spark polyline { fill: none; stroke: var(--text-muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .6; }
+    .uv-kpi svg.spark polyline.now { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+    .uv-kpis-head { display: flex; align-items: center; justify-content: space-between; font-size: .78rem; color: var(--text-muted); margin-bottom: 6px; }
+    .uv-kpis-head button { margin: 0; padding: 0 6px; background: transparent; border: 0; box-shadow: none; color: var(--text-muted); font-size: .76rem; }
+    .uv-kpis-head button:hover { color: var(--text-primary); background: transparent; }
+    .uv-up { margin-bottom: 10px; padding: 6px 2px 8px; border-bottom: 1px solid var(--border-glass); }
+    .uv-up-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; font-size: .8rem; color: var(--text-muted); cursor: pointer; user-select: none; }
+    .uv-up-line:hover .uv-up-caret { color: var(--text-primary); }
+    .uv-up-item { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .uv-up-item .name { color: var(--text-primary); font-weight: 600; }
+    .uv-up-item .num { font-variant-numeric: tabular-nums; }
+    .uv-up-item .is-warn { color: var(--warning); font-weight: 600; }
+    .uv-meters { display: inline-flex; gap: 3px; }
+    .uv-meter { width: 30px; height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+    .uv-meter i { display: block; height: 100%; background: var(--text-muted); opacity: .7; }
+    .uv-meter i.warn { background: var(--warning); opacity: 1; }
+    .uv-up-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--warning); font-weight: 600; }
+    .uv-up-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+    .uv-up-caret { margin-left: auto; font-size: .75rem; }
+    .uv-up-detail { max-width: 520px; margin-top: 10px; display: grid; grid-template-columns: auto minmax(60px, 1fr) auto auto; gap: 6px 12px; align-items: center; font-size: .8rem; }
+    .uv-up-detail .prov { grid-column: 1 / -1; display: flex; justify-content: space-between; margin-top: 6px; font-weight: 600; color: var(--text-primary); }
+    .uv-up-detail .prov span { font-weight: 400; color: var(--text-muted); }
+    .uv-up-detail .k { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .uv-up-detail .bar { height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+    .uv-up-detail .bar i { display: block; height: 100%; background: var(--text-muted); opacity: .7; }
+    .uv-up-detail .bar i.warn { background: var(--warning); opacity: 1; }
+    .uv-up-detail .t { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .uv-up-detail .t.is-warn { color: var(--warning); }
+    .uv-up-detail button { margin: 0; padding: 1px 10px; font-size: .75rem; }
+    .uv-rail-collapsed.is-warn { border-color: var(--warning); color: var(--warning); }
+
+    /* D / E / F */
+    .proto-main.is-fill { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 72px; }
+    .proto-main.is-fill > .uv-fill { flex: 1; min-height: 0; }
+    .uv-d { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 10px; }
+    .uv-pane { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-1); padding: 12px; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+    .uv-pane.plain { border: 0; padding: 0; background: transparent; }
+    .uv-pane .grow { flex: 1; min-height: 120px; overflow: auto; }
+    .uv-pane h4 { margin: 12px 0 6px; font-size: .85rem; color: var(--text-muted); }
+    .uv-pane h4:first-child { margin-top: 0; }
+    .uv-tabstrip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+    .uv-tabstrip button.sess { margin: 0; display: inline-flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-1); color: var(--text-primary); box-shadow: none; font-weight: 600; }
+    .uv-tabstrip button.sess:hover { background: var(--surface-2); color: var(--text-primary); }
+    .uv-tabstrip button.sess.is-on { border-color: var(--accent); background: var(--accent-soft); }
+    .uv-tabstrip .spacer { flex: 1; }
+    .uv-f-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 12px 14px; border-top: 1px solid var(--border-glass); }
+    .uv-f-body > div + div { border-left: 1px solid var(--border-glass); padding-left: 16px; }
+    .uv-f-body h4 { margin: 0 0 6px; font-size: .85rem; color: var(--text-muted); }
+    .uv-f-body h4 + * { margin-bottom: 4px; }
+    .uv-statrow { display: flex; flex-wrap: wrap; gap: 18px; margin: 10px 0; font-size: .9rem; }
+    .uv-statrow b { font-size: 1.15rem; font-variant-numeric: tabular-nums; margin-left: 4px; }
+    @media (max-width: 900px) {
+      .uv-d, .uv-f-body { grid-template-columns: 1fr; }
+      .uv-f-body > div + div { border-left: 0; padding-left: 0; }
+      .proto-main.is-fill { display: block; overflow: auto; }
+    }
+
+    .session-form-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 10px; }
+    .session-form-compact input { margin: 0; width: auto; }
+    .session-form-compact .session-name-input { flex: 1 1 14rem; }
+    .session-form-compact .input-narrow { width: 5rem; flex: none; }
+    .course-toolbar .add-course-form { display: inline-flex; align-items: center; gap: 6px; }
+    .course-toolbar .add-course-form input { width: 12rem; margin: 0; }
+    .course-detail-header .end-course-btn { margin-left: auto; }
+
+    /* live page */
+    .uv-live-item { display: grid; grid-template-columns: 5.2rem 9rem 7rem 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-glass); cursor: pointer; }
+    .uv-live-item:hover { background: var(--surface-2); }
+    .uv-live-item.is-fresh { animation: fresh 2.5s ease-out; }
+    @media (max-width: 900px) {
+      .proto-menu { display: none; }
+      .uv-c { grid-template-columns: 1fr; }
+      .uv-live-item { grid-template-columns: 1fr; gap: 2px; }
+    }
+
+    /* prototype chrome */
+    .proto-switcher { position: fixed; z-index: 300; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 999px; background: #facc15; color: #111; box-shadow: 0 6px 24px rgba(0,0,0,.4); font-weight: 700; }
+    .proto-switcher button { margin: 0; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 0; background: #111; color: #facc15; box-shadow: none; }
+    .proto-switcher span { padding: 0 12px; white-space: nowrap; }
+    .proto-state { position: fixed; z-index: 300; bottom: 16px; left: 16px; max-width: 320px; font: 12px/1.4 'JetBrains Mono', monospace; background: #111; color: #e5e7eb; border: 1px solid #facc15; border-radius: 10px; padding: 8px 10px; }
+    .proto-state summary { cursor: pointer; color: #facc15; }
+    .proto-state pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header class="site-nav">
+    <div class="nav-brand">
+      <div class="nav-logo"><img src="/portal/static/brand-logo.png" alt="" width="32" height="32" /></div>
+      <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
+    </div>
+    <div class="nav-user">
+      <span>示範帳號（原型）</span>
+      <button type="button" class="nav-theme-toggle" data-theme-toggle aria-label="切換 Theme" title="切換 Theme">
+        <i class="fas fa-moon theme-icon-light" aria-hidden="true"></i>
+        <i class="fas fa-sun theme-icon-dark" aria-hidden="true"></i>
+      </button>
+    </div>
+  </header>
+  <div class="proto-shell">
+    <nav class="proto-menu" aria-label="老師功能">
+      <div class="sidebar-section-label">老師</div>
+      <button type="button" class="sidebar-nav-btn" data-page="key"><i class="fas fa-key"></i> 個人 API Key</button>
+      <button type="button" class="sidebar-nav-btn" data-page="class"><i class="fas fa-book"></i> 我的課程</button>
+      <button type="button" class="sidebar-nav-btn" data-page="live"><i class="fas fa-satellite-dish"></i> 即時監控<span class="nav-live-dot"></span></button>
+      <button type="button" class="sidebar-nav-btn" data-page="probe"><i class="fas fa-flask"></i> API 測試</button>
+      <button type="button" class="sidebar-nav-btn" data-page="admin"><i class="fas fa-shield-halved"></i> 系統管理</button>
+    </nav>
+    <main class="proto-main" id="main"></main>
+  </div>
+  <aside class="uv-drawer" id="drawer"></aside>
+  <div class="proto-switcher" id="switcher">
+    <button type="button" data-step="-1" aria-label="上一個版本"><i class="fas fa-chevron-left"></i></button>
+    <span id="switcherLabel"></span>
+    <button type="button" data-step="1" aria-label="下一個版本"><i class="fas fa-chevron-right"></i></button>
+  </div>
+  <details class="proto-state" id="protoState"><summary>原型狀態</summary><pre id="protoStateBody"></pre></details>
+
+  <script>
+  (function () {
+    const VARIANTS = [
+      { key: 'A', name: '檢視窗分頁' },
+      { key: 'B', name: '課程儀表板' },
+      { key: 'C', name: '常駐監控欄' },
+      { key: 'D', name: '上游置頂・兩欄等高' },
+      { key: 'E', name: '課堂分頁・整寬儀表板' },
+      { key: 'F', name: '課堂卡・卡內左右' },
+    ];
+
+    // ---------- fixture data ----------
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const NAMES = ['王小明', '李小華', '陳怡君', '林冠宇', '張雅婷', '黃柏翰', '吳佳穎', '劉子豪', '蔡宜蓁', '楊承恩', '許詩涵', '鄭宇軒'];
+    const PROMPTS = [
+      '幫我寫一個 for 迴圈印出 1 到 10', '為什麼我的 import 一直報 ModuleNotFoundError？', '把這段程式改成用 list comprehension',
+      '請解釋 async / await 的差別', '幫我寫作業第三題的答案', 'agent 呼叫工具時 tool_call_id 是什麼', '產生一張貓咪寫程式的圖',
+      '這個 KeyError 怎麼修', '幫我把 README 翻成英文', '寫一個測試檢查 add(2,3)==5', '幫我想 10 個專題題目',
+      '請用 Python 讀 CSV 並算平均', '為什麼 VS Code 找不到 vcr-auto 模型', '把整個專案重寫成 TypeScript',
+    ];
+    const MODELS = ['vcr-auto', 'openai/gpt-4.1', 'anthropic/claude-sonnet-4', 'google/gemini-2.5-flash'];
+    const now = Date.now();
+    const H = 3600e3, D = 24 * H;
+
+    const courses = [
+      { id: 1, name: 'Agent Studio 秋季班', status: 'active', studentCount: 10, sessions: [
+        { id: 11, name: '第一堂：環境建置', at: now - 14 * D, hours: 2, seats: 12, invite: 'ENV-8F3K' },
+        { id: 12, name: '第二堂：Agent 與工具', at: now - 7 * D, hours: 2, seats: 12, invite: 'AGT-2M9Q' },
+        { id: 13, name: '第三堂：多代理協作', at: now - 40 * 60e3, hours: 3, seats: 12, invite: 'MUL-7X1C' },
+      ] },
+      { id: 2, name: 'Python 入門', status: 'active', studentCount: 8, sessions: [
+        { id: 21, name: '變數與函式', at: now - 3 * D, hours: 2, seats: 10, invite: 'PY-1A2B' },
+        { id: 22, name: '迴圈與串列', at: now - 25 * 60e3, hours: 2, seats: 10, invite: 'PY-3C4D' },
+      ] },
+      { id: 3, name: '寒假班', status: 'ended', studentCount: 6, sessions: [
+        { id: 31, name: '結業坐', at: now - 270 * D, hours: 2, seats: 8, invite: 'WIN-9Z' },
+      ] },
+    ];
+    let logId = 1;
+    let nextId = 100;
+    const logs = [];      // {id, at, courseId, sessionId, studentId, endpoint, model, status, prompt, pt, ct}
+    const students = {};  // id -> {id, name, email}
+    for (const c of courses) {
+      c.students = [];
+      for (let i = 0; i < c.studentCount; i++) {
+        const s = { id: `s${c.id}${i}`, name: NAMES[(i + c.id * 3) % NAMES.length], email: `student${c.id}${i}@school.edu.tw` };
+        students[s.id] = s; c.students.push(s.id);
+      }
+      for (const ses of c.sessions) {
+        ses.redeemed = [];
+        for (const sid of c.students) {
+          if (rnd() < 0.15) continue;           // absent
+          ses.redeemed.push(sid);
+          const heavy = sid === c.students[2];  // one outlier per course
+          const n = heavy ? 18 + Math.floor(rnd() * 8) : Math.floor(rnd() * 9);
+          const span = Math.min(ses.hours * H, now - ses.at);
+          for (let k = 0; k < n; k++) addLog(c.id, ses.id, sid, ses.at + rnd() * span, heavy);
+        }
+      }
+    }
+    logs.sort((a, b) => b.at - a.at);
+    // upstream pools (fixture shaped like /teacher/upstream-pools)
+    const upstream = {
+      ollama_cloud: { capacity: 6, waiting: 0, busy_total: 3, keys: [
+        { index: 0, cap: 3, in_flight: 2, used: 12.4, limit: 20, resetDays: 9 },
+        { index: 1, cap: 3, in_flight: 0, used: 19.6, limit: 20, resetDays: 9, quarantined: true, remain: 1840 },
+      ] },
+      openrouter: { capacity: 8, waiting: 0, busy_total: 0, credit: 4.3, keys: [
+        { index: 0, cap: 4, in_flight: 1 }, { index: 1, cap: 4, in_flight: 0 },
+      ] },
+    };
+    function sampleConc() {
+      const n = Object.values(upstream).flatMap((p) => p.keys).reduce((a, k) => a + k.in_flight, 0);
+      concHist.push(n); if (concHist.length > 12) concHist.shift();
+    }
+    function addLog(courseId, sessionId, studentId, at, heavy) {
+      const rejected = rnd() < 0.07;
+      const pt = rejected ? 0 : Math.floor((heavy ? 4000 : 800) + rnd() * (heavy ? 22000 : 4000));
+      const log = {
+        id: logId++, at, courseId, sessionId, studentId,
+        endpoint: rnd() < 0.85 ? 'chat' : (rnd() < 0.5 ? 'responses' : 'image'),
+        model: pick(MODELS), status: rejected ? 'rejected' : 'ok', prompt: pick(PROMPTS),
+        pt, ct: rejected ? 0 : Math.floor(pt * (0.3 + rnd() * 0.6)),
+      };
+      logs.push(log);
+      return log;
+    }
+
+    // ---------- derived ----------
+    const courseById = (id) => courses.find((c) => c.id === id);
+    const sessionById = (c, id) => c?.sessions.find((s) => s.id === id);
+    const isActive = (c, s) => c.status === "active" && Date.now() <= s.at + s.hours * H && Date.now() >= s.at;
+    const scopeLogs = (courseId, sessionId, studentId) => logs.filter((l) =>
+      l.courseId === courseId && (!sessionId || l.sessionId === sessionId) && (!studentId || l.studentId === studentId));
+    function usageRows(courseId, sessionId) {
+      const c = courseById(courseId);
+      const rows = c.students.map((sid) => ({ sid, pt: 0, ct: 0, req: 0, rej: 0, last: 0 }));
+      const map = Object.fromEntries(rows.map((r) => [r.sid, r]));
+      for (const l of scopeLogs(courseId, sessionId)) {
+        const r = map[l.studentId]; r.req++; r.pt += l.pt; r.ct += l.ct; if (l.status === 'rejected') r.rej++; r.last = Math.max(r.last, l.at);
+      }
+      rows.forEach((r) => { r.total = r.pt + r.ct; });
+      return rows;
+    }
+    const sumTokens = (ls) => ls.reduce((a, l) => a + l.pt + l.ct, 0);
+    const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+    const fmtTime = (t) => new Date(t).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const fmtAgo = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s} 秒前` : s < 3600 ? `${Math.round(s / 60)} 分前` : fmtTime(t); };
+    const esc = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    const sessionTag = (c, x) => {
+      if (c.status === 'active' && Date.now() < x.at) return '<span class="tag">未開始</span>';
+      return statusTag(isActive(c, x));
+    };
+    const statusTag = (on) => `<span class="tag ${on ? 'tag-active' : 'tag-ended'}">${on ? '進行中' : '已結束'}</span>`;
+    const endpointTag = (e) => `<span class="uv-pill">${e}</span>`;
+    const isFresh = (l) => l.fresh && Date.now() - l.fresh < 2600;
+
+    // ---------- state (selection lives in the hash) ----------
+    const state = {
+      page: 'class', courseId: 1, sessionId: 13, view: 'usage', student: '',
+      status: 'all', keyword: '', sort: 'total', openLog: null, railOpen: true, expanded: [], upstreamOpen: false, lastSessionId: 0, settingsOpen: false, upstreamCompact: false,
+      courseQuery: '', courseStatus: 'active', addingCourse: false, drafts: {},
+      livePaused: false, liveCourse: 0, lastAction: '開啟原型',
+    };
+    function variantKey() {
+      const k = (new URLSearchParams(location.search).get('variant') || 'A').toUpperCase();
+      return VARIANTS.some((v) => v.key === k) ? k : 'A';
+    }
+    function writeHash() {
+      const q = state.student ? `?student=${state.student}` : '';
+      const h = state.page === 'live' ? '#/live' : `#/class/${state.courseId}/session/${state.sessionId || 'all'}/${state.view}${q}`;
+      if (location.hash !== h) history.replaceState(null, '', location.pathname + location.search + h);
+    }
+    function readHash() {
+      const m = location.hash.match(/^#\/class\/(\d+)\/session\/(\w+)\/(\w+)(?:\?student=(\w+))?/);
+      if (location.hash === '#/live') { state.page = 'live'; return; }
+      if (!m) return;
+      state.page = 'class'; state.courseId = Number(m[1]);
+      state.sessionId = m[2] === 'all' ? 0 : Number(m[2]);
+      state.view = m[3]; state.student = m[4] || '';
+    }
+    function set(patch, action) {
+      Object.assign(state, patch);
+      state.lastAction = action || state.lastAction;
+      render();
+    }
+
+    // ---------- shared fragments ----------
+    function visibleCourses() {
+      const q = state.courseQuery.trim().toLowerCase();
+      return courses.filter((c) => (state.courseStatus === 'all' || c.status === state.courseStatus) && (!q || c.name.toLowerCase().includes(q)));
+    }
+    function courseToolbar() {
+      const vis = visibleCourses();
+      return `<div class="course-toolbar">
+        <input id="uvCourseQuery" placeholder="搜尋課程" value="${esc(state.courseQuery)}" />
+        <select id="uvCourseStatus" aria-label="課程狀態">${[['active', '進行中'], ['all', '全部'], ['ended', '已結束']].map(([v, l]) =>
+          `<option value="${v}"${state.courseStatus === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="uvCourse" aria-label="課程">${vis.length ? vis.map((c) =>
+          `<option value="${c.id}"${c.id === state.courseId ? ' selected' : ''}>${esc(c.name)} · ${c.students.length} 位</option>`).join('') : '<option value="">沒有符合的課程</option>'}</select>
+        ${state.addingCourse
+          ? `<span class="add-course-form"><input id="uvNewCourse" data-draft="courseName" placeholder="新課程名稱" value="${esc(state.drafts.courseName || '')}" />
+             <button type="button" data-act="createCourse">建立</button><button type="button" class="btn-secondary" data-act="cancelCourse">取消</button></span>`
+          : '<button type="button" class="btn-secondary" data-act="addCourse">＋ 課程</button>'}
+        <button type="button" class="btn-secondary">預設模型設定</button>
+      </div>`;
+    }
+    function selectCourse(c, label) {
+      const pickS = c ? (c.sessions.find((x) => isActive(c, x)) || c.sessions[c.sessions.length - 1]) : null;
+      const id = pickS ? pickS.id : 0;
+      set({ courseId: c ? c.id : state.courseId, sessionId: id, lastSessionId: id, expanded: id ? [id] : [], student: '', openLog: null }, label);
+    }
+    function newSessionForm(c) {
+      if (c.status === 'ended') return '<p class="hint">此課程已結束，無法新增課堂。</p>';
+      const d = state.drafts;
+      return `<div class="session-form session-form-compact uv-newsession">
+        <input type="text" id="uvNewSession" data-draft="sessionName" class="session-name-input" placeholder="新課堂名稱" value="${esc(d.sessionName || '')}" />
+        <input type="datetime-local" data-draft="sessionAt" aria-label="課堂時間" value="${esc(d.sessionAt)}" />
+        <input type="number" data-draft="sessionTtl" min="1" class="input-narrow" aria-label="時數" title="課堂時數，key 在這個時間後到期" value="${esc(d.sessionTtl)}" />
+        <span class="hint hint-inline">小時</span>
+        <button type="button" data-act="createSession">新增課堂</button>
+      </div>`;
+    }
+    function summaryStrip(c) {
+      const ls = scopeLogs(c.id, 0);
+      const used = new Set(ls.map((l) => l.studentId)).size;
+      const rej = ls.filter((l) => l.status === 'rejected').length;
+      const live = c.sessions.find((s) => isActive(c, s));
+      return `<div class="uv-summary">
+        <button type="button" class="uv-stat" data-act="goUsage"><span class="k">課程總 Token</span><span class="v">${fmtTok(sumTokens(ls))}</span></button>
+        <button type="button" class="uv-stat" data-act="goLogs"><span class="k">請求數</span><span class="v">${ls.length}</span></button>
+        <button type="button" class="uv-stat" data-act="goUsage"><span class="k">有使用的學生</span><span class="v">${used} / ${c.students.length}</span></button>
+        <button type="button" class="uv-stat${rej ? ' is-warn' : ''}" data-act="goRejected"><span class="k">被拒絕</span><span class="v">${rej}</span></button>
+        ${live ? `<button type="button" class="uv-stat" data-act="goSession" data-id="${live.id}"><span class="k">進行中課堂</span><span class="v" style="font-size:1rem">${esc(live.name)}</span></button>` : ''}
+      </div>`;
+    }
+    function usageTable(c, sessionId, opts = {}) {
+      const rows = usageRows(c.id, sessionId).sort((a, b) => state.sort === 'name'
+        ? students[a.sid].name.localeCompare(students[b.sid].name) : b[state.sort] - a[state.sort]);
+      const max = Math.max(1, ...rows.map((r) => r.total));
+      const avg = rows.reduce((a, r) => a + r.total, 0) / Math.max(1, rows.filter((r) => r.req).length);
+      const th = (key, label, cls = '') => `<th class="sortable ${cls}" data-sort="${key}">${label}${state.sort === key ? ' ▾' : ''}</th>`;
+      return `<div class="table-wrap"><table class="uv-table">
+        <tr>${th('name', '學生')}${th('total', 'Total Token', 'uv-bar-cell')}${opts.compact ? '' : th('pt', 'Prompt', 'num') + th('ct', 'Completion', 'num')}${th('req', '請求', 'num')}${th('rej', '拒絕', 'num')}<th>最近</th><th></th></tr>
+        ${rows.map((r) => `<tr class="is-click" data-student="${r.sid}">
+          <td>${esc(students[r.sid].name)}${r.total > avg * 2.5 ? '<span class="uv-flag">⚠ 用量偏高</span>' : ''}${r.req ? '' : ' <span class="uv-muted">（未使用）</span>'}</td>
+          <td class="uv-bar-cell"><span class="uv-bar" style="width:${Math.round(r.total / max * 140)}px"></span>${fmtTok(r.total)}</td>
+          ${opts.compact ? '' : `<td class="num">${fmtTok(r.pt)}</td><td class="num">${fmtTok(r.ct)}</td>`}
+          <td class="num">${r.req}</td><td class="num">${r.rej || ''}</td>
+          <td class="uv-muted">${r.last ? fmtAgo(r.last) : '—'}</td>
+          <td><span class="uv-muted">看紀錄 →</span></td>
+        </tr>`).join('')}
+      </table></div>`;
+    }
+    function logFilterBar(showSession) {
+      const st = state.student ? students[state.student] : null;
+      return `<div class="uv-filterbar">
+        ${st ? `<span class="uv-chip">學生：${esc(st.name)}<button type="button" data-act="clearStudent" aria-label="清除">✕</button></span>` : ''}
+        <span class="uv-seg">${[['all', '全部'], ['rejected', '只看拒絕']].map(([k, l]) =>
+          `<button type="button" data-status="${k}" class="${state.status === k ? 'is-on' : ''}">${l}</button>`).join('')}</span>
+        <input id="uvKeyword" placeholder="prompt 關鍵字" value="${esc(state.keyword)}" />
+        ${showSession ? '' : ''}
+      </div>`;
+    }
+    function filteredLogs(c, sessionId) {
+      return scopeLogs(c.id, sessionId, state.student)
+        .filter((l) => state.status === 'all' || l.status === 'rejected')
+        .filter((l) => !state.keyword || l.prompt.includes(state.keyword));
+    }
+    function logTable(c, sessionId, opts = {}) {
+      const ls = filteredLogs(c, sessionId).slice(0, 80);
+      if (!ls.length) return '<p class="hint">沒有符合的紀錄</p>';
+      const showSes = !sessionId;
+      return `<div class="table-wrap"><table class="uv-table">
+        <tr><th>時間</th>${state.student ? '' : '<th>學生</th>'}${showSes ? '<th>課堂</th>' : ''}<th>端點</th>${opts.compact ? '' : '<th>模型</th>'}<th class="num">Token</th><th>狀態</th><th>使用者預覽</th></tr>
+        ${ls.map((l) => `<tr class="is-click${isFresh(l) ? ' is-fresh' : ''}" data-log="${l.id}">
+          <td class="uv-muted">${fmtTime(l.at)}</td>
+          ${state.student ? '' : `<td>${esc(students[l.studentId].name)}</td>`}
+          ${showSes ? `<td class="uv-muted">${esc(sessionById(c, l.sessionId).name)}</td>` : ''}
+          <td>${endpointTag(l.endpoint)}</td>${opts.compact ? '' : `<td class="uv-muted">${esc(l.model)}</td>`}
+          <td class="num">${fmtTok(l.pt + l.ct)}</td>
+          <td>${l.status === 'rejected' ? '<span class="tag tag-ended">rejected</span>' : '<span class="tag tag-active">ok</span>'}</td>
+          <td><div class="uv-preview">${esc(l.prompt)}</div></td>
+        </tr>${state.openLog === l.id ? `<tr class="uv-detail"><td colspan="8">user: ${esc(l.prompt)}\nassistant: （原型：這裡顯示完整對話與 token 細節）\nmodel: ${esc(l.model)} · prompt ${l.pt} / completion ${l.ct}</td></tr>` : ''}`).join('')}
+      </table></div>
+      <p class="hint">共 ${filteredLogs(c, sessionId).length} 筆${ls.length < filteredLogs(c, sessionId).length ? `，顯示最新 ${ls.length} 筆` : ''}</p>`;
+    }
+    function settingsBlock(c, s) {
+      return `<div class="uv-kv">
+        <span class="k">邀請碼</span><span><code>${esc(s.invite)}</code></span>
+        <span class="k">座位</span><span>${s.redeemed.length} / ${s.seats}</span>
+        <span class="k">時間</span><span>${fmtTime(s.at)} · ${s.hours} 小時</span>
+        <span class="k">對話模型</span><span>${MODELS.slice(1).map((m) => `<span class="uv-pill">${esc(m)}</span>`).join('')}</span>
+        <span class="k">能力</span><span><span class="uv-pill">生圖 開</span><span class="uv-pill">Prompt 開</span><span class="uv-pill">決策 關</span></span>
+      </div><p class="hint">（原型：設定內容維持現狀，這裡只放摘要。）</p>`;
+    }
+    function sessionRow(c, s, extra = '') {
+      const tok = s ? sumTokens(scopeLogs(c.id, s.id)) : sumTokens(scopeLogs(c.id, 0));
+      const cur = (s ? s.id : 0) === state.sessionId ? ' is-current' : '';
+      if (!s) return `<button type="button" class="session-layout-row is-all${cur}" data-session="0">
+          <span class="sl-name">全部課堂（課程合計）</span><span class="sl-tokens">${fmtTok(tok)}</span></button>`;
+      return `<button type="button" class="session-layout-row${cur}" data-session="${s.id}">
+        <span class="sl-name">${esc(s.name)}</span>${sessionTag(c, s)}
+        <span class="session-name-sub">${fmtTime(s.at)}</span>
+        <span class="sl-seats">${s.redeemed.length} / ${s.seats}</span>
+        <span class="sl-tokens">${fmtTok(tok)}</span>${extra}</button>`;
+    }
+
+    // ---------- Variant A: inspector tabs ----------
+    function renderA(c) {
+      const s = sessionById(c, state.sessionId);
+      if (!s && state.view === 'settings') state.view = 'usage';
+      const ls = scopeLogs(c.id, state.sessionId);
+      const tabs = [
+        s ? ['settings', '設定', ''] : null,
+        ['usage', '用量', fmtTok(sumTokens(ls))],
+        ['logs', 'Prompt 紀錄', String(ls.length)],
+      ].filter(Boolean);
+      let body = '';
+      if (state.view === 'settings') body = settingsBlock(c, s);
+      if (state.view === 'usage') body = `<p class="hint">點學生 → 直接看他的 Prompt 紀錄。</p>${usageTable(c, state.sessionId)}`;
+      if (state.view === 'logs') body = logFilterBar() + logTable(c, state.sessionId);
+      return `${courseToolbar()}
+        <div class="course-detail-header"><span>${esc(c.name)}</span>${statusTag(c.status === 'active')}<span class="hint hint-inline">${c.students.length} 位成員</span></div>
+        ${summaryStrip(c)}
+        <div class="session-layout session-layout-split">
+          <div class="session-layout-list">${sessionRow(c, null)}${c.sessions.slice().reverse().map((x) => sessionRow(c, x)).join('')}</div>
+          <div class="session-layout-inspector">
+            <div class="session-layout-head"><strong>${s ? esc(s.name) : '全部課堂'}</strong>${s ? sessionTag(c, s) : ''}</div>
+            <div class="uv-tabs">${tabs.map(([k, l, b]) => `<button type="button" data-view="${k}" class="${state.view === k ? 'is-on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div>
+            ${body}
+          </div>
+        </div>`;
+    }
+
+    // ---------- Variant B: heat map + drawer ----------
+    function renderB(c) {
+      const sessions = c.sessions;
+      const cell = {};
+      let max = 1;
+      for (const l of scopeLogs(c.id, 0)) {
+        const k = `${l.studentId}|${l.sessionId}`;
+        cell[k] = (cell[k] || 0) + l.pt + l.ct; max = Math.max(max, cell[k]);
+      }
+      const shade = (v) => v ? `background: color-mix(in srgb, var(--accent) ${Math.round(12 + v / max * 78)}%, transparent);${v / max > .55 ? 'color:#fff;' : ''}` : 'background: var(--surface-2); color: var(--text-muted);';
+      const rowTotal = (sid) => sessions.reduce((a, s) => a + (cell[`${sid}|${s.id}`] || 0), 0);
+      const sorted = c.students.slice().sort((a, b) => rowTotal(b) - rowTotal(a));
+      const sel = (sid, ses) => state.view === 'logs' && state.student === sid && (state.sessionId === ses) ? ' is-sel' : '';
+      return `${courseToolbar()}
+        <div class="course-detail-header"><span>${esc(c.name)}</span>${statusTag(c.status === 'active')}<span class="hint hint-inline">${c.students.length} 位成員</span>
+          <button type="button" class="btn-secondary" style="margin-left:auto" data-act="openSettings">課堂設定…</button></div>
+        ${summaryStrip(c)}
+        <p class="hint">每格 = 學生在該課堂的 Token。點格子看那堂的紀錄，點姓名看全部紀錄，點課堂標題看整堂紀錄。</p>
+        <div class="table-wrap"><table class="uv-matrix">
+          <tr><th></th>${sessions.map((s) => `<th class="col" data-col="${s.id}">${esc(s.name)}<br>${sessionTag(c, s)}</th>`).join('')}<th class="col">合計</th></tr>
+          ${sorted.map((sid) => `<tr>
+            <th class="rowh" data-row="${sid}">${esc(students[sid].name)}</th>
+            ${sessions.map((s) => { const v = cell[`${sid}|${s.id}`] || 0; return `<td class="cell${sel(sid, s.id)}" data-cell="${sid}|${s.id}" style="${shade(v)}">${v ? fmtTok(v) : '—'}</td>`; }).join('')}
+            <td class="total">${fmtTok(rowTotal(sid))}</td></tr>`).join('')}
+          <tr><th class="rowh uv-muted">合計</th>${sessions.map((s) => `<td class="total">${fmtTok(sumTokens(scopeLogs(c.id, s.id)))}</td>`).join('')}<td class="total">${fmtTok(sumTokens(scopeLogs(c.id, 0)))}</td></tr>
+        </table></div>`;
+    }
+    function renderDrawerB(c) {
+      const drawer = document.getElementById('drawer');
+      if (variantKey() === 'E') {
+        const s = sessionById(c, state.sessionId);
+        const openE = state.page === 'class' && state.settingsOpen && !!s;
+        drawer.classList.toggle('is-open', openE);
+        drawer.innerHTML = openE ? `<div class="uv-drawer-head"><h3>課堂設定：${esc(s.name)}</h3><button type="button" class="btn-secondary btn-sm" data-act="closeSettingsE">關閉</button></div>${settingsBlock(c, s)}` : '';
+        return;
+      }
+      const open = variantKey() === 'B' && state.page === 'class' && (state.view === 'logs' || state.view === 'settings');
+      drawer.classList.toggle('is-open', open);
+      if (!open) { drawer.innerHTML = ''; return; }
+      const s = sessionById(c, state.sessionId);
+      const title = state.view === 'settings'
+        ? `課堂設定：${s ? esc(s.name) : ''}`
+        : `${state.student ? esc(students[state.student].name) : '全部學生'} · ${s ? esc(s.name) : '全部課堂'}`;
+      let body;
+      if (state.view === 'settings') {
+        body = `<div class="uv-filterbar"><select id="uvDrawerSession">${c.sessions.map((x) => `<option value="${x.id}"${x.id === state.sessionId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>${s ? settingsBlock(c, s) : '<p class="hint">選一堂課</p>'}`;
+      } else {
+        body = logFilterBar() + logTable(c, state.sessionId, { compact: true });
+      }
+      drawer.innerHTML = `<div class="uv-drawer-head"><h3>${title}</h3><button type="button" class="btn-secondary btn-sm" data-act="closeDrawer">關閉</button></div>${body}`;
+    }
+
+    // ---------- upstream (shared): one quiet line, colour only when something needs attention ----------
+    const pct = (k) => k.used / k.limit;
+    function upstreamWarn() {
+      const o = upstream.ollama_cloud, r = upstream.openrouter;
+      return [...o.keys, ...r.keys].some((k) => k.quarantined) || o.keys.some((k) => pct(k) >= 0.9) || r.credit < 5;
+    }
+    function upstreamLine() {
+      const o = upstream.ollama_cloud, r = upstream.openrouter;
+      const q = [...o.keys, ...r.keys].filter((k) => k.quarantined).length;
+      const inflight = [...o.keys, ...r.keys].reduce((a, k) => a + k.in_flight, 0);
+      const cap = o.capacity + r.capacity;
+      const waiting = o.waiting + r.waiting;
+      const meters = o.keys.map((k) => `<span class="uv-meter" title="#${k.index} $${k.used.toFixed(1)} / $${k.limit}"><i class="${pct(k) >= 0.9 ? 'warn' : ''}" style="width:${Math.round(pct(k) * 100)}%"></i></span>`).join('');
+      return `<div class="uv-up-line" data-act="toggleUpstreamCompact" title="點一下展開儀表板">
+        <span class="uv-up-item"><span class="name">Ollama</span><span class="uv-meters">${meters}</span><span>${o.keys[0].resetDays} 天後重置</span></span>
+        <span class="uv-up-item"><span class="name">OpenRouter</span><span class="num${r.credit < 5 ? ' is-warn' : ''}">$${r.credit.toFixed(2)}</span></span>
+        <span class="uv-up-item"><span class="name">併發</span><span class="num">${inflight}/${cap}</span>${waiting ? `<span class="is-warn">排隊 ${waiting}</span>` : ''}</span>
+        ${q ? `<span class="uv-up-badge">${q} 把 key 隔離中</span>` : ''}
+        <span class="uv-up-caret">展開儀表板 <i class="fas fa-chevron-down"></i></span>
+      </div>`;
+    }
+    function upstreamDetail() {
+      const o = upstream.ollama_cloud, r = upstream.openrouter;
+      const conc = (k) => `併發 ${k.in_flight}/${k.cap}`;
+      const tail = (name, k) => k.quarantined
+        ? `<button type="button" class="btn-secondary" data-release="${name}|${k.index}">解除隔離</button>`
+        : `<span class="k">${conc(k)}</span>`;
+      const oRows = o.keys.map((k) => `
+        <span class="k">#${k.index}</span>
+        <span class="bar"><i class="${pct(k) >= 0.9 ? 'warn' : ''}" style="width:${Math.round(pct(k) * 100)}%"></i></span>
+        <span class="t${pct(k) >= 0.9 ? ' is-warn' : ''}">$${k.used.toFixed(1)} / $${k.limit}${k.quarantined ? ` · 隔離 ${Math.ceil(k.remain / 60)} 分` : ''}</span>
+        ${tail('ollama_cloud', k)}`).join('');
+      const rRows = r.keys.map((k) => `
+        <span class="k">#${k.index}</span>
+        <span class="bar"><i style="width:${Math.round(k.in_flight / k.cap * 100)}%"></i></span>
+        <span class="t">${k.quarantined ? `隔離 ${Math.ceil(k.remain / 60)} 分` : ''}</span>
+        ${tail('openrouter', k)}`).join('');
+      return `<div class="uv-up-detail">
+        <div class="prov">Ollama Cloud <span>月用量 · ${o.keys[0].resetDays} 天後重置</span></div>${oRows}
+        <div class="prov">OpenRouter <span>帳號餘額 $${r.credit.toFixed(2)}（所有 key 共用）</span></div>${rRows}
+      </div>`;
+    }
+    const concHist = [];
+    function sparkline(values) {
+      if (values.length < 2) return '';
+      const max = Math.max(1, ...values), w = 100, h = 26;
+      const pts = values.map((v, i) => [i / (values.length - 1) * (w - 4) + 2, h - 3 - v / max * (h - 6)]);
+      const last = pts[pts.length - 1];
+      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="${pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ')}" vector-effect="non-scaling-stroke"/>
+        <polyline class="now" points="${pts.slice(-2).map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ')}" vector-effect="non-scaling-stroke"/></svg>`;
+    }
+    function upstreamTiles() {
+      const o = upstream.ollama_cloud, r = upstream.openrouter;
+      const all = [...o.keys, ...r.keys];
+      const inflight = all.reduce((a, k) => a + k.in_flight, 0);
+      const cap = o.capacity + r.capacity;
+      const waiting = o.waiting + r.waiting;
+      const ollamaTile = (k) => {
+        const warn = pct(k) >= 0.9;
+        return `<div class="uv-kpi" title="Ollama Cloud #${k.index}：$${k.used.toFixed(2)} of $${k.limit} used，Resets in ${k.resetDays}d">
+          <div class="lbl"><span>Ollama #${k.index} 月用量</span><span>${Math.round(pct(k) * 100)}%</span></div>
+          <div class="val">$${k.used.toFixed(1)}<small>/ $${k.limit}</small></div>
+          <div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.round(pct(k) * 100)}%"></i></div>
+          <div class="sub">${k.quarantined
+            ? `<span class="status"><i class="fas fa-triangle-exclamation"></i>隔離中 ${Math.ceil(k.remain / 60)} 分</span><button type="button" class="btn-secondary" data-release="ollama_cloud|${k.index}">解除隔離</button>`
+            : warn ? `<span class="status"><i class="fas fa-triangle-exclamation"></i>快用完</span><span>${k.resetDays} 天後重置</span>`
+            : `<span>${k.resetDays} 天後重置 · 併發 ${k.in_flight}/${k.cap}</span>`}</div>
+        </div>`;
+      };
+      const rq = r.keys.filter((k) => k.quarantined).length;
+      return `<div class="uv-kpis-head"><span>上游狀態</span><button type="button" data-act="toggleUpstreamCompact">收合成一行 <i class="fas fa-chevron-up"></i></button></div>
+        <div class="uv-kpis">
+          ${o.keys.map(ollamaTile).join('')}
+          <div class="uv-kpi" title="OpenRouter 帳號剩餘額度，${r.keys.length} 把 key 共用">
+            <div class="lbl"><span>OpenRouter 餘額</span><span>${r.keys.length} 把 key</span></div>
+            <div class="val">$${r.credit.toFixed(2)}</div>
+            <div class="sub">${r.credit < 5 ? '<span class="status"><i class="fas fa-triangle-exclamation"></i>餘額偏低</span>' : '<span>帳號共用額度</span>'}
+              ${rq ? `<span class="status"><i class="fas fa-triangle-exclamation"></i>${rq} 把隔離</span>` : ''}</div>
+          </div>
+          <div class="uv-kpi" title="目前進行中的上游請求 / 併發上限（最近 ${concHist.length} 次取樣）">
+            <div class="lbl"><span>併發</span><span>${waiting ? `<span class="status">排隊 ${waiting}</span>` : '無排隊'}</span></div>
+            <div class="val">${inflight}<small>/ ${cap}</small></div>
+            ${sparkline(concHist)}
+            <div class="sub"><span>Ollama ${o.keys.reduce((a, k) => a + k.in_flight, 0)}/${o.capacity} · OpenRouter ${r.keys.reduce((a, k) => a + k.in_flight, 0)}/${r.capacity}</span></div>
+          </div>
+        </div>`;
+    }
+    function upstreamBox(full) {
+      if (full || !state.upstreamCompact) return upstreamTiles();
+      return `<div class="uv-up">${upstreamLine()}${state.upstreamOpen ? upstreamDetail() : ''}</div>`;
+    }
+
+    // ---------- Variant C: settings bands (left) + monitor rail (right) ----------
+    function renderC(c) {
+      const s = sessionById(c, state.sessionId);
+      const rows = usageRows(c.id, state.sessionId).filter((r) => r.req).sort((a, b) => b.total - a.total);
+      const max = Math.max(1, ...rows.map((r) => r.total));
+      const feed = filteredLogs(c, state.sessionId).slice(0, 25);
+      const band = (x) => {
+        const id = x ? x.id : 0;
+        const open = state.expanded.includes(id);
+        const focus = state.sessionId === id;
+        const tok = sumTokens(scopeLogs(c.id, id));
+        const head = x
+          ? `<span class="sl-name">${esc(x.name)}</span>${sessionTag(c, x)}<span class="session-name-sub">${fmtTime(x.at)}</span><span class="sl-seats">${x.redeemed.length} / ${x.seats}</span>`
+          : `<span class="sl-name">全部課堂（課程合計）</span>`;
+        return `<section class="uv-band${focus ? ' is-focus' : ''}">
+          <button type="button" data-band="${id}" aria-expanded="${open}">
+            ${head}<span class="sl-tokens">${fmtTok(tok)}</span>${focus ? '<span class="focus-mark">右側顯示中 →</span>' : ''}
+            <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+          </button>
+          ${open ? `<div class="uv-band-body">${x ? settingsBlock(c, x) : `<p class="hint">整門課的學生用量與紀錄顯示在右側。</p>`}</div>` : ''}
+        </section>`;
+      };
+      const rail = state.railOpen ? `<aside class="uv-rail">
+          ${upstreamBox(false)}
+          <div class="uv-rail-head"><strong>${s ? esc(s.name) : `${esc(c.name)}（整門課）`}</strong>${s && isActive(c, s) ? '<span class="nav-live-dot"></span>' : ''}
+            <span class="uv-seg">${[['session', '這堂'], ['course', '整門課']].map(([k, l]) =>
+              `<button type="button" data-scope="${k}" class="${(k === 'course') === !s ? 'is-on' : ''}">${l}</button>`).join('')}</span>
+            <button type="button" class="btn-secondary btn-sm" data-act="toggleRail" title="收合">⟩</button></div>
+          <div class="uv-summary" style="grid-template-columns:1fr 1fr; margin:8px 0">
+            <div class="uv-stat"><span class="k">Token</span><span class="v">${fmtTok(sumTokens(scopeLogs(c.id, state.sessionId)))}</span></div>
+            <div class="uv-stat"><span class="k">請求</span><span class="v">${scopeLogs(c.id, state.sessionId).length}</span></div>
+          </div>
+          <h4>學生用量（點選篩選下方紀錄）</h4>
+          ${rows.map((r) => `<div class="uv-mini${state.student === r.sid ? ' is-sel' : ''}" data-student="${r.sid}">
+            <span>${esc(students[r.sid].name)}</span><span><span class="uv-bar" style="width:${Math.round(r.total / max * 100)}%"></span></span><span class="num">${fmtTok(r.total)}</span></div>`).join('') || '<p class="hint">尚無用量</p>'}
+          <h4>最新紀錄${state.student ? ` · ${esc(students[state.student].name)} <button type="button" class="btn-secondary btn-sm" data-act="clearStudent">清除</button>` : ''}</h4>
+          ${feed.map((l) => `<div class="uv-feed-item${isFresh(l) ? ' is-fresh' : ''}" data-log="${l.id}">
+            <div>${state.student ? '' : `<strong>${esc(students[l.studentId].name)}</strong> `}${state.sessionId ? '' : `<span class="uv-muted">[${esc(sessionById(c, l.sessionId).name.split('：')[0])}]</span> `}${esc(l.prompt)}</div>
+            <div class="meta">${fmtAgo(l.at)} · ${l.endpoint} · ${fmtTok(l.pt + l.ct)}${l.status === 'rejected' ? ' · <span style="color:var(--danger)">rejected</span>' : ''}</div>
+            ${state.openLog === l.id ? `<div class="meta" style="white-space:pre-wrap">model: ${esc(l.model)}\nprompt ${l.pt} / completion ${l.ct}\n（原型：完整對話）</div>` : ''}
+          </div>`).join('') || '<p class="hint">沒有紀錄</p>'}
+        </aside>` : `<button type="button" class="btn-secondary uv-rail-collapsed${upstreamWarn() ? ' is-warn' : ''}" data-act="toggleRail">⟨ 用量與紀錄${upstreamWarn() ? ' ⚠' : ''}</button>`;
+      return `${courseToolbar()}
+        <div class="course-detail-header"><span>${esc(c.name)}</span>${statusTag(c.status === 'active')}<span class="hint hint-inline">${c.students.length} 位成員 · 課程合計 ${fmtTok(sumTokens(scopeLogs(c.id, 0)))}</span></div>
+        <div class="uv-c2${state.railOpen ? '' : ' rail-closed'}">
+          <div>${c.sessions.slice().reverse().map(band).join('')}</div>
+          ${rail}
+        </div>`;
+    }
+
+    // ---------- shared pieces for D / E / F ----------
+    function miniUsage(c, sessionId, limit) {
+      const rows = usageRows(c.id, sessionId).filter((r) => r.req).sort((a, b) => b.total - a.total).slice(0, limit || 99);
+      const max = Math.max(1, ...rows.map((r) => r.total));
+      return rows.map((r) => `<div class="uv-mini${state.student === r.sid && state.sessionId === sessionId ? ' is-sel' : ''}" data-student="${r.sid}" data-in="${sessionId}">
+        <span>${esc(students[r.sid].name)}</span><span><span class="uv-bar" style="width:${Math.round(r.total / max * 100)}%"></span></span><span class="num">${fmtTok(r.total)}</span></div>`).join('') || '<p class="hint">尚無用量</p>';
+    }
+    function miniFeed(c, sessionId, limit) {
+      const who = state.sessionId === sessionId ? state.student : '';
+      const ls = scopeLogs(c.id, sessionId, who).slice(0, limit);
+      return ls.map((l) => `<div class="uv-feed-item${isFresh(l) ? ' is-fresh' : ''}" data-log="${l.id}">
+          <div>${who ? '' : `<strong>${esc(students[l.studentId].name)}</strong> `}${sessionId ? '' : `<span class="uv-muted">[${esc(sessionById(c, l.sessionId).name.split('：')[0])}]</span> `}${esc(l.prompt)}</div>
+          <div class="meta">${fmtAgo(l.at)} · ${l.endpoint} · ${fmtTok(l.pt + l.ct)}${l.status === 'rejected' ? ' · <span style="color:var(--danger)">rejected</span>' : ''}</div>
+          ${state.openLog === l.id ? `<div class="meta" style="white-space:pre-wrap">model: ${esc(l.model)}\nprompt ${l.pt} / completion ${l.ct}\n（原型：完整對話）</div>` : ''}
+        </div>`).join('') || '<p class="hint">沒有紀錄</p>';
+    }
+    function whoChip(sessionId) {
+      return state.student && state.sessionId === sessionId
+        ? ` · ${esc(students[state.student].name)} <button type="button" class="btn-secondary btn-sm" data-act="clearStudent">清除</button>` : '';
+    }
+    function statPair(c, sessionId) {
+      return `<div class="uv-summary" style="grid-template-columns:1fr 1fr; margin:8px 0">
+        <div class="uv-stat"><span class="k">Token</span><span class="v">${fmtTok(sumTokens(scopeLogs(c.id, sessionId)))}</span></div>
+        <div class="uv-stat"><span class="k">請求</span><span class="v">${scopeLogs(c.id, sessionId).length}</span></div></div>`;
+    }
+    function scopeSeg(s) {
+      return `<span class="uv-seg">${[['session', '這堂'], ['course', '整門課']].map(([k, l]) =>
+        `<button type="button" data-scope="${k}" class="${(k === 'course') === !s ? 'is-on' : ''}">${l}</button>`).join('')}</span>`;
+    }
+    function settingsBand(c, x) {
+      const open = state.expanded.includes(x.id);
+      const focus = state.sessionId === x.id;
+      return `<section class="uv-band${focus ? ' is-focus' : ''}">
+        <button type="button" data-band="${x.id}" aria-expanded="${open}">
+          <span class="sl-name">${esc(x.name)}</span>${sessionTag(c, x)}<span class="session-name-sub">${fmtTime(x.at)}</span>
+          <span class="sl-seats">${x.redeemed.length} / ${x.seats}</span><span class="sl-tokens">${fmtTok(sumTokens(scopeLogs(c.id, x.id)))}</span>
+          ${focus ? '<span class="focus-mark">右側顯示中 →</span>' : ''}<i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+        </button>
+        ${open ? `<div class="uv-band-body">${settingsBlock(c, x)}</div>` : ''}
+      </section>`;
+    }
+    function courseHead(c, manage) {
+      return `${courseToolbar()}
+        <div class="course-detail-header"><span>${esc(c.name)}</span>${statusTag(c.status === 'active')}<span class="hint hint-inline">${c.students.length} 位成員 · 課程合計 ${fmtTok(sumTokens(scopeLogs(c.id, 0)))}</span>
+          ${manage && c.status === 'active' ? '<button type="button" class="btn-danger end-course-btn" data-act="endCourse">結束課程</button>' : ''}</div>`;
+    }
+
+    // ---------- Variant D: upstream on top, two full-height columns ----------
+    function renderD(c) {
+      const s = sessionById(c, state.sessionId);
+      return `${courseHead(c)}
+        <div style="margin-top:10px">${upstreamBox(false)}</div>
+        <div class="uv-d uv-fill">
+          <div class="uv-pane plain">${c.sessions.slice().reverse().map((x) => settingsBand(c, x)).join('')}</div>
+          <div class="uv-pane">
+            <div class="uv-rail-head"><strong>${s ? esc(s.name) : `${esc(c.name)}（整門課）`}</strong>${s && isActive(c, s) ? '<span class="nav-live-dot"></span>' : ''}${scopeSeg(s)}</div>
+            ${statPair(c, state.sessionId)}
+            <h4>學生用量（點選篩選下方紀錄）</h4>
+            <div style="max-height:34%; overflow:auto; flex-shrink:0">${miniUsage(c, state.sessionId)}</div>
+            <h4>最新紀錄${whoChip(state.sessionId)}</h4>
+            <div class="grow">${miniFeed(c, state.sessionId, 40)}</div>
+          </div>
+        </div>`;
+    }
+
+    // ---------- Variant E: session tabs, full-width dashboard, settings drawer ----------
+    function renderE(c) {
+      const s = sessionById(c, state.sessionId);
+      const tab = (x) => {
+        const id = x ? x.id : 0;
+        return `<button type="button" class="sess${state.sessionId === id ? ' is-on' : ''}" data-tabsession="${id}">
+          ${x ? esc(x.name) : '整門課'}${x && isActive(c, x) ? '<span class="nav-live-dot" style="margin:0"></span>' : ''}
+          <span class="sl-tokens">${fmtTok(sumTokens(scopeLogs(c.id, id)))}</span></button>`;
+      };
+      return `${courseHead(c)}
+        <div style="margin-top:10px">${upstreamBox(false)}</div>
+        <div class="uv-tabstrip">${c.sessions.slice().reverse().map(tab).join('')}${tab(null)}<span class="spacer"></span>
+          ${s ? `<span class="hint hint-inline">邀請碼 <code>${esc(s.invite)}</code> · 座位 ${s.redeemed.length}/${s.seats}</span>` : ''}
+          <button type="button" class="btn-secondary" data-act="openSettingsE"${s ? '' : ' disabled'}><i class="fas fa-gear"></i> 課堂設定</button></div>
+        <div class="uv-d uv-fill">
+          <div class="uv-pane">
+            <h4>學生用量（點選篩選右邊紀錄）</h4>
+            ${statPair(c, state.sessionId)}
+            <div class="grow">${miniUsage(c, state.sessionId)}</div>
+          </div>
+          <div class="uv-pane">
+            <h4>最新 Prompt 紀錄${whoChip(state.sessionId)}</h4>
+            <div class="grow">${miniFeed(c, state.sessionId, 50)}</div>
+          </div>
+        </div>`;
+    }
+
+    // ---------- Variant F: session cards, settings | usage inside each card ----------
+    function renderF(c) {
+      const ls = scopeLogs(c.id, 0);
+      const card = (x) => {
+        const open = state.expanded.includes(x.id);
+        return `<section class="uv-band${open && state.sessionId === x.id ? ' is-focus' : ''}">
+          <button type="button" data-band="${x.id}" aria-expanded="${open}">
+            <span class="sl-name">${esc(x.name)}</span>${sessionTag(c, x)}<span class="session-name-sub">${fmtTime(x.at)}</span>
+            <span class="sl-seats">${x.redeemed.length} / ${x.seats}</span><span class="sl-tokens">${fmtTok(sumTokens(scopeLogs(c.id, x.id)))}</span>
+            <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+          </button>
+          ${open ? `<div class="uv-f-body">
+            <div><h4>設定</h4>${settingsBlock(c, x)}</div>
+            <div><h4>學生用量</h4>${miniUsage(c, x.id, 6)}
+              <h4 style="margin-top:10px">最新紀錄${whoChip(x.id)}</h4>${miniFeed(c, x.id, 5)}</div>
+          </div>` : ''}
+        </section>`;
+      };
+      return `${courseHead(c, true)}
+        <div style="margin-top:10px">${upstreamBox(false)}</div>
+        <div class="uv-statrow"><span>整門課 Token<b>${fmtTok(sumTokens(ls))}</b></span><span>請求<b>${ls.length}</b></span>
+          <span>有使用的學生<b>${new Set(ls.map((l) => l.studentId)).size} / ${c.students.length}</b></span>
+          <span>被拒絕<b>${ls.filter((l) => l.status === 'rejected').length}</b></span></div>
+        ${newSessionForm(c)}
+        ${c.sessions.length ? c.sessions.slice().reverse().map(card).join('') : '<p class="hint">尚無課堂，用上面的表單新增第一堂。</p>'}`;
+    }
+
+    // ---------- 即時監控 (shared) ----------
+    function renderLive() {
+      const ls = logs.filter((l) => !state.liveCourse || l.courseId === state.liveCourse)
+        .filter((l) => { const c = courseById(l.courseId); return isActive(c, sessionById(c, l.sessionId)); })
+        .slice(0, 60);
+      const activeSessions = courses.flatMap((c) => c.sessions.filter((s) => isActive(c, s)).map((s) => ({ c, s })));
+      return `<h2>即時監控</h2>
+        <p class="hint">跨課程、只看進行中的課堂，約每 3 秒更新。點一筆會跳到「我的課程」該課堂的紀錄，並篩選成那位學生。上游負載放在最上面（右側監控欄也有精簡版）。</p>
+        ${upstreamBox(true)}
+        <div class="uv-summary">${activeSessions.map(({ c, s }) => `<button type="button" class="uv-stat" data-jump="${c.id}|${s.id}|">
+          <span class="k">${esc(c.name)}</span><span class="v" style="font-size:1rem">${esc(s.name)}</span>
+          <span class="k">${fmtTok(sumTokens(scopeLogs(c.id, s.id)))} · ${scopeLogs(c.id, s.id).length} 筆</span></button>`).join('')}</div>
+        <div class="uv-filterbar">
+          <span class="uv-seg">${[[0, '全部課程'], ...courses.filter((c) => c.status === 'active').map((c) => [c.id, c.name])].map(([id, n]) =>
+            `<button type="button" data-livecourse="${id}" class="${state.liveCourse === id ? 'is-on' : ''}">${esc(n)}</button>`).join('')}</span>
+          <button type="button" class="btn-secondary" data-act="pauseLive">${state.livePaused ? '▶ 繼續更新' : '⏸ 暫停更新'}</button>
+        </div>
+        <div class="session-layout-inspector" style="padding:0">${ls.map((l) => {
+          const c = courseById(l.courseId);
+          return `<div class="uv-live-item${isFresh(l) ? ' is-fresh' : ''}" data-jump="${l.courseId}|${l.sessionId}|${l.studentId}">
+            <span class="uv-muted">${fmtAgo(l.at)}</span><strong>${esc(students[l.studentId].name)}</strong>
+            <span class="uv-muted">${esc(c.name.slice(0, 8))}</span><span class="uv-preview">${esc(l.prompt)}</span>
+            <span>${l.status === 'rejected' ? '<span class="tag tag-ended">rejected</span>' : fmtTok(l.pt + l.ct)}</span></div>`;
+        }).join('') || '<p class="hint" style="padding:12px">目前沒有進行中的課堂</p>'}</div>`;
+    }
+
+    // ---------- render ----------
+    function render() {
+      writeHash();
+      const v = variantKey();
+      const main = document.getElementById('main');
+      const keep = main.scrollTop;
+      const railEl = document.querySelector('.uv-rail');
+      const railKeep = railEl ? railEl.scrollTop : 0;
+      const paneKeep = [...document.querySelectorAll('.uv-pane, .uv-pane .grow')].map((el) => el.scrollTop);
+      const ae = document.activeElement;
+      const keepFocus = state.focusId || (ae && ae.id && ae.matches('input, select') ? ae.id : null);
+      state.focusId = null;
+      document.querySelectorAll('.proto-menu [data-page]').forEach((b) => b.classList.toggle('tab-active', b.dataset.page === state.page));
+      const c = courseById(state.courseId);
+      if (state.page === 'class') main.innerHTML = ({ A: renderA, B: renderB, C: renderC, D: renderD, E: renderE, F: renderF })[v](c);
+      else if (state.page === 'live') main.innerHTML = renderLive();
+      else main.innerHTML = `<h2>${{ key: '個人 API Key', probe: 'API 測試', admin: '系統管理' }[state.page]}</h2><p class="hint">原型空殼。</p>`;
+      renderDrawerB(c);
+      main.classList.toggle('is-fill', state.page === 'class' && (v === 'D' || v === 'E'));
+      main.scrollTop = keep;
+      const railNew = document.querySelector('.uv-rail'); if (railNew) railNew.scrollTop = railKeep;
+      document.querySelectorAll('.uv-pane, .uv-pane .grow').forEach((el, i) => { el.scrollTop = paneKeep[i] || 0; });
+      if (keepFocus) { const k = document.getElementById(keepFocus); if (k) { k.focus(); try { k.setSelectionRange(k.value.length, k.value.length); } catch (err) {} } }
+      document.getElementById('switcherLabel').textContent = `${v} · ${VARIANTS.find((x) => x.key === v).name}`;
+      const { lastAction, ...rest } = state;
+      document.getElementById('protoStateBody').textContent = `hash: ${location.hash}\n上一步: ${lastAction}\n` + JSON.stringify(rest, null, 1);
+    }
+
+    // ---------- events ----------
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      const c = courseById(state.courseId);
+      const pageBtn = t.closest('.proto-menu [data-page]');
+      if (pageBtn) return set({ page: pageBtn.dataset.page, openLog: null }, `切到 ${pageBtn.textContent.trim()}`);
+      const step = t.closest('#switcher [data-step]');
+      if (step) return cycle(Number(step.dataset.step));
+      const act = t.closest('[data-act]')?.dataset.act;
+      if (act) {
+        const live = c.sessions.find((s) => isActive(c, s));
+        const target = live ? live.id : 0;
+        const go = (patch, label) => set({ student: '', openLog: null, ...patch }, label);
+        if (act === 'goUsage') return go({ sessionId: 0, view: variantKey() === 'B' ? 'matrix' : 'usage' }, '摘要 → 課程用量');
+        if (act === 'goLogs') return go({ sessionId: 0, view: 'logs', status: 'all' }, '摘要 → 課程紀錄');
+        if (act === 'goRejected') return go({ sessionId: 0, view: 'logs', status: 'rejected' }, '摘要 → 被拒絕紀錄');
+        if (act === 'goSession') return go({ sessionId: Number(t.closest('[data-id]').dataset.id), view: 'usage' }, '摘要 → 進行中課堂');
+        if (act === 'clearStudent') return set({ student: '' }, '清除學生篩選');
+        if (act === 'closeDrawer') return set({ view: 'matrix', student: '', openLog: null }, '關閉抽屜');
+        if (act === 'openSettings') return set({ view: 'settings', sessionId: state.sessionId || target || c.sessions[0].id }, '打開課堂設定');
+        if (act === 'addCourse') { state.focusId = 'uvNewCourse'; return set({ addingCourse: true }, '打開新增課程'); }
+        if (act === 'cancelCourse') return set({ addingCourse: false, drafts: { ...state.drafts, courseName: '' } }, '取消新增課程');
+        if (act === 'createCourse') {
+          const name = (state.drafts.courseName || '').trim();
+          if (!name) { state.focusId = 'uvNewCourse'; return render(); }
+          const nc = { id: nextId++, name, status: 'active', studentCount: 0, students: [], sessions: [] };
+          courses.unshift(nc);
+          Object.assign(state, { addingCourse: false, courseQuery: '', courseStatus: 'active', drafts: { ...state.drafts, courseName: '' } });
+          state.focusId = 'uvNewSession';
+          return selectCourse(nc, `建立課程 ${name}`);
+        }
+        if (act === 'endCourse') { c.status = 'ended'; return set({ courseStatus: 'all' }, `結束課程 ${c.name}`); }
+        if (act === 'createSession') {
+          const d = state.drafts;
+          const name = (d.sessionName || '').trim();
+          if (!name) { state.focusId = 'uvNewSession'; return render(); }
+          const at = d.sessionAt ? new Date(d.sessionAt).getTime() : Date.now();
+          const ns = { id: nextId++, name, at, hours: Math.max(1, Number(d.sessionTtl) || 2), seats: 60,
+            invite: Math.random().toString(36).slice(2, 6).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase(), redeemed: [] };
+          c.sessions.push(ns);
+          c.sessions.sort((a, b) => a.at - b.at);
+          return set({ sessionId: ns.id, lastSessionId: ns.id, expanded: [...state.expanded, ns.id], drafts: { ...d, sessionName: '' } }, `新增課堂 ${name}`);
+        }
+        if (act === 'openSettingsE') return set({ settingsOpen: true }, '打開課堂設定抽屜');
+        if (act === 'closeSettingsE') return set({ settingsOpen: false }, '關閉課堂設定抽屜');
+        if (act === 'toggleUpstreamCompact') return set({ upstreamCompact: !state.upstreamCompact }, state.upstreamCompact ? '上游 → 儀表板' : '上游 → 收合成一行');
+        if (act === 'toggleUpstream') return set({ upstreamOpen: !state.upstreamOpen }, state.upstreamOpen ? '收合上游' : '展開上游');
+        if (act === 'toggleRail') return set({ railOpen: !state.railOpen }, state.railOpen ? '收合監控欄' : '展開監控欄');
+        if (act === 'pauseLive') return set({ livePaused: !state.livePaused }, state.livePaused ? '繼續即時更新' : '暫停即時更新');
+      }
+      const rel = t.closest('[data-release]');
+      if (rel) { const [p, i] = rel.dataset.release.split('|'); upstream[p].keys[Number(i)].quarantined = false; return set({}, `解除隔離 ${p} #${i}`); }
+      const tabS = t.closest('[data-tabsession]');
+      if (tabS) { const id = Number(tabS.dataset.tabsession); return set({ sessionId: id, lastSessionId: id || state.lastSessionId, student: '', openLog: null }, `分頁 → ${id || '整門課'}`); }
+      const scope = t.closest('[data-scope]');
+      if (scope) {
+        const course = scope.dataset.scope === 'course';
+        return set({ sessionId: course ? 0 : state.lastSessionId, student: '', openLog: null }, course ? '右側 → 整門課' : '右側 → 這堂');
+      }
+      const bandBtn = t.closest('[data-band]');
+      if (bandBtn) {
+        const id = Number(bandBtn.dataset.band);
+        const open = state.expanded.includes(id);
+        // click the focused open band → collapse it; click any other band → open it and make the rail follow it
+        const collapse = state.sessionId === id && open;
+        const expanded = collapse ? state.expanded.filter((x) => x !== id) : [...new Set([...state.expanded, id])];
+        return set({ expanded, sessionId: id, lastSessionId: id, student: state.sessionId === id ? state.student : '', openLog: null }, `課堂列 ${id || '全部'}${collapse ? ' 收合' : ' 展開＋右側跟隨'}`);
+      }
+      const ses = t.closest('[data-session]');
+      if (ses) {
+        const id = Number(ses.dataset.session);
+        const view = variantKey() === 'A' ? (id === 0 && state.view === 'settings' ? 'usage' : state.view) : 'settings';
+        return set({ sessionId: id, view: variantKey() === 'C' ? 'settings' : view, student: variantKey() === 'C' ? '' : state.student, openLog: null }, `選課堂 ${id || '全部'}`);
+      }
+      const view = t.closest('.uv-tabs [data-view]');
+      if (view) return set({ view: view.dataset.view, openLog: null }, `分頁 → ${view.textContent.trim()}`);
+      const sort = t.closest('[data-sort]');
+      if (sort) return set({ sort: sort.dataset.sort }, `排序 ${sort.dataset.sort}`);
+      const status = t.closest('[data-status]');
+      if (status) return set({ status: status.dataset.status }, `狀態 ${status.dataset.status}`);
+      const stu = t.closest('[data-student]');
+      if (stu) {
+        const sid = stu.dataset.student;
+        if ('CDEF'.includes(variantKey())) {
+          const inS = stu.dataset.in != null ? Number(stu.dataset.in) : state.sessionId;
+          const same = state.student === sid && state.sessionId === inS;
+          return set({ student: same ? '' : sid, sessionId: inS, openLog: null }, same ? '清除學生篩選' : `篩選 ${students[sid].name}`);
+        }
+        return set({ student: sid, view: 'logs', openLog: null }, `點學生 ${students[sid].name} → 紀錄`);
+      }
+      const log = t.closest('[data-log]');
+      if (log) { const id = Number(log.dataset.log); return set({ openLog: state.openLog === id ? null : id }, `展開紀錄 #${id}`); }
+      const cellEl = t.closest('[data-cell]');
+      if (cellEl) { const [sid, sesId] = cellEl.dataset.cell.split('|'); return set({ student: sid, sessionId: Number(sesId), view: 'logs', openLog: null }, `格子 → ${students[sid].name}`); }
+      const row = t.closest('[data-row]');
+      if (row) return set({ student: row.dataset.row, sessionId: 0, view: 'logs', openLog: null }, `姓名 → 全部紀錄`);
+      const col = t.closest('[data-col]');
+      if (col) return set({ student: '', sessionId: Number(col.dataset.col), view: 'logs', openLog: null }, `課堂標題 → 整堂紀錄`);
+      const lc = t.closest('[data-livecourse]');
+      if (lc) return set({ liveCourse: Number(lc.dataset.livecourse) }, '即時：篩課程');
+      const jump = t.closest('[data-jump]');
+      if (jump) {
+        const [cid, sesId, sid] = jump.dataset.jump.split('|');
+        return set({ page: 'class', courseId: Number(cid), sessionId: Number(sesId), student: sid || '', view: sid ? 'logs' : 'usage', openLog: null }, '即時 → 跳到課堂');
+      }
+      if (t.closest('[data-theme-toggle]')) {
+        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('portal-theme', next); } catch (err) {}
+      }
+    });
+    document.addEventListener('change', (e) => {
+      if (e.target.id === 'uvCourse' && e.target.value) {
+        const c = courseById(Number(e.target.value));
+        selectCourse(c, `切課程 ${c.name}`);
+      }
+      if (e.target.id === 'uvCourseStatus') {
+        state.courseStatus = e.target.value;
+        const vis = visibleCourses();
+        if (vis.length && !vis.some((x) => x.id === state.courseId)) return selectCourse(vis[0], '課程狀態篩選');
+        set({}, '課程狀態篩選');
+      }
+      if (e.target.id === 'uvDrawerSession') set({ sessionId: Number(e.target.value) }, '抽屜切課堂');
+    });
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'uvKeyword') set({ keyword: e.target.value }, '關鍵字');
+      if (e.target.dataset && e.target.dataset.draft) state.drafts[e.target.dataset.draft] = e.target.value;
+      if (e.target.id === 'uvCourseQuery') {
+        state.courseQuery = e.target.value;
+        const vis = visibleCourses();
+        if (vis.length && !vis.some((x) => x.id === state.courseId)) return selectCourse(vis[0], '搜尋課程');
+        set({}, '搜尋課程');
+      }
+    });
+    window.addEventListener('hashchange', () => { readHash(); render(); });
+
+    function cycle(step) {
+      const i = VARIANTS.findIndex((v) => v.key === variantKey());
+      const next = VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length].key;
+      const url = new URL(location.href); url.searchParams.set('variant', next);
+      history.replaceState(null, '', url);
+      if (next === 'B' && state.view === 'usage') state.view = 'matrix';
+      if (next !== 'B' && state.view === 'matrix') state.view = 'usage';
+      state.lastAction = `切版本 ${next}`;
+      render();
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.target.id === 'uvNewCourse' && e.key === 'Enter') return document.querySelector('[data-act="createCourse"]').click();
+      if (e.target.id === 'uvNewCourse' && e.key === 'Escape') return document.querySelector('[data-act="cancelCourse"]').click();
+      if (e.target.id === 'uvNewSession' && e.key === 'Enter') return document.querySelector('[data-act="createSession"]').click();
+      if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.key === 'ArrowLeft') cycle(-1);
+      if (e.key === 'ArrowRight') cycle(1);
+      if (e.key === 'Escape' && state.settingsOpen) set({ settingsOpen: false }, '關閉課堂設定抽屜');
+      if (e.key === 'Escape' && variantKey() === 'B' && state.view === 'logs') set({ view: 'matrix' }, '關閉抽屜');
+    });
+
+    // live ticker: new prompts arrive in active sessions
+    setInterval(() => {
+      if (state.livePaused) return;
+      const active = courses.flatMap((c) => c.sessions.filter((s) => isActive(c, s)).map((s) => ({ c, s })));
+      if (!active.length) return;
+      const { c, s } = pick(active);
+      const log = addLog(c.id, s.id, pick(s.redeemed), Date.now(), rnd() < 0.2);
+      log.fresh = Date.now();
+      for (const pool of Object.values(upstream)) for (const k of pool.keys) if (!k.quarantined) k.in_flight = Math.floor(rnd() * (k.cap + 1));
+      upstream.ollama_cloud.keys[0].used = Math.min(20, upstream.ollama_cloud.keys[0].used + 0.02);
+      upstream.openrouter.credit = Math.max(0, upstream.openrouter.credit - 0.01);
+      sampleConc();
+      logs.sort((a, b) => b.at - a.at);
+      if (!document.activeElement?.matches?.('input, select, textarea')) render();
+    }, 3000);
+
+    if (!new URLSearchParams(location.search).get('variant')) {
+      const url = new URL(location.href); url.searchParams.set('variant', 'A'); history.replaceState(null, '', url);
+    }
+    for (let i = 0; i < 12; i++) { for (const pool of Object.values(upstream)) for (const k of pool.keys) if (!k.quarantined) k.in_flight = Math.floor(rnd() * (k.cap + 1)); sampleConc(); }
+    {
+      const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1);
+      const pad = (n) => String(n).padStart(2, '0');
+      state.drafts = { sessionAt: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`, sessionTtl: '2' };
+    }
+    readHash();
+    {
+      const c0 = courseById(state.courseId);
+      const fallback = (c0.sessions.find((x) => isActive(c0, x)) || c0.sessions[c0.sessions.length - 1]).id;
+      state.lastSessionId = state.sessionId || fallback;
+      state.expanded = [state.lastSessionId];
+    }
+    if (variantKey() === 'B' && state.view === 'usage') state.view = 'matrix';
+    render();
+  })();
+  </script>
+</body>
+</html>

@@ -37,6 +37,7 @@ PORTAL_CSS_PATH = WEB_DIR / "portal.css"
 PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_JS = WEB_DIR / "session_layout_prototype.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML = WEB_DIR / "session_layout_prototype.html"
+PORTAL_USAGE_VIEW_PROTOTYPE_HTML = WEB_DIR / "usage_view_prototype.html"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
@@ -277,6 +278,12 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         if not PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML.is_file():
             raise HTTPException(status_code=404, detail="session layout prototype not found")
         return HTMLResponse(PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML.read_text(encoding="utf-8"))
+
+    @router.get("/portal/prototype/usage-view", response_class=HTMLResponse)
+    async def portal_usage_view_prototype_page():
+        if not PORTAL_USAGE_VIEW_PROTOTYPE_HTML.is_file():
+            raise HTTPException(status_code=404, detail="usage view prototype not found")
+        return HTMLResponse(PORTAL_USAGE_VIEW_PROTOTYPE_HTML.read_text(encoding="utf-8"))
 
     @router.get("/portal/static/session_layout_prototype.js")
     async def portal_session_layout_prototype_js():
