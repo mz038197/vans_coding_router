@@ -1421,6 +1421,24 @@
       return { summary, resets: resets.replace(/\.$/, '') };
     }
 
+    // 快用完 at 90% or more of Included Monthly Usage.
+    function upstreamKpiUsageNearlyUsed(fraction) {
+      return fraction != null && fraction >= 0.9;
+    }
+
+    // 餘額偏低 below $5 of Account Credit Remaining.
+    function upstreamKpiLowCredit(credit) {
+      return credit != null && credit < 5;
+    }
+
+    function upstreamKpiConcurrencyText(key) {
+      return `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+    }
+
+    function upstreamKpiQuarantineText(key) {
+      return `隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`;
+    }
+
     function upstreamKpiCredit(key) {
       const value = key?.account_credit_remaining;
       return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -1435,15 +1453,16 @@
         const fraction = upstreamKpiUsedFraction(key);
         const name = `Ollama #${Number(key.index)}`;
         items.push(`${name} ${upstreamKpiMonthlyUsageParts(key).summary}`);
-        if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
-        else if (fraction != null && fraction >= 0.9) warnings.push(status(warnIcon, `${name} 快用完`));
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
+        else if (upstreamKpiUsageNearlyUsed(fraction)) warnings.push(status(warnIcon, `${name} 快用完`));
       }
       for (const key of providers?.openrouter?.pool?.keys || []) {
         const credit = upstreamKpiCredit(key);
         const name = `OpenRouter #${Number(key.index)}`;
         items.push(`${name} ${formatAccountCreditRemaining(credit)}`);
-        if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
-        else if (credit != null && credit < 5) warnings.push(status(warnIcon, `${name} 餘額偏低`));
+        // Low credit does not clear by itself the way a quarantine does, so both show.
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
+        if (upstreamKpiLowCredit(credit)) warnings.push(status(warnIcon, `${name} 餘額偏低`));
       }
       return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
     }
@@ -1479,19 +1498,18 @@
     function upstreamKpiTilesHtml(providers) {
       const status = upstreamKpiStatus;
       const warnIcon = 'fa-triangle-exclamation';
-      const quarantine = (provider, key, prefix) => {
-        const minutes = upstreamKpiQuarantineMinutes(key);
-        return `${status('fa-ban', `${prefix}隔離中 ${minutes} 分`)}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
+      const quarantine = (provider, key) => {
+        return `${status('fa-ban', upstreamKpiQuarantineText(key))}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
       };
       const ollamaKeys = providers?.ollama_cloud?.pool?.keys || [];
       const ollamaTile = (key) => {
         const { summary, resets } = upstreamKpiMonthlyUsageParts(key);
         const usedFraction = upstreamKpiUsedFraction(key);
         const known = usedFraction != null;
-        const warn = known && usedFraction >= 0.9;
-        const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+        const warn = upstreamKpiUsageNearlyUsed(usedFraction);
+        const concurrency = upstreamKpiConcurrencyText(key);
         const sub = key.quarantined
-          ? quarantine('ollama_cloud', key, '')
+          ? quarantine('ollama_cloud', key)
           : warn
           ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
           : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
@@ -1510,12 +1528,10 @@
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
       const openrouterTile = (key) => {
         const credit = upstreamKpiCredit(key);
-        const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+        const low = upstreamKpiLowCredit(credit) ? status(warnIcon, '餘額偏低') : '';
         const sub = key.quarantined
-          ? quarantine('openrouter', key, '')
-          : credit != null && credit < 5
-          ? status(warnIcon, '餘額偏低')
-          : `<span>${escapeHtml(concurrency)}</span>`;
+          ? quarantine('openrouter', key) + low
+          : low || `<span>${escapeHtml(upstreamKpiConcurrencyText(key))}</span>`;
         return `<div class="upstream-kpi">
           <div class="lbl"><span>OpenRouter #${Number(key.index)}</span></div>
           <div class="val${credit == null ? ' val-muted' : ''}">${escapeHtml(formatAccountCreditRemaining(credit))}</div>

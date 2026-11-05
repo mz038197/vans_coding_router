@@ -33,6 +33,10 @@ function loadKpi() {
     "upstreamKpiQuarantineMinutes",
     "upstreamKpiUsedFraction",
     "upstreamKpiMonthlyUsageParts",
+    "upstreamKpiUsageNearlyUsed",
+    "upstreamKpiLowCredit",
+    "upstreamKpiConcurrencyText",
+    "upstreamKpiQuarantineText",
     "upstreamKpiCredit",
     "upstreamKpiTilesHtml",
     "upstreamKpiLineHtml",
@@ -181,6 +185,19 @@ test("a quarantined OpenRouter key shows 隔離中 N 分 and a Quarantine Releas
   assert.deepEqual(releaseButtons(quarantined), ["openrouter|1"]);
   assert.deepEqual(statuses(healthy), []);
   assert.deepEqual(releaseButtons(healthy), []);
+});
+
+test("a quarantined OpenRouter key low on credit shows both 隔離中 and 餘額偏低", () => {
+  const { upstreamKpiTilesHtml, upstreamKpiLineHtml } = loadKpi();
+  const keys = [openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, account_credit_remaining: 1 })];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
+
+  assert.deepEqual(statuses(openrouter), ["隔離中 1 分", "餘額偏低"]);
+  assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
+  assert.deepEqual(statuses(upstreamKpiLineHtml(providers({ ollamaKeys: [], openrouterKeys: keys }))), [
+    "OpenRouter #0 隔離中 1 分",
+    "OpenRouter #0 餘額偏低",
+  ]);
 });
 
 test("each OpenRouter key gets its own tile with its own Account Credit Remaining", () => {
