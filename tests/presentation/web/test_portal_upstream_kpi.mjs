@@ -33,8 +33,11 @@ function loadKpi() {
     "upstreamKpiQuarantineMinutes",
     "upstreamKpiUsedFraction",
     "upstreamKpiMonthlyUsageParts",
+    "upstreamKpiUsageNearlyUsed",
+    "upstreamKpiLowCredit",
+    "upstreamKpiConcurrencyText",
+    "upstreamKpiQuarantineText",
     "upstreamKpiCredit",
-    "upstreamKpiSparkline",
     "upstreamKpiTilesHtml",
     "upstreamKpiLineHtml",
     "readUpstreamKpiCollapsed",
@@ -47,7 +50,6 @@ function loadKpi() {
   return context;
 }
 
-const NOW = Date.parse("2026-11-05T00:00:00Z");
 const IN_9_DAYS = "2026-11-14T00:00:00Z";
 
 // Included Monthly Usage as the pool status reports it (src/domain/extra_usage.py).
@@ -101,7 +103,7 @@ function tiles(html) {
 
 test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and its concurrency", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const html = upstreamKpiTilesHtml(providers(), [], NOW);
+  const html = upstreamKpiTilesHtml(providers());
   const ollama = tiles(html)[0];
 
   assert.match(ollama, /Ollama #0/);
@@ -125,7 +127,7 @@ function statuses(tile) {
 test("an Ollama key at 90% of Included Monthly Usage shows 快用完 with an icon and reset days", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const key = ollamaKey({ included_monthly_usage: monthlyUsage(54, 60) });
-  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] })))[0];
 
   assert.deepEqual(statuses(ollama), ["快用完"]);
   assert.match(ollama, /\$54 of \$60 used/);
@@ -136,7 +138,7 @@ test("an Ollama key at 90% of Included Monthly Usage shows 快用完 with an ico
 test("an Ollama key just under 90% has no warning", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const key = ollamaKey({ included_monthly_usage: monthlyUsage(53.9, 60) });
-  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] })))[0];
 
   assert.deepEqual(statuses(ollama), []);
 });
@@ -144,7 +146,7 @@ test("an Ollama key just under 90% has no warning", () => {
 test("an Ollama key without Included Monthly Usage says it is unavailable instead of drawing numbers", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const key = ollamaKey({ included_monthly_usage: null });
-  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] })))[0];
 
   assert.match(ollama, /月用量無法取得/);
   assert.match(ollama, /併發 1\/3/);
@@ -168,36 +170,55 @@ test("a quarantined Ollama key shows 隔離中 N 分 with an icon and a Quaranti
     quarantine_remaining_sec: 1840,
     included_monthly_usage: monthlyUsage(58, 60),
   });
-  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] }), [], NOW))[0];
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] })))[0];
 
   assert.deepEqual(statuses(ollama), ["隔離中 31 分"]);
   assert.deepEqual(releaseButtons(ollama), ["ollama_cloud|1"]);
 });
 
-test("a quarantined OpenRouter key shows 隔離中 N 分 and a Quarantine Release button on the credit tile", () => {
+test("a quarantined OpenRouter key shows 隔離中 N 分 and a Quarantine Release button on its own tile", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey(), openrouterKey({ index: 1, quarantined: true, quarantine_remaining_sec: 60 })];
-  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
+  const [, healthy, quarantined] = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })));
 
-  assert.deepEqual(statuses(openrouter), ["#1 隔離中 1 分"]);
-  assert.deepEqual(releaseButtons(openrouter), ["openrouter|1"]);
+  assert.deepEqual(statuses(quarantined), ["隔離中 1 分"]);
+  assert.deepEqual(releaseButtons(quarantined), ["openrouter|1"]);
+  assert.deepEqual(statuses(healthy), []);
+  assert.deepEqual(releaseButtons(healthy), []);
 });
 
-test("OpenRouter Account Credit Remaining at $5 or more is shared credit with no warning", () => {
-  const { upstreamKpiTilesHtml } = loadKpi();
-  const keys = [openrouterKey({ account_credit_remaining: 5 }), openrouterKey({ index: 1, account_credit_remaining: 5 })];
-  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
+test("a quarantined OpenRouter key low on credit shows both 隔離中 and 餘額偏低", () => {
+  const { upstreamKpiTilesHtml, upstreamKpiLineHtml } = loadKpi();
+  const keys = [openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, account_credit_remaining: 1 })];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
-  assert.match(openrouter, /餘額 \$5\.00/);
-  assert.match(openrouter, /2 把 key/);
-  assert.match(openrouter, /帳號共用額度/);
-  assert.deepEqual(statuses(openrouter), []);
+  assert.deepEqual(statuses(openrouter), ["隔離中 1 分", "餘額偏低"]);
+  assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
+  assert.deepEqual(statuses(upstreamKpiLineHtml(providers({ ollamaKeys: [], openrouterKeys: keys }))), [
+    "OpenRouter #0 隔離中 1 分",
+    "OpenRouter #0 餘額偏低",
+  ]);
+});
+
+test("each OpenRouter key gets its own tile with its own Account Credit Remaining", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [openrouterKey({ account_credit_remaining: 13.13 }), openrouterKey({ index: 1, account_credit_remaining: 41 })];
+  const [, first, second] = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })));
+
+  assert.match(first, /OpenRouter #0/);
+  assert.match(first, /餘額 \$13\.13/);
+  assert.match(second, /OpenRouter #1/);
+  assert.match(second, /餘額 \$41\.00/);
+  for (const tile of [first, second]) {
+    assert.doesNotMatch(tile, /帳號共用額度|把 key/);
+    assert.deepEqual(statuses(tile), []);
+  }
 });
 
 test("an OpenRouter tile with no Account Credit Remaining says it is unavailable", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ account_credit_remaining: null })];
-  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
   assert.match(openrouter, /餘額無法取得/);
   assert.doesNotMatch(openrouter, /NaN|null|undefined|—/);
@@ -206,57 +227,46 @@ test("an OpenRouter tile with no Account Credit Remaining says it is unavailable
 test("OpenRouter Account Credit Remaining below $5 shows 餘額偏低 with an icon", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ account_credit_remaining: 4.3 })];
-  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys }), [], NOW))[1];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
   assert.match(openrouter, /餘額 \$4\.30/);
   assert.deepEqual(statuses(openrouter), ["餘額偏低"]);
 });
 
-test("the concurrency tile shows in-flight / capacity and 無排隊 when nothing waits", () => {
+test("a low balance on the second OpenRouter account warns on that key's tile only", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const concurrency = tiles(upstreamKpiTilesHtml(providers(), [], NOW))[2];
+  const keys = [openrouterKey({ account_credit_remaining: 23.5 }), openrouterKey({ index: 1, account_credit_remaining: 2 })];
+  const [, first, second] = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })));
 
-  assert.match(concurrency, /併發/);
-  assert.match(concurrency, /1<small>\/ 14<\/small>/);
-  assert.match(concurrency, /無排隊/);
-  assert.match(concurrency, /Ollama 1\/6 · OpenRouter 0\/8/);
-  assert.deepEqual(statuses(concurrency), []);
+  assert.deepEqual(statuses(first), []);
+  assert.deepEqual(statuses(second), ["餘額偏低"]);
 });
 
-test("the concurrency tile shows 排隊 N with an icon when requests wait", () => {
+test("a healthy OpenRouter tile shows that key's concurrency", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const concurrency = tiles(upstreamKpiTilesHtml(providers({ waiting: 3 }), [], NOW))[2];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: [openrouterKey({ in_flight: 2 })] })))[1];
 
-  assert.deepEqual(statuses(concurrency), ["排隊 3"]);
+  assert.match(openrouter, /併發 2\/4/);
 });
 
-test("the concurrency sparkline draws recent samples with the latest point in the accent line", () => {
+test("the dashboard has no pool-wide concurrency tile", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
-  const concurrency = tiles(upstreamKpiTilesHtml(providers(), [0, 2, 4], NOW))[2];
+  const html = upstreamKpiTilesHtml(providers({ waiting: 3 }));
 
-  const lines = [...concurrency.matchAll(/<polyline( class="now")? points="([^"]+)"/g)];
-  assert.equal(lines.length, 2);
-  assert.equal(lines[0][1], undefined);
-  assert.equal(lines[0][2].split(" ").length, 3);
-  assert.equal(lines[1][1], ' class="now"');
-  assert.equal(lines[1][2], "50.0,13.0 98.0,3.0");
+  assert.equal(tiles(html).length, 2);
+  assert.doesNotMatch(html, /<svg|無排隊|排隊 3|\/ 14/);
 });
 
-test("the concurrency sparkline is left out with fewer than two samples", () => {
-  const { upstreamKpiTilesHtml } = loadKpi();
-  const concurrency = tiles(upstreamKpiTilesHtml(providers(), [1], NOW))[2];
-
-  assert.doesNotMatch(concurrency, /<svg/);
-});
-
-test("the collapsed line summarizes usage, credit and concurrency with no warnings when healthy", () => {
+test("the collapsed line lists each key's usage or balance with no warnings when healthy", () => {
   const { upstreamKpiLineHtml } = loadKpi();
-  const line = upstreamKpiLineHtml(providers(), NOW);
+  const keys = [openrouterKey(), openrouterKey({ index: 1, account_credit_remaining: 41 })];
+  const line = upstreamKpiLineHtml(providers({ openrouterKeys: keys }));
 
   assert.match(line, /Ollama #0 \$12\.40 of \$60 used/);
   assert.doesNotMatch(line, /\d%/);
-  assert.match(line, /OpenRouter 餘額 \$23\.50/);
-  assert.match(line, /併發 1\/14/);
+  assert.match(line, /OpenRouter #0 餘額 \$23\.50/);
+  assert.match(line, /OpenRouter #1 餘額 \$41\.00/);
+  assert.doesNotMatch(line, /併發/);
   assert.deepEqual(statuses(line), []);
 });
 
@@ -269,12 +279,20 @@ test("the collapsed line keeps every warning as an icon plus text", () => {
         ollamaKey({ included_monthly_usage: monthlyUsage(57, 60) }),
         ollamaKey({ index: 1, quarantined: true, quarantine_remaining_sec: 600 }),
       ],
-      openrouterKeys: [openrouterKey({ account_credit_remaining: 1 })],
+      openrouterKeys: [
+        openrouterKey(),
+        openrouterKey({ index: 1, account_credit_remaining: 1 }),
+        openrouterKey({ index: 2, quarantined: true, quarantine_remaining_sec: 120 }),
+      ],
     }),
-    NOW,
   );
 
-  assert.deepEqual(statuses(line), ["Ollama #0 快用完", "Ollama #1 隔離中 10 分", "餘額偏低", "排隊 2"]);
+  assert.deepEqual(statuses(line), [
+    "Ollama #0 快用完",
+    "Ollama #1 隔離中 10 分",
+    "OpenRouter #1 餘額偏低",
+    "OpenRouter #2 隔離中 2 分",
+  ]);
 });
 
 test("collapse state round-trips through storage", () => {

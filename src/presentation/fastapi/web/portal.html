@@ -1397,19 +1397,6 @@
     }
 
     // Upstream KPI tiles on 我的課程 (prototype F). Pure: data in, HTML out.
-    function upstreamKpiSparkline(values) {
-      const samples = (values || []).map(Number).filter(Number.isFinite);
-      if (samples.length < 2) return '';
-      const max = Math.max(1, ...samples);
-      const w = 100;
-      const h = 26;
-      const points = samples.map((v, i) => [i / (samples.length - 1) * (w - 4) + 2, h - 3 - v / max * (h - 6)]);
-      const line = (pts) => pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
-      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-          <polyline points="${line(points)}" vector-effect="non-scaling-stroke"/>
-          <polyline class="now" points="${line(points.slice(-2))}" vector-effect="non-scaling-stroke"/></svg>`;
-    }
-
     // A tile status is always an icon plus text, never colour alone.
     function upstreamKpiStatus(icon, text) {
       return `<span class="upstream-kpi-status"><i class="fas ${icon}" aria-hidden="true"></i>${escapeHtml(text)}</span>`;
@@ -1434,14 +1421,30 @@
       return { summary, resets: resets.replace(/\.$/, '') };
     }
 
-    function upstreamKpiCredit(keys) {
-      const value = (keys || [])
-        .map(key => key.account_credit_remaining)
-        .find(v => typeof v === 'number' && Number.isFinite(v));
-      return value ?? null;
+    // 快用完 at 90% or more of Included Monthly Usage.
+    function upstreamKpiUsageNearlyUsed(fraction) {
+      return fraction != null && fraction >= 0.9;
     }
 
-    function upstreamKpiLineHtml(providers, nowMs) {
+    // 餘額偏低 below $5 of Account Credit Remaining.
+    function upstreamKpiLowCredit(credit) {
+      return credit != null && credit < 5;
+    }
+
+    function upstreamKpiConcurrencyText(key) {
+      return `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+    }
+
+    function upstreamKpiQuarantineText(key) {
+      return `隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`;
+    }
+
+    function upstreamKpiCredit(key) {
+      const value = key?.account_credit_remaining;
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    }
+
+    function upstreamKpiLineHtml(providers) {
       const status = upstreamKpiStatus;
       const warnIcon = 'fa-triangle-exclamation';
       const items = [];
@@ -1450,27 +1453,16 @@
         const fraction = upstreamKpiUsedFraction(key);
         const name = `Ollama #${Number(key.index)}`;
         items.push(`${name} ${upstreamKpiMonthlyUsageParts(key).summary}`);
-        if (key.quarantined) warnings.push(status('fa-ban', `${name} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
-        else if (fraction != null && fraction >= 0.9) warnings.push(status(warnIcon, `${name} 快用完`));
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
+        else if (upstreamKpiUsageNearlyUsed(fraction)) warnings.push(status(warnIcon, `${name} 快用完`));
       }
-      const openrouterKeys = providers?.openrouter?.pool?.keys || [];
-      if (openrouterKeys.length) {
-        const credit = upstreamKpiCredit(openrouterKeys);
-        items.push(`OpenRouter ${formatAccountCreditRemaining(credit)}`);
-        for (const key of openrouterKeys) {
-          if (key.quarantined) {
-            warnings.push(status('fa-ban', `OpenRouter #${Number(key.index)} 隔離中 ${upstreamKpiQuarantineMinutes(key)} 分`));
-          }
-        }
-        if (credit != null && credit < 5) warnings.push(status(warnIcon, '餘額偏低'));
-      }
-      const pools = [providers?.ollama_cloud?.pool, providers?.openrouter?.pool].filter(Boolean);
-      if (pools.length) {
-        const inFlight = pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0);
-        const capacity = pools.reduce((sum, pool) => sum + Number(pool.capacity ?? 0), 0);
-        const waiting = pools.reduce((sum, pool) => sum + Number(pool.waiting ?? 0), 0);
-        items.push(`併發 ${inFlight}/${capacity}`);
-        if (waiting > 0) warnings.push(status('fa-hourglass-half', `排隊 ${waiting}`));
+      for (const key of providers?.openrouter?.pool?.keys || []) {
+        const credit = upstreamKpiCredit(key);
+        const name = `OpenRouter #${Number(key.index)}`;
+        items.push(`${name} ${formatAccountCreditRemaining(credit)}`);
+        // Low credit does not clear by itself the way a quarantine does, so both show.
+        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
+        if (upstreamKpiLowCredit(credit)) warnings.push(status(warnIcon, `${name} 餘額偏低`));
       }
       return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
     }
@@ -1503,22 +1495,21 @@
       };
     }
 
-    function upstreamKpiTilesHtml(providers, history, nowMs) {
+    function upstreamKpiTilesHtml(providers) {
       const status = upstreamKpiStatus;
       const warnIcon = 'fa-triangle-exclamation';
-      const quarantine = (provider, key, prefix) => {
-        const minutes = upstreamKpiQuarantineMinutes(key);
-        return `${status('fa-ban', `${prefix}隔離中 ${minutes} 分`)}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
+      const quarantine = (provider, key) => {
+        return `${status('fa-ban', upstreamKpiQuarantineText(key))}<button type="button" class="btn-secondary upstream-quarantine-release" data-provider="${provider}" data-index="${Number(key.index)}">解除隔離</button>`;
       };
       const ollamaKeys = providers?.ollama_cloud?.pool?.keys || [];
       const ollamaTile = (key) => {
         const { summary, resets } = upstreamKpiMonthlyUsageParts(key);
         const usedFraction = upstreamKpiUsedFraction(key);
         const known = usedFraction != null;
-        const warn = known && usedFraction >= 0.9;
-        const concurrency = `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+        const warn = upstreamKpiUsageNearlyUsed(usedFraction);
+        const concurrency = upstreamKpiConcurrencyText(key);
         const sub = key.quarantined
-          ? quarantine('ollama_cloud', key, '')
+          ? quarantine('ollama_cloud', key)
           : warn
           ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
           : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
@@ -1532,27 +1523,22 @@
           <div class="sub">${sub}</div>
         </div>`;
       };
+      // Each OpenRouter key may draw from its own account, so each key shows its own
+      // Account Credit Remaining (CONTEXT.md) rather than one balance for the pool.
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
-      const credit = upstreamKpiCredit(openrouterKeys);
-      const openrouterTile = openrouterKeys.length ? `<div class="upstream-kpi">
-          <div class="lbl"><span>OpenRouter</span><span>${openrouterKeys.length} 把 key</span></div>
+      const openrouterTile = (key) => {
+        const credit = upstreamKpiCredit(key);
+        const low = upstreamKpiLowCredit(credit) ? status(warnIcon, '餘額偏低') : '';
+        const sub = key.quarantined
+          ? quarantine('openrouter', key) + low
+          : low || `<span>${escapeHtml(upstreamKpiConcurrencyText(key))}</span>`;
+        return `<div class="upstream-kpi">
+          <div class="lbl"><span>OpenRouter #${Number(key.index)}</span></div>
           <div class="val${credit == null ? ' val-muted' : ''}">${escapeHtml(formatAccountCreditRemaining(credit))}</div>
-          <div class="sub">${credit != null && credit < 5 ? status(warnIcon, '餘額偏低') : '<span>帳號共用額度</span>'}
-            ${openrouterKeys.filter(key => key.quarantined).map(key => quarantine('openrouter', key, `#${Number(key.index)} `)).join('')}</div>
-        </div>` : '';
-      const pools = [['Ollama', providers?.ollama_cloud?.pool], ['OpenRouter', providers?.openrouter?.pool]]
-        .filter(([, pool]) => pool);
-      const inFlight = (pool) => Number(pool.in_flight_total ?? 0);
-      const totalInFlight = pools.reduce((sum, [, pool]) => sum + inFlight(pool), 0);
-      const totalCapacity = pools.reduce((sum, [, pool]) => sum + Number(pool.capacity ?? 0), 0);
-      const waiting = pools.reduce((sum, [, pool]) => sum + Number(pool.waiting ?? 0), 0);
-      const concurrencyTile = pools.length ? `<div class="upstream-kpi">
-          <div class="lbl"><span>併發</span><span>${waiting > 0 ? status('fa-hourglass-half', `排隊 ${waiting}`) : '無排隊'}</span></div>
-          <div class="val">${totalInFlight}<small>/ ${totalCapacity}</small></div>
-          ${upstreamKpiSparkline(history)}
-          <div class="sub"><span>${pools.map(([label, pool]) => `${label} ${inFlight(pool)}/${pool.capacity ?? '—'}`).join(' · ')}</span></div>
-        </div>` : '';
-      return ollamaKeys.map(ollamaTile).join('') + openrouterTile + concurrencyTile;
+          <div class="sub">${sub}</div>
+        </div>`;
+      };
+      return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
     }
 
     async function loadUpstreamPools() {
@@ -1587,16 +1573,12 @@
     }
 
     let upstreamKpiData = null;
-    const upstreamKpiHistory = [];
 
     function renderUpstreamKpi(data) {
       const board = document.getElementById('upstreamKpi');
       if (!board) return;
       if (data !== undefined) {
         upstreamKpiData = data;
-        const pools = Object.values(data?.providers || {}).map(p => p?.pool).filter(Boolean);
-        upstreamKpiHistory.push(pools.reduce((sum, pool) => sum + Number(pool.in_flight_total ?? 0), 0));
-        if (upstreamKpiHistory.length > 12) upstreamKpiHistory.shift();
       }
       bindUpstreamKpiBoard(board);
       const providers = upstreamKpiData?.providers || {};
@@ -1608,9 +1590,9 @@
       const toggle = `<button type="button" class="upstream-kpi-toggle" data-upstream-kpi-toggle aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展開儀表板 <i class="fas fa-chevron-down" aria-hidden="true"></i>' : '收合成一行 <i class="fas fa-chevron-up" aria-hidden="true"></i>'}</button>`;
       board.classList.toggle('is-collapsed', collapsed);
       board.innerHTML = collapsed
-        ? `<div class="upstream-kpi-line"><span class="upstream-kpi-line-title">上游狀態</span>${upstreamKpiLineHtml(providers, Date.now())}${toggle}</div>`
+        ? `<div class="upstream-kpi-line"><span class="upstream-kpi-line-title">上游狀態</span>${upstreamKpiLineHtml(providers)}${toggle}</div>`
         : `<div class="upstream-kpi-head"><span>上游狀態</span>${toggle}</div>
-          <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers, upstreamKpiHistory, Date.now())}</div>`;
+          <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers)}</div>`;
     }
 
     function upstreamKpiStorage() {
