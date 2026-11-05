@@ -38,6 +38,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
+            token_usage_is_new = not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='token_usage'"
+            ).fetchone()
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -121,6 +124,21 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     message_preview TEXT,
                     messages_json TEXT
                 );
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    class_id INTEGER,
+                    session_id INTEGER,
+                    model TEXT NOT NULL,
+                    api_endpoint TEXT NOT NULL DEFAULT '',
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS token_usage_class_user ON token_usage(class_id, user_id);
+                CREATE INDEX IF NOT EXISTS token_usage_session_user ON token_usage(session_id, user_id);
+                CREATE INDEX IF NOT EXISTS token_usage_user ON token_usage(user_id);
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -257,6 +275,49 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._backfill_ended_session_expires(conn)
             self._backfill_session_chat_language_models(conn)
             self._backfill_router_model_templates(conn)
+            if token_usage_is_new:
+                self._backfill_token_usage_from_prompt_logs(conn)
+                self._backfill_token_usage_from_archive(conn)
+
+    def _backfill_token_usage_from_archive(self, conn: sqlite3.Connection) -> None:
+        """Copy successful archived Prompt Logs into token_usage.
+
+        Archive files written before token columns existed there give a request with zero tokens.
+        A row still present in the live table (an interrupted archive run) was already copied.
+        """
+        archive_dir = Path(self.settings.database.archive_dir).expanduser()
+        if not archive_dir.exists():
+            return
+        live_ids = {row[0] for row in conn.execute("SELECT id FROM prompt_logs").fetchall()}
+        for archive_path in sorted(archive_dir.glob("archive_*.db")):
+            with sqlite3.connect(archive_path) as archive:
+                columns = {row[1] for row in archive.execute("PRAGMA table_info(prompt_logs_archive)").fetchall()}
+                if not columns:
+                    continue
+
+                def column(name: str, fallback: str) -> str:
+                    return f"COALESCE({name}, {fallback})" if name in columns else fallback
+
+                rows = archive.execute(
+                    f"""
+                    SELECT id, user_id, class_id, session_id, model, {column('api_endpoint', "''")},
+                           {column('prompt_tokens', '0')}, {column('completion_tokens', '0')},
+                           {column('total_tokens', '0')}, created_at
+                    FROM prompt_logs_archive
+                    WHERE status = 'ok' AND user_id IS NOT NULL
+                    ORDER BY created_at, id
+                    """
+                ).fetchall()
+            conn.executemany(
+                """
+                INSERT INTO token_usage(
+                    user_id, class_id, session_id, model, api_endpoint,
+                    prompt_tokens, completion_tokens, total_tokens, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [tuple(row[1:]) for row in rows if row[0] not in live_ids],
+            )
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
