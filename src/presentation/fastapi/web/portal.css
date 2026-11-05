@@ -1887,6 +1887,101 @@
       min-height: 0;
     }
 
+    /* Upstream KPI dashboard on 我的課程 (prototype F) */
+    .upstream-kpi-board { margin-bottom: 14px; }
+    .upstream-kpi-board:empty { display: none; }
+    .upstream-kpi-head,
+    .upstream-kpi-line {
+      display: flex;
+      align-items: center;
+      gap: 6px 16px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .upstream-kpi-head { justify-content: space-between; margin-bottom: 6px; }
+    .upstream-kpi-line {
+      flex-wrap: wrap;
+      padding: 6px 2px 8px;
+      border-bottom: 1px solid var(--border-glass);
+    }
+    .upstream-kpi-line-title { font-weight: 600; color: var(--text-primary); }
+    .upstream-kpi-line-item { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .upstream-kpi-toggle {
+      margin: 0 0 0 auto;
+      padding: 0 6px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    .upstream-kpi-toggle:hover { color: var(--text-primary); background: transparent; }
+    .upstream-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+    }
+    .upstream-kpi {
+      padding: 12px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface-1);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 104px;
+      min-width: 0;
+    }
+    .upstream-kpi .lbl {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .upstream-kpi .val {
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-primary);
+    }
+    .upstream-kpi .val small { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+    .upstream-kpi .val.val-muted { font-size: 0.95rem; font-weight: 500; color: var(--text-muted); }
+    .upstream-kpi .sub {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: auto;
+    }
+    .upstream-kpi .meter { height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; }
+    .upstream-kpi .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+    .upstream-kpi .meter.warn { background: color-mix(in srgb, var(--warning) 18%, transparent); }
+    .upstream-kpi .meter.warn i { background: var(--warning); }
+    .upstream-kpi-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: var(--warning);
+      white-space: nowrap;
+    }
+    .upstream-kpi .sub .upstream-quarantine-release { margin: 0; padding: 1px 10px; font-size: 0.74rem; }
+    .upstream-kpi svg.spark { width: 100%; height: 26px; display: block; }
+    .upstream-kpi svg.spark polyline {
+      fill: none;
+      stroke: var(--text-muted);
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      opacity: 0.6;
+    }
+    .upstream-kpi svg.spark polyline.now { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+
     @media (max-width: 640px) {
       .nav-user { justify-content: flex-end; max-width: 60%; }
       .profile-line > span:first-child { font-size: 0.82rem; }
