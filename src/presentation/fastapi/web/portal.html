@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=redesign-d-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=rail-right-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -925,18 +925,46 @@
       return rows;
     }
 
+    // An upstream's logo, named for screen readers and on hover; an upstream without a logo is named in text.
+    function upstreamLogoHtml(upstream) {
+      const logos = { ollama_cloud: ['Ollama', 'ollama'], openrouter: ['OpenRouter', 'openrouter'] };
+      const known = logos[upstream];
+      if (!known) return `<span class="session-model-upstream">${escapeHtml(upstream)}</span>`;
+      const [label, file] = known;
+      return `<i class="upstream-logo upstream-logo-${file}" role="img" aria-label="${label}" title="${label}"></i>`;
+    }
+
+    // Chat models as a multi-column list, grouped by upstream (the part of the id before `@`).
+    // A teacher-given name is shown as written; otherwise a short form of the upstream model id.
+    function sessionModelListHtml(models) {
+      const groups = new Map();
+      for (const model of models) {
+        const at = model.id.indexOf('@');
+        const upstream = at > 0 ? model.id.slice(0, at) : '';
+        if (!groups.has(upstream)) groups.set(upstream, []);
+        groups.get(upstream).push(model);
+      }
+      const shortName = (id) => id.slice(id.indexOf('@') + 1)
+        .replace(/^[^/]+\//, '')
+        .replace(/[:-]cloud$/, '')
+        .replace(/:([^:]+)$/, ' $1');
+      const rows = [...groups].flatMap(([upstream, group]) => group.map((model) => {
+        const name = model.name || shortName(model.id);
+        return `<div class="session-model-row" title="${escapeHtml(model.id)}">${upstream ? upstreamLogoHtml(upstream) : ''}<span class="session-model-name">${escapeHtml(name)}</span></div>`;
+      }));
+      return `<div class="session-model-list">${rows.join('')}</div>`;
+    }
+
     function sessionModelAllowlistCell(classId, session) {
       const edit = `<button type="button" class="btn-link session-model-settings-btn" onclick="beginEditSessionChatLanguageModels(${classId}, ${session.id})">模型設定</button>`;
       const chat = sessionTextModels(session);
-      const pills = chat.length
-        ? chat.map((model) => `<span class="session-model-pill" title="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</span>`).join('')
-        : '<span class="hint">尚未勾選對話模型</span>';
+      const list = chat.length ? sessionModelListHtml(chat) : '<p class="hint">尚未勾選對話模型</p>';
       return `<div class="session-models">
         <div class="session-models-head">
           <span class="session-kicker">對話模型 ${edit} ${sessionAutoSelectionBadge(session)}</span>
           <span class="session-model-choice">模型選擇：${sessionModelChoiceLabel(session)}</span>
         </div>
-        <div class="session-model-pills">${pills}</div>
+        ${list}
       </div>`;
     }
 
@@ -1487,7 +1515,7 @@
           : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
         const meter = known ? upstreamKpiMeterHtml(usedFraction, warn) : '';
         return `<div class="upstream-kpi">
-          <div class="lbl"><span>Ollama #${Number(key.index)}</span></div>
+          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('ollama_cloud')}<span>#${Number(key.index)}</span></span></div>
           <div class="val${known ? '' : ' val-muted'}">${escapeHtml(summary)}</div>
           ${meter}
           <div class="sub">${sub}</div>
@@ -1505,7 +1533,7 @@
         const concurrency = upstreamKpiConcurrencyText(key);
         const fraction = upstreamKpiKeyLimitFraction(key);
         const tile = (val, valMuted, meter, sub) => `<div class="upstream-kpi">
-          <div class="lbl"><span>OpenRouter #${Number(key.index)}</span></div>
+          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('openrouter')}<span>#${Number(key.index)}</span></span></div>
           <div class="val${valMuted ? ' val-muted' : ''}">${escapeHtml(val)}</div>
           ${meter}
           <div class="sub">${sub}</div>

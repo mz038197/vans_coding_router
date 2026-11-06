@@ -38,6 +38,8 @@ PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_JS = WEB_DIR / "session_layout_prototype.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML = WEB_DIR / "session_layout_prototype.html"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
+# Upstream logos (from @lobehub/icons-static-svg, MIT), drawn in the text colour via CSS mask.
+PORTAL_UPSTREAM_LOGO_PATHS = {name: WEB_DIR / f"provider-{name}.svg" for name in ("ollama", "openrouter")}
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
 
@@ -313,6 +315,13 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             content=PORTAL_BRAND_LOGO_PATH.read_bytes(),
             media_type="image/png",
         )
+
+    @router.get("/portal/static/provider-{name}.svg")
+    async def portal_upstream_logo(name: str):
+        path = PORTAL_UPSTREAM_LOGO_PATHS.get(name)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="upstream logo not found")
+        return Response(content=path.read_text(encoding="utf-8"), media_type="image/svg+xml")
 
     @router.get("/auth/config")
     async def auth_config():

@@ -27,6 +27,7 @@ function extractNamedFunction(source, name) {
 function loadKpi() {
   const names = [
     "escapeHtml",
+    "upstreamLogoHtml",
     "formatIncludedMonthlyUsage",
     "formatAccountCreditRemaining",
     "upstreamKpiStatus",
@@ -101,12 +102,20 @@ function tiles(html) {
   return html.split('<div class="upstream-kpi').slice(1);
 }
 
+// A tile's label as read aloud: the upstream logo's name, then the key number.
+function label(tile) {
+  const lbl = tile.match(/<div class="lbl">([\s\S]*?)<\/div>/)[1];
+  const logo = lbl.match(/role="img" aria-label="([^"]*)"/)?.[1];
+  const number = lbl.match(/<span>(#\d+)<\/span>/)?.[1];
+  return `${logo} ${number}`;
+}
+
 test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and its concurrency", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const html = upstreamKpiTilesHtml(providers());
   const ollama = tiles(html)[0];
 
-  assert.match(ollama, /Ollama #0/);
+  assert.equal(label(ollama), "Ollama #0");
   assert.match(ollama, /\$12\.40 of \$60 used/);
   assert.match(ollama, /<div class="meter"><i style="width:21%"><\/i><\/div>/);
   assert.match(ollama, /Resets in 9 days · 併發 1\/3/);
@@ -201,9 +210,9 @@ test("each OpenRouter key gets its own tile with its own Account Credit Remainin
   const keys = [openrouterKey({ account_credit_remaining: 13.13 }), openrouterKey({ index: 1, account_credit_remaining: 41 })];
   const [, first, second] = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })));
 
-  assert.match(first, /OpenRouter #0/);
+  assert.equal(label(first), "OpenRouter #0");
   assert.match(first, /餘額 \$13\.13/);
-  assert.match(second, /OpenRouter #1/);
+  assert.equal(label(second), "OpenRouter #1");
   assert.match(second, /餘額 \$41\.00/);
   for (const tile of [first, second]) {
     assert.doesNotMatch(tile, /帳號共用額度|把 key/);
@@ -262,7 +271,7 @@ test("an OpenRouter key with a monthly cap leads with its balance and shows the 
   const keys = [openrouterKey({ in_flight: 1, key_monthly_limit: keyMonthlyLimit(8.2, 20) })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
-  assert.match(openrouter, /OpenRouter #0/);
+  assert.equal(label(openrouter), "OpenRouter #0");
   assert.match(openrouter, /<div class="val">餘額 \$23\.50<\/div>/);
   assert.match(openrouter, /<div class="meter"><i style="width:41%"><\/i><\/div>/);
   assert.match(openrouter, /月上限 \$8\.20 of \$20 used · Resets in 9 days · 併發 1\/4/);
