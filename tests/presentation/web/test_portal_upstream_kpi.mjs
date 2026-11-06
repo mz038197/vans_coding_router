@@ -31,7 +31,11 @@ function loadKpi() {
     "formatAccountCreditRemaining",
     "upstreamKpiStatus",
     "upstreamKpiQuarantineMinutes",
+    "upstreamKpiSpendFraction",
     "upstreamKpiUsedFraction",
+    "upstreamKpiKeyLimitFraction",
+    "upstreamKpiMeterHtml",
+    "upstreamKpiResetsText",
     "upstreamKpiMonthlyUsageParts",
     "upstreamKpiUsageNearlyUsed",
     "upstreamKpiLowCredit",
@@ -247,6 +251,78 @@ test("a healthy OpenRouter tile shows that key's concurrency", () => {
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: [openrouterKey({ in_flight: 2 })] })))[1];
 
   assert.match(openrouter, /併發 2\/4/);
+});
+
+// Key Monthly Limit as the pool status reports it (src/domain/extra_usage.py).
+function keyMonthlyLimit(used, limit) {
+  const dollars = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+  return {
+    used_usd: used,
+    limit_usd: limit,
+    resets_at: IN_9_DAYS,
+    summary: `$${dollars(used)} of $${dollars(limit)} used`,
+    resets: "Resets in 9 days.",
+  };
+}
+
+test("an OpenRouter key with a monthly cap shows $X of $Y used, a meter, Resets in …, its balance and concurrency", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [openrouterKey({ in_flight: 1, key_monthly_limit: keyMonthlyLimit(8.2, 20) })];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
+
+  assert.match(openrouter, /OpenRouter #0/);
+  assert.match(openrouter, /<div class="val">\$8\.20 of \$20 used<\/div>/);
+  assert.match(openrouter, /<div class="meter"><i style="width:41%"><\/i><\/div>/);
+  assert.match(openrouter, /Resets in 9 days · 餘額 \$23\.50 · 併發 1\/4/);
+  assert.deepEqual(statuses(openrouter), []);
+});
+
+test("an OpenRouter key at 90% of its monthly cap shows 快用完, and a low balance still warns", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [
+    openrouterKey({ key_monthly_limit: keyMonthlyLimit(18, 20) }),
+    openrouterKey({ index: 1, account_credit_remaining: 3, key_monthly_limit: keyMonthlyLimit(1, 20) }),
+  ];
+  const [, nearlyUsed, lowCredit] = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })));
+
+  assert.deepEqual(statuses(nearlyUsed), ["快用完"]);
+  assert.match(nearlyUsed, /meter warn/);
+  assert.match(nearlyUsed, /Resets in 9 days · 餘額 \$23\.50</);
+  assert.deepEqual(statuses(lowCredit), ["餘額偏低"]);
+  assert.doesNotMatch(lowCredit, /meter warn/);
+});
+
+test("a quarantined OpenRouter key with a monthly cap keeps its reset and balance beside 隔離中", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [
+    openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, key_monthly_limit: keyMonthlyLimit(18, 20) }),
+  ];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
+
+  assert.deepEqual(statuses(openrouter), ["隔離中 1 分"]);
+  assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
+  assert.match(openrouter, /Resets in 9 days · 餘額 \$23\.50</);
+});
+
+test("an OpenRouter key without a monthly cap keeps the balance tile and draws no meter", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [openrouterKey({ key_monthly_limit: null })];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
+
+  assert.match(openrouter, /<div class="val">餘額 \$23\.50<\/div>/);
+  assert.doesNotMatch(openrouter, /class="meter|used|月用量無法取得/);
+});
+
+test("the collapsed line shows an OpenRouter key's monthly cap beside its balance", () => {
+  const { upstreamKpiLineHtml } = loadKpi();
+  const keys = [
+    openrouterKey({ key_monthly_limit: keyMonthlyLimit(8.2, 20) }),
+    openrouterKey({ index: 1, key_monthly_limit: keyMonthlyLimit(19, 20) }),
+  ];
+  const line = upstreamKpiLineHtml(providers({ ollamaKeys: [], openrouterKeys: keys }));
+
+  assert.match(line, /OpenRouter #0 \$8\.20 of \$20 used · 餘額 \$23\.50/);
+  assert.deepEqual(statuses(line), ["OpenRouter #1 快用完"]);
 });
 
 test("the dashboard has no pool-wide concurrency tile", () => {

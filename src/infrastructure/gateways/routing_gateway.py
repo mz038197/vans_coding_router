@@ -60,6 +60,9 @@ class RoutingGateway:
     async def overlay_account_credit_remaining(self, status: dict[str, Any]) -> dict[str, Any]:
         return await self._overlay_pool_attach(status, "attach_account_credit_remaining")
 
+    async def overlay_key_monthly_limit(self, status: dict[str, Any]) -> dict[str, Any]:
+        return await self._overlay_pool_attach(status, "attach_key_monthly_limit")
+
     async def _overlay_pool_attach(self, status: dict[str, Any], attach_name: str) -> dict[str, Any]:
         providers = status.get("providers")
         if not isinstance(providers, dict):
