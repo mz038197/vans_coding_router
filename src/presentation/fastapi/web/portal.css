@@ -1888,7 +1888,8 @@
     }
 
     /* Upstream KPI dashboard on 我的課程 (prototype F) */
-    .upstream-kpi-board { margin-bottom: 14px; }
+    /* Not a padded card: drop the generic `section` padding and top margin. */
+    .upstream-kpi-board { margin: 0 0 14px; padding: 0; }
     .upstream-kpi-board:empty { display: none; }
     .upstream-kpi-head,
     .upstream-kpi-line {
