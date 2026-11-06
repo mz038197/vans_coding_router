@@ -2227,6 +2227,10 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
             if key == "or-secret-a":
                 return httpx.Response(401, json={"error": "unauthorized"})
             return httpx.Response(200, json={"data": {"total_credits": 10, "total_usage": 10.5, "limit_remaining": 1}})
+        if url == "https://openrouter.ai/api/v1/key":
+            if key == "or-secret-a":
+                return httpx.Response(200, json={"data": {"limit": 20, "limit_reset": "monthly", "limit_remaining": 15}})
+            return httpx.Response(200, json={"data": {"limit": None, "limit_reset": None, "limit_remaining": None}})
         if url.startswith("https://ollama.com/api/"):
             return _meter_documents(request, 2.5)
         return httpx.Response(404, json={"error": "unexpected"})
@@ -2271,6 +2275,9 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
     openrouter_keys = body["providers"]["openrouter"]["pool"]["keys"]
     ollama_keys = body["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["account_credit_remaining"] for item in openrouter_keys] == [None, -0.5]
+    assert openrouter_keys[0]["key_monthly_limit"]["summary"] == "$5 of $20 used"
+    assert openrouter_keys[1]["key_monthly_limit"] is None
+    assert "key_monthly_limit" not in ollama_keys[0]
     assert "included_monthly_usage" not in openrouter_keys[1]
     assert [item["in_flight"] for item in openrouter_keys] == [0, 0]
     assert [item["quarantined"] for item in openrouter_keys] == [False, False]

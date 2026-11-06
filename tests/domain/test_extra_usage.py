@@ -6,6 +6,7 @@ from src.domain.extra_usage import (
     included_monthly_usage_from_documents,
     is_credit_exhaustion,
     is_extra_usage_exhaustion,
+    key_monthly_limit_from_key_payload,
 )
 
 
@@ -267,3 +268,36 @@ def test_reset_phrase_uses_day_and_week_cutoffs():
     )
     assert one_week["resets"] == "Resets in 1 week."
     assert one_week["summary"] == "$1 of $1000 used"
+
+
+def test_maps_key_monthly_limit_from_the_key_document():
+    now = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+    meter = key_monthly_limit_from_key_payload(
+        {"data": {"limit": 20, "limit_reset": "monthly", "limit_remaining": 11.8, "usage": 99.5}},
+        now=now,
+    )
+    assert meter["used_usd"] == 8.2
+    assert meter["limit_usd"] == 20.0
+    assert meter["summary"] == "$8.20 of $20 used"
+    assert meter["resets_at"] == "2026-12-01T00:00:00Z"
+    assert meter["resets"] == "Resets in 3 weeks."
+
+
+def test_key_monthly_limit_resets_on_the_first_across_a_year_end():
+    meter = key_monthly_limit_from_key_payload(
+        {"data": {"limit": 10, "limit_reset": "monthly", "limit_remaining": 10}},
+        now=datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc),
+    )
+    assert meter["summary"] == "$0 of $10 used"
+    assert meter["resets_at"] == "2027-01-01T00:00:00Z"
+    assert meter["resets"] == "Resets in 12 hours."
+
+
+def test_no_key_monthly_limit_without_a_monthly_cap_on_the_key():
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    unset = {"data": {"limit": None, "limit_reset": None, "limit_remaining": None, "usage": 6.37}}
+    weekly = {"data": {"limit": 5, "limit_reset": "weekly", "limit_remaining": 4}}
+    no_reset = {"data": {"limit": 5, "limit_reset": None, "limit_remaining": 4}}
+    credits_doc = {"data": {"total_credits": 10, "total_usage": 1}}
+    for payload in (unset, weekly, no_reset, credits_doc, {"limit": 5}, None):
+        assert key_monthly_limit_from_key_payload(payload, now=now) is None

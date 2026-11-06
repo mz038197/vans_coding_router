@@ -1406,19 +1406,38 @@
       return Math.ceil(Math.max(0, Number(key.quarantine_remaining_sec) || 0) / 60);
     }
 
+    function upstreamKpiSpendFraction(used, cap) {
+      if (used == null || cap == null) return null;
+      const spent = Number(used);
+      const total = Number(cap);
+      return Number.isFinite(spent) && Number.isFinite(total) && total > 0 ? spent / total : null;
+    }
+
+    // Ollama: share of Included Monthly Usage spent.
     function upstreamKpiUsedFraction(key) {
       const usage = key?.included_monthly_usage;
-      if (!usage || usage.used_usd == null || usage.included_usd == null) return null;
-      const used = Number(usage.used_usd);
-      const included = Number(usage.included_usd);
-      return Number.isFinite(used) && Number.isFinite(included) && included > 0 ? used / included : null;
+      return usage ? upstreamKpiSpendFraction(usage.used_usd, usage.included_usd) : null;
+    }
+
+    // OpenRouter: share of the Key Monthly Limit spent; null when the key has no monthly cap.
+    function upstreamKpiKeyLimitFraction(key) {
+      const limit = key?.key_monthly_limit;
+      return limit ? upstreamKpiSpendFraction(limit.used_usd, limit.limit_usd) : null;
+    }
+
+    function upstreamKpiMeterHtml(fraction, warn) {
+      return `<div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, Math.round(fraction * 100))}%"></i></div>`;
+    }
+
+    // `Resets in …` without the sentence's closing period, since tiles join it with " · ".
+    function upstreamKpiResetsText(meter) {
+      return (typeof meter?.resets === 'string' ? meter.resets : '').replace(/\.$/, '');
     }
 
     // Included Monthly Usage label pieces: `$X of $Y used` and `Resets in …` (or unavailable).
     function upstreamKpiMonthlyUsageParts(key) {
-      const [summary, resets = ''] = formatIncludedMonthlyUsage(key?.included_monthly_usage).split('\n');
-      // The tile joins resets with "· 併發 …", so drop the sentence's closing period.
-      return { summary, resets: resets.replace(/\.$/, '') };
+      const [summary] = formatIncludedMonthlyUsage(key?.included_monthly_usage).split('\n');
+      return { summary, resets: upstreamKpiResetsText(key?.included_monthly_usage) };
     }
 
     // 快用完 at 90% or more of Included Monthly Usage.
@@ -1459,9 +1478,12 @@
       for (const key of providers?.openrouter?.pool?.keys || []) {
         const credit = upstreamKpiCredit(key);
         const name = `OpenRouter #${Number(key.index)}`;
-        items.push(`${name} ${formatAccountCreditRemaining(credit)}`);
+        const fraction = upstreamKpiKeyLimitFraction(key);
+        const creditText = formatAccountCreditRemaining(credit);
+        items.push(fraction == null ? `${name} ${creditText}` : `${name} ${key.key_monthly_limit.summary} · ${creditText}`);
         // Low credit does not clear by itself the way a quarantine does, so both show.
         if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
+        else if (upstreamKpiUsageNearlyUsed(fraction)) warnings.push(status(warnIcon, `${name} 快用完`));
         if (upstreamKpiLowCredit(credit)) warnings.push(status(warnIcon, `${name} 餘額偏低`));
       }
       return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
@@ -1513,9 +1535,7 @@
           : warn
           ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
           : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
-        const meter = known
-          ? `<div class="meter${warn ? ' warn' : ''}"><i style="width:${Math.min(100, Math.round(usedFraction * 100))}%"></i></div>`
-          : '';
+        const meter = known ? upstreamKpiMeterHtml(usedFraction, warn) : '';
         return `<div class="upstream-kpi">
           <div class="lbl"><span>Ollama #${Number(key.index)}</span></div>
           <div class="val${known ? '' : ' val-muted'}">${escapeHtml(summary)}</div>
@@ -1525,18 +1545,35 @@
       };
       // Each OpenRouter key may draw from its own account, so each key shows its own
       // Account Credit Remaining (CONTEXT.md) rather than one balance for the pool.
+      // A key with a monthly cap leads with its Key Monthly Limit meter instead.
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
       const openrouterTile = (key) => {
         const credit = upstreamKpiCredit(key);
+        const creditText = formatAccountCreditRemaining(credit);
         const low = upstreamKpiLowCredit(credit) ? status(warnIcon, '餘額偏低') : '';
-        const sub = key.quarantined
-          ? quarantine('openrouter', key) + low
-          : low || `<span>${escapeHtml(upstreamKpiConcurrencyText(key))}</span>`;
-        return `<div class="upstream-kpi">
+        const concurrency = upstreamKpiConcurrencyText(key);
+        const fraction = upstreamKpiKeyLimitFraction(key);
+        const tile = (val, valMuted, meter, sub) => `<div class="upstream-kpi">
           <div class="lbl"><span>OpenRouter #${Number(key.index)}</span></div>
-          <div class="val${credit == null ? ' val-muted' : ''}">${escapeHtml(formatAccountCreditRemaining(credit))}</div>
+          <div class="val${valMuted ? ' val-muted' : ''}">${escapeHtml(val)}</div>
+          ${meter}
           <div class="sub">${sub}</div>
         </div>`;
+        if (fraction == null) {
+          const sub = key.quarantined
+            ? quarantine('openrouter', key) + low
+            : low || `<span>${escapeHtml(concurrency)}</span>`;
+          return tile(creditText, credit == null, '', sub);
+        }
+        const warn = upstreamKpiUsageNearlyUsed(fraction);
+        const resets = upstreamKpiResetsText(key.key_monthly_limit);
+        const alerts = (warn ? status(warnIcon, '快用完') : '') + low;
+        const sub = key.quarantined
+          ? quarantine('openrouter', key) + low
+          : alerts
+          ? `${alerts}<span>${escapeHtml([resets, creditText].filter(Boolean).join(' · '))}</span>`
+          : `<span>${escapeHtml([resets, creditText, concurrency].filter(Boolean).join(' · '))}</span>`;
+        return tile(key.key_monthly_limit.summary, false, upstreamKpiMeterHtml(fraction, warn), sub);
       };
       return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
     }

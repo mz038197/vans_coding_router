@@ -22,6 +22,7 @@ from src.domain.extra_usage import (
     account_credit_remaining_from_credits_payload,
     included_monthly_usage_from_documents,
     is_key_failover_exhaustion,
+    key_monthly_limit_from_key_payload,
 )
 from src.infrastructure.config import (
     ProviderSettings,
@@ -49,6 +50,7 @@ _ollama_thinking_cache = OllamaThinkingCache()
 _OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
 _OLLAMA_CLOUD_ME_URL = "https://ollama.com/api/me"
 _OPENROUTER_CREDITS_PATH = "/credits"
+_OPENROUTER_KEY_PATH = "/key"
 _USAGE_TIMEOUT = httpx.Timeout(2.0)
 _USAGE_CACHE_TTL_SEC = 45.0
 
@@ -68,6 +70,7 @@ class OpenAICompatibleGateway:
         self._created_usage_client = False
         self._monthly_usage_cache: dict[int, tuple[dict[str, Any], float]] = {}
         self._account_credit_cache: dict[int, tuple[float, float]] = {}
+        self._key_monthly_limit_cache: dict[int, tuple[dict[str, Any], float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
 
@@ -200,17 +203,45 @@ class OpenAICompatibleGateway:
             attached.append(row)
         return {**pool, "keys": attached}
 
+    async def attach_key_monthly_limit(self, pool: dict[str, Any]) -> dict[str, Any]:
+        """Overlay Key Monthly Limit onto openrouter pool keys without touching in-flight."""
+        if self.provider.name != "openrouter":
+            return pool
+        keys = list(pool.get("keys") or [])
+        limits = await asyncio.gather(
+            *(self._key_monthly_limit_for_index(int(item["index"])) for item in keys)
+        )
+        attached = []
+        for item, limit in zip(keys, limits, strict=True):
+            row = dict(item)
+            row["key_monthly_limit"] = limit
+            attached.append(row)
+        return {**pool, "keys": attached}
+
     async def _account_credit_remaining_for_index(self, index: int) -> float | None:
         now = time.monotonic()
         cached = self._account_credit_cache.get(index)
         if cached is not None and cached[1] > now:
             return cached[0]
-        remaining = await self._fetch_account_credit_remaining(index)
+        payload = await self._fetch_openrouter_document(index, _OPENROUTER_CREDITS_PATH)
+        remaining = account_credit_remaining_from_credits_payload(payload)
         if remaining is not None:
             self._account_credit_cache[index] = (remaining, now + _USAGE_CACHE_TTL_SEC)
         return remaining
 
-    async def _fetch_account_credit_remaining(self, index: int) -> float | None:
+    async def _key_monthly_limit_for_index(self, index: int) -> dict[str, Any] | None:
+        now = time.monotonic()
+        cached = self._key_monthly_limit_cache.get(index)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        payload = await self._fetch_openrouter_document(index, _OPENROUTER_KEY_PATH)
+        limit = key_monthly_limit_from_key_payload(payload, now=datetime.now(timezone.utc))
+        if limit is not None:
+            self._key_monthly_limit_cache[index] = (limit, now + _USAGE_CACHE_TTL_SEC)
+        return limit
+
+    async def _fetch_openrouter_document(self, index: int, path: str) -> Any:
+        """GET one OpenRouter account document with that key; None when unavailable."""
         pool = self._ensure_pool()
         if pool is None or not (0 <= index < pool.key_count):
             return None
@@ -220,7 +251,7 @@ class OpenAICompatibleGateway:
         try:
             client = await self._ensure_usage_client()
             response = await client.get(
-                self.provider.base_url.rstrip("/") + _OPENROUTER_CREDITS_PATH,
+                self.provider.base_url.rstrip("/") + path,
                 headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
                 timeout=_USAGE_TIMEOUT,
             )
@@ -228,18 +259,18 @@ class OpenAICompatibleGateway:
             raise
         except Exception:
             logger.info(
-                "account_credit_remaining_unavailable provider=%s index=%s",
+                "openrouter_document_unavailable provider=%s index=%s path=%s",
                 self.provider.name,
                 index,
+                path,
             )
             return None
         if response.status_code >= 400:
             return None
         try:
-            payload = response.json()
+            return response.json()
         except json.JSONDecodeError:
             return None
-        return account_credit_remaining_from_credits_payload(payload)
 
     async def _ensure_usage_client(self) -> httpx.AsyncClient:
         if self._usage_client is None:

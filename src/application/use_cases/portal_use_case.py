@@ -166,7 +166,11 @@ class PortalUseCase:
         if not callable(status_fn):
             return {"providers": {}}
         result = status_fn(limited_only=True)
-        for method_name in ("overlay_included_monthly_usage", "overlay_account_credit_remaining"):
+        for method_name in (
+            "overlay_included_monthly_usage",
+            "overlay_account_credit_remaining",
+            "overlay_key_monthly_limit",
+        ):
             overlay = getattr(gateway, method_name, None)
             if not callable(overlay):
                 continue

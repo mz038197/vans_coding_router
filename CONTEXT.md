@@ -32,6 +32,10 @@ _Avoid_: Extra Usage Remaining, weekly usage, quota remaining, session usage, cr
 The remaining prepaid credit, in dollars, on the OpenRouter account that one upstream key draws from. Every key on that account has the same Account Credit Remaining. Zero and a negative amount are still this balance. It is not Included Monthly Usage, not Extra Usage Remaining, not that key's own spend, and not a per-key spending cap.
 _Avoid_: Credit Exhaustion, limit remaining, key usage, 月用量, credits (ambiguous), 餘額無法取得
 
+**Key Monthly Limit** (Portal: `$X of $Y used` / `Resets in …`):
+The spend so far this month on one OpenRouter key, as dollars used out of the monthly spending cap set on that key in OpenRouter, plus when the cap resets (00:00 UTC on the 1st). A key with no cap, or a cap that resets daily or weekly, has no Key Monthly Limit and its Portal tile shows only Account Credit Remaining. It is not Account Credit Remaining: a key can be under its cap while its account has no credit left. It is not Included Monthly Usage.
+_Avoid_: Account Credit Remaining, 餘額, Included Monthly Usage, budget (ambiguous), limit remaining (as the displayed number)
+
 **Credit Exhaustion**:
 An Upstream Refusal that means the upstream account or that key has insufficient credits (account balance or per-key spending cap). It is not Extra Usage Exhaustion, not a rate-limit busy signal, and not Account Credit Remaining.
 _Avoid_: Extra Usage Exhaustion, quota full, rate limit, payment required (as a routing class), Account Credit Remaining, 餘額

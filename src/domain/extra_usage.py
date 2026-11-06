@@ -82,6 +82,35 @@ def account_credit_remaining_from_credits_payload(payload: Any) -> float | None:
     return credits - usage
 
 
+def key_monthly_limit_from_key_payload(payload: Any, *, now: datetime) -> dict[str, Any] | None:
+    """Return the Key Monthly Limit meter from an OpenRouter key document, or None.
+
+    Only a cap set on the key with a monthly reset is this meter; a key with no cap,
+    or one that resets daily or weekly, has none. Spend is the cap minus what remains.
+    OpenRouter resets monthly caps at 00:00 UTC on the 1st.
+    """
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict) or data.get("limit_reset") != "monthly":
+        return None
+    limit = _as_finite_number(data.get("limit"))
+    remaining = _as_finite_number(data.get("limit_remaining"))
+    if limit is None or limit <= 0 or remaining is None:
+        return None
+    used = round(limit - remaining, 6)
+    now_utc = now.astimezone(timezone.utc)
+    year, month = _shift_month(now_utc.year, now_utc.month, 1)
+    resets_at = datetime(year, month, 1, tzinfo=timezone.utc)
+    return {
+        "used_usd": used,
+        "limit_usd": limit,
+        "resets_at": _iso_z(resets_at),
+        "summary": f"${_format_dollars(used)} of ${_format_dollars(limit)} used",
+        "resets": f"Resets in {_relative_phrase(int((resets_at - now_utc).total_seconds()))}.",
+    }
+
+
 # Published included monthly amounts. Ollama's usage document has spend, not this cap.
 _INCLUDED_USD_BY_PLAN = {
     "pro": 60.0,
