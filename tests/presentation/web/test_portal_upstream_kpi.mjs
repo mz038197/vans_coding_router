@@ -249,8 +249,8 @@ test("a low balance on the second OpenRouter account warns on that key's tile on
 // A tile's in-flight light: [state class, count shown beside it, spoken label].
 function light(tile) {
   const lbl = tile.match(/<div class="lbl">([\s\S]*?)<\/div>/)[1];
-  const m = lbl.match(/<span class="upstream-kpi-load">([^<]*)<i class="upstream-kpi-light( is-[a-z]+)?" role="img" aria-label="([^"]*)"/);
-  return m && [m[2]?.trim() ?? "", m[1], m[3]];
+  const m = lbl.match(/<span class="upstream-kpi-load">(?:<span aria-hidden="true">([^<]*)<\/span>)?<i class="upstream-kpi-light( is-[a-z]+)?" role="img" aria-label="([^"]*)"/);
+  return m && [m[2]?.trim() ?? "", m[1] ?? "", m[3]];
 }
 
 test("a key with requests in flight breathes next to its label and shows in-flight/cap there", () => {
@@ -275,6 +275,7 @@ test("a key at its concurrency cap shows a steady full light", () => {
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [ollamaKey({ in_flight: 3 })] })))[0];
 
   assert.deepEqual(light(ollama), ["is-full", "3/3", "滿載 3/3"]);
+  assert.match(ollama, /--load:1\.00/);
 });
 
 test("a key without a concurrency cap counts its requests but is never full", () => {
@@ -282,6 +283,7 @@ test("a key without a concurrency cap counts its requests but is never full", ()
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [ollamaKey({ cap: null, in_flight: 5 })] })))[0];
 
   assert.deepEqual(light(ollama), ["is-active", "5", "工作中 5"]);
+  assert.match(ollama, /--load:0\.00/);
 });
 
 test("concurrency is no longer repeated in a tile's sub line", () => {

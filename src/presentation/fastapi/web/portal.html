@@ -1495,8 +1495,9 @@
       const count = cap != null ? `${inflight}/${cap}` : String(inflight);
       const full = cap != null && inflight >= cap;
       const [state, spoken] = full ? [' is-full', `滿載 ${count}`] : inflight > 0 ? [' is-active', `工作中 ${count}`] : ['', '閒置'];
-      const load = cap != null ? Math.min(1, inflight / cap) : 1;
-      return `<span class="upstream-kpi-load">${inflight > 0 ? count : ''}<i class="upstream-kpi-light${state}" role="img" aria-label="${spoken}" style="--load:${load.toFixed(2)}"></i></span>`;
+      const load = cap != null ? Math.min(1, inflight / cap) : 0;
+      const shown = inflight > 0 ? `<span aria-hidden="true">${count}</span>` : '';
+      return `<span class="upstream-kpi-load">${shown}<i class="upstream-kpi-light${state}" role="img" aria-label="${spoken}" style="--load:${load.toFixed(2)}"></i></span>`;
     }
 
     function upstreamKpiQuarantineText(key) {
@@ -1600,6 +1601,8 @@
     }
 
     let upstreamKpiData = null;
+    // One breath of the in-flight light; matches the 4s upstream-kpi-breathe animation in portal.css.
+    const UPSTREAM_KPI_BREATH_MS = 4000;
 
     function renderUpstreamKpi(data) {
       const board = document.getElementById('upstreamKpi');
@@ -1617,7 +1620,7 @@
         <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers)}</div>`;
       // The board is redrawn every poll. Start each light partway through the 4s breath, at
       // the page clock's phase, so lights keep breathing in step instead of restarting.
-      const phase = `${-Math.round(performance.now() % 4000)}ms`;
+      const phase = `${-Math.round(performance.now() % UPSTREAM_KPI_BREATH_MS)}ms`;
       board.querySelectorAll('.upstream-kpi-light.is-active').forEach((light) => { light.style.animationDelay = phase; });
     }
 

@@ -1937,7 +1937,8 @@
     }
     .upstream-kpi .val.val-muted { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-muted); }
     .upstream-kpi-name { display: inline-flex; align-items: center; gap: 4px; }
-    /* In-flight light (ADR 0047): breathes while a key has requests in flight, steady at its cap. */
+    /* In-flight light (ADR 0047): breathes while a key has requests in flight, steady at its cap.
+       The 4s cycle is also UPSTREAM_KPI_BREATH_MS in portal.html; change both together. */
     .upstream-kpi-load {
       display: inline-flex;
       align-items: center;
@@ -1965,8 +1966,9 @@
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning-fill) 25%, transparent);
     }
     @keyframes upstream-kpi-breathe {
-      0%, 100% { opacity: calc(.55 + var(--load) * .2); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-fill) 55%, transparent); }
+      0% { opacity: calc(.55 + var(--load) * .2); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-fill) 55%, transparent); }
       40% { opacity: 1; box-shadow: 0 0 0 calc(2px + var(--load) * 4px) color-mix(in srgb, var(--success-fill) 0%, transparent); }
+      100% { opacity: calc(.55 + var(--load) * .2); box-shadow: 0 0 0 0 transparent; }
     }
     @media (prefers-reduced-motion: reduce) {
       .upstream-kpi-light.is-active { animation: none; }
