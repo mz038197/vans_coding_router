@@ -90,5 +90,6 @@ These override the foundations above where they differ. They live outside the ma
 - Status text vs fill: success `#16A34A` and warning `#D97706` are fills only (meters, dots, tinted backgrounds); as text use `#15803D` and `#B45309` (5.0:1 on white). Danger text `#B91C1C`.
 - Light: surface `#FFFFFF`, subtle `#F9FAFB`, muted `#F3F4F6`, border `#E5E7EB`, strong border `#D1D5DB`, text `#111827`, secondary text `#4B5563`.
 - Dark: background `#0A0A0A`, surfaces `#111111` / `#18181B` / `#27272A`, border `#27272A`, strong border `#3F3F46`, text `#FAFAFA`, secondary text `#A1A1AA`, primary `#FAFAFA` with `#0A0A0A` text; status text `#4ADE80` / `#FBBF24` / `#F87171`.
+- Hover and dark fills: primary hover `#2B2B2B` (light) / `#E4E4E7` (dark); dark status fills `#22C55E` / `#F59E0B`.
 - Radius: 6px everywhere; pills fully round. No shadows or blur on cards, buttons or the nav.
 - Decorative colour (role, endpoint, personal tags) is neutral gray; colour means status only.

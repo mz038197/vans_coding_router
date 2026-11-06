@@ -1,5 +1,7 @@
 # OpenRouter tiles lead with Account Credit Remaining
 
+Status: accepted.
+
 Supersedes ADR 0042 for the 我的課程 tile layout. Every OpenRouter tile now leads with that key's Account Credit Remaining (`餘額 $…`), whether or not the key has a Key Monthly Limit. A key with a monthly cap adds the cap's meter under the headline and a sub line `月上限 $X of $Y used · Resets in … · 併發 n/m`. 快用完 still shows at 90% of the cap, 餘額偏低 still shows below $5, and a quarantined key still shows 隔離中 with 解除隔離 in place of the concurrency. A key with no cap is unchanged: the balance and its concurrency, no meter.
 
 Ollama tiles are unchanged and still lead with Included Monthly Usage.

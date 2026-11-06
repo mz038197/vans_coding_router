@@ -4,6 +4,7 @@
       --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
       --font-mono: "Fira Code", ui-monospace, "SF Mono", Consolas, monospace;
       --radius: 6px;
+      --nav-height: 68px;
       --bg-base: #ffffff;
       --bg-card: #ffffff;
       --bg-muted: #f3f4f6;
@@ -20,7 +21,6 @@
       --accent-soft-strong: rgba(17, 24, 39, 0.1);
       --accent-border: #d1d5db;
       --accent-text: #111827;
-      --brand: #007070;
       --brand-yellow: #f8c000;
       --code-bg: #f9fafb;
       --code-text: #111827;
@@ -66,7 +66,6 @@
       --accent-soft-strong: rgba(250, 250, 250, 0.12);
       --accent-border: #3f3f46;
       --accent-text: #fafafa;
-      --brand: #2a9d9d;
       --brand-yellow: #f8c000;
       --code-bg: #111111;
       --code-text: #e4e4e7;
@@ -233,25 +232,6 @@
 
     #loginShell .login-hero {
       background-color: var(--bg-base);
-    }
-
-    /* Light login: clearly open glass (override .glass-card solid --bg-glass). */
-    html[data-theme="light"] #loginShell .site-nav {
-      background: rgba(255, 255, 255, 0.42);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-bottom-color: rgba(15, 23, 42, 0.08);
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-    }
-
-    html[data-theme="light"] #loginShell .glass-card.login-card {
-      background: rgba(255, 255, 255, 0.55);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-color: var(--accent-border);
-      box-shadow:
-        0 16px 40px rgba(15, 23, 42, 0.08),
-        0 0 0 1px var(--accent-soft);
     }
 
     html[data-theme="light"] #loginShell .login-orbs::before {
@@ -510,7 +490,6 @@
       text-decoration: underline;
       text-underline-offset: 2px;
       padding: 0;
-      text-decoration: underline;
       border: 0;
       box-shadow: none;
       font-weight: 500;
@@ -521,11 +500,11 @@
     .btn-danger {
       background: transparent;
       color: var(--danger);
-      border: 1px solid rgba(248, 113, 113, 0.4);
+      border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
       box-shadow: none;
     }
 
-    .btn-danger:hover { background: rgba(248, 113, 113, 0.1); }
+    .btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
     .oauth-btn {
       display: inline-flex;
@@ -1670,20 +1649,21 @@
     .tag-expired { background: color-mix(in srgb, var(--warning-fill) 12%, transparent); color: var(--warning); }
     .tag-rejected { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
     .tag-success { background: color-mix(in srgb, var(--success-fill) 12%, transparent); color: var(--success); }
-    .tag-role-admin { background: var(--surface-3); color: var(--text-primary); }
-    .tag-role-teacher { background: var(--surface-3); color: var(--text-primary); }
-    .tag-role-student { background: var(--surface-3); color: var(--text-primary); }
+    /* Decorative tags are neutral: colour means status only (ADR 0045). */
+    .tag-role-admin,
+    .tag-role-teacher,
+    .tag-role-student,
+    .tag-personal,
+    .tag-endpoint-chat,
+    .tag-endpoint-responses,
+    .tag-endpoint-images,
+    .tag-endpoint-audio { background: var(--surface-3); color: var(--text-primary); }
     .tag-role-inactive { background: transparent; opacity: 0.45; border: 1px dashed currentColor; }
     .tag-clickable { cursor: pointer; border: none; font: inherit; }
     .tag-clickable:hover { filter: brightness(1.15); }
     .tag-user-active { background: color-mix(in srgb, var(--success-fill) 12%, transparent); color: var(--success); }
     .tag-user-inactive { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
     #adminUserSearch { margin-top: 12px; max-width: 320px; }
-    .tag-personal { background: var(--surface-3); color: var(--text-primary); }
-    .tag-endpoint-chat { background: var(--surface-3); color: var(--text-primary); }
-    .tag-endpoint-responses { background: var(--surface-3); color: var(--text-primary); }
-    .tag-endpoint-images { background: var(--surface-3); color: var(--text-primary); }
-    .tag-endpoint-audio { background: var(--surface-3); color: var(--text-primary); }
 
     .tag-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
@@ -1906,8 +1886,8 @@
     .class-main { min-width: 0; }
     .upstream-kpi-board {
       position: sticky;
-      top: 88px;
-      max-height: calc(100vh - 104px);
+      top: calc(var(--nav-height) + 20px);
+      max-height: calc(100vh - var(--nav-height) - 36px);
       overflow-y: auto;
       margin: 0;
       padding: 0;

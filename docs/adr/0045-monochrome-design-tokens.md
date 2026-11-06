@@ -1,5 +1,7 @@
 # Portal uses monochrome design tokens
 
+Status: accepted.
+
 Every page that loads `portal.css` (Portal, Agent Lobby, the login page) now draws from the shadcn style in `.agents/skills/design-system/SKILL.md`: black, white and grays, with colour reserved for status. The token names stay the same, so pages did not change their markup; only the values changed.
 
 - **Colour.** Light: white background, `#111827` text, `#4b5563` secondary text, `#111111` primary buttons with white text. Dark: `#0a0a0a` background, `#fafafa` text, `#a1a1aa` secondary text, `#fafafa` primary buttons with near-black text (`--accent-fg`). Teal `#007070` survives only as the logo badge. Dark Theme's indigo accent and the teal-to-yellow gradient title are gone; the title is plain text.
