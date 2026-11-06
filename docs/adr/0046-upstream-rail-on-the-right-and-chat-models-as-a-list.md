@@ -1,6 +1,6 @@
 # Upstream rail moves right and shrinks; chat models show as a grouped list
 
-Status: accepted.
+Status: accepted. Amended by ADR 0047 (in-flight light beside the label).
 
 Amends ADR 0043. On 我的課程 the upstream status rail now sits right of the course column instead of left, and is narrower: 208px instead of 260px. Its tiles are tighter (8px padding, 12px label, 16px headline, 4px meter) so the course column, which is what teachers work in, gets the room. It still sticks below the site header. Below 1100px wide it still moves above the course column and scrolls sideways. In the markup it stays before the course column, so it comes first when the page stacks.
 
