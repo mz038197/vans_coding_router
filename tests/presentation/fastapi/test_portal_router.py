@@ -263,7 +263,7 @@ def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     assert "toggleSessionLayoutBand" in html
     assert "return width >= 700" in html
     assert "width >= 640" in html
-    assert "session-model-pill" in html
+    assert "session-model-list" in html
     assert "尚未勾選對話模型" in html
     assert "<th>課堂座位</th>" not in html
 
@@ -2350,3 +2350,13 @@ def test_portal_css_spacing_sits_on_the_spacing_scale(tmp_path):
             elif size not in SPACING_SCALE_PX and size != 1 and size <= 32:
                 off_scale.append(f"{prop}: {value.strip()}")
     assert off_scale == []
+
+
+def test_portal_serves_upstream_logos_as_svg(tmp_path):
+    client, _, _ = _client(tmp_path)
+    for name in ("ollama", "openrouter"):
+        response = client.get(f"/portal/static/provider-{name}.svg")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/svg+xml")
+        assert response.text.startswith("<svg")
+    assert client.get("/portal/static/provider-other.svg").status_code == 404

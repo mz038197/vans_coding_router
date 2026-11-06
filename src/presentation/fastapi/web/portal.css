@@ -1684,7 +1684,8 @@
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
-      margin: 12px 0;
+      /* No top margin: the gap above the toolbar then equals the gap beside it. */
+      margin: 0 0 12px;
     }
     .course-toolbar .course-toolbar-template { margin-left: auto; }
 
@@ -1878,14 +1879,14 @@
       min-height: 0;
     }
 
-    /* 我的課程: upstream status in a sticky left rail beside the course column (ADR 0043). */
+    /* 我的課程: upstream status in a compact sticky rail right of the course column (ADR 0046). */
     .class-layout {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) 208px;
       gap: 24px;
       align-items: start;
     }
-    .class-main { min-width: 0; }
+    .class-main { min-width: 0; grid-column: 1; grid-row: 1; }
     .upstream-kpi-board {
       position: sticky;
       top: calc(var(--nav-height) + 24px);
@@ -1893,22 +1894,24 @@
       overflow-y: auto;
       margin: 0;
       padding: 0;
+      grid-column: 2;
+      grid-row: 1;
     }
     .upstream-kpi-head {
       display: flex;
       align-items: center;
-      margin-bottom: 8px;
-      font-size: 14px;
+      margin-bottom: 4px;
+      font-size: 12px;
       font-weight: 600;
-      color: var(--text-primary);
+      color: var(--text-muted);
     }
     .upstream-kpi-grid {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 4px;
     }
     .upstream-kpi {
-      padding: 12px;
+      padding: 8px;
       border: 1px solid var(--border-glass);
       border-radius: var(--radius);
       background: var(--surface-1);
@@ -1918,7 +1921,7 @@
       min-width: 0;
     }
     .upstream-kpi .lbl {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 600;
       color: var(--text-primary);
       display: flex;
@@ -1926,13 +1929,14 @@
       gap: 4px;
     }
     .upstream-kpi .val {
-      font-size: 20px;
+      font-size: 16px;
       font-weight: 600;
-      line-height: 28px;
+      line-height: 24px;
       font-variant-numeric: tabular-nums;
       color: var(--text-primary);
     }
-    .upstream-kpi .val.val-muted { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+    .upstream-kpi .val.val-muted { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-muted); }
+    .upstream-kpi-name { display: inline-flex; align-items: center; gap: 4px; }
     .upstream-kpi .sub {
       font-size: 12px;
       color: var(--text-muted);
@@ -1942,7 +1946,7 @@
       flex-wrap: wrap;
       margin-top: auto;
     }
-    .upstream-kpi .meter { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+    .upstream-kpi .meter { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
     .upstream-kpi .meter i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
     .upstream-kpi .meter.warn { background: color-mix(in srgb, var(--warning-fill) 18%, transparent); }
     .upstream-kpi .meter.warn i { background: var(--warning-fill); }
@@ -1960,6 +1964,7 @@
     /* Narrow: the rail moves above the course column, stops sticking, and its keys scroll sideways. */
     @media (max-width: 1100px) {
       .class-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+      .class-main, .upstream-kpi-board { grid-column: auto; grid-row: auto; }
       .upstream-kpi-board { position: static; max-height: none; overflow: visible; }
       .upstream-kpi-grid { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
       .upstream-kpi { flex: 0 0 220px; }
@@ -2546,14 +2551,30 @@
 
     .session-model-choice { font-size: 14px; color: var(--text-muted); white-space: nowrap; }
 
-    .session-model-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      max-height: 60px;
+    /* Chat models: every model shown, one row each, in as many columns as fit (ADR 0046). */
+    .session-model-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+      gap: 4px 16px;
       margin-top: 8px;
-      overflow: auto;
+      font-size: 14px;
     }
+    .session-model-row { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 20px; }
+    .session-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-model-upstream { flex: none; font-size: 12px; color: var(--text-muted); }
+
+    /* Upstream logos: monochrome through a mask, so they follow the text colour in light and dark. */
+    .upstream-logo {
+      display: inline-block;
+      flex: none;
+      width: 16px;
+      height: 16px;
+      background: currentColor;
+      -webkit-mask: var(--logo) center / contain no-repeat;
+      mask: var(--logo) center / contain no-repeat;
+    }
+    .upstream-logo-ollama { --logo: url("/portal/static/provider-ollama.svg"); }
+    .upstream-logo-openrouter { --logo: url("/portal/static/provider-openrouter.svg"); }
 
     .session-auto-badge {
       display: inline-flex;
@@ -2565,16 +2586,6 @@
       color: var(--accent-text);
       font-size: 12px;
       white-space: nowrap;
-    }
-
-    .session-model-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border-strong);
-      background: var(--surface-2);
-      font-size: 14px;
     }
 
     .session-field.session-redemptions { margin-top: 0; min-width: 0; overflow: hidden; }
