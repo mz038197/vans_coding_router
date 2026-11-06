@@ -292,6 +292,18 @@ test("an OpenRouter key at 90% of its monthly cap shows 快用完, and a low bal
   assert.doesNotMatch(lowCredit, /meter warn/);
 });
 
+test("a quarantined OpenRouter key with a monthly cap keeps its reset and balance beside 隔離中", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const keys = [
+    openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, key_monthly_limit: keyMonthlyLimit(18, 20) }),
+  ];
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
+
+  assert.deepEqual(statuses(openrouter), ["隔離中 1 分"]);
+  assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
+  assert.match(openrouter, /Resets in 9 days · 餘額 \$23\.50</);
+});
+
 test("an OpenRouter key without a monthly cap keeps the balance tile and draws no meter", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ key_monthly_limit: null })];

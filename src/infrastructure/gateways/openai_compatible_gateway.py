@@ -235,10 +235,10 @@ class OpenAICompatibleGateway:
         if cached is not None and cached[1] > now:
             return cached[0]
         payload = await self._fetch_openrouter_document(index, _OPENROUTER_KEY_PATH)
-        limit = key_monthly_limit_from_key_payload(payload, now=datetime.now(timezone.utc))
-        if limit is not None:
-            self._key_monthly_limit_cache[index] = (limit, now + _USAGE_CACHE_TTL_SEC)
-        return limit
+        meter = key_monthly_limit_from_key_payload(payload, now=datetime.now(timezone.utc))
+        if meter is not None:
+            self._key_monthly_limit_cache[index] = (meter, now + _USAGE_CACHE_TTL_SEC)
+        return meter
 
     async def _fetch_openrouter_document(self, index: int, path: str) -> Any:
         """GET one OpenRouter account document with that key; None when unavailable."""

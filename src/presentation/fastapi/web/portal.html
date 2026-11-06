@@ -1421,8 +1421,8 @@
 
     // OpenRouter: share of the Key Monthly Limit spent; null when the key has no monthly cap.
     function upstreamKpiKeyLimitFraction(key) {
-      const limit = key?.key_monthly_limit;
-      return limit ? upstreamKpiSpendFraction(limit.used_usd, limit.limit_usd) : null;
+      const meter = key?.key_monthly_limit;
+      return meter ? upstreamKpiSpendFraction(meter.used_usd, meter.limit_usd) : null;
     }
 
     function upstreamKpiMeterHtml(fraction, warn) {
@@ -1440,7 +1440,7 @@
       return { summary, resets: upstreamKpiResetsText(key?.included_monthly_usage) };
     }
 
-    // 快用完 at 90% or more of Included Monthly Usage.
+    // 快用完 at 90% or more of Included Monthly Usage or of a Key Monthly Limit.
     function upstreamKpiUsageNearlyUsed(fraction) {
       return fraction != null && fraction >= 0.9;
     }
@@ -1567,12 +1567,12 @@
         }
         const warn = upstreamKpiUsageNearlyUsed(fraction);
         const resets = upstreamKpiResetsText(key.key_monthly_limit);
-        const alerts = (warn ? status(warnIcon, '快用完') : '') + low;
-        const sub = key.quarantined
+        // The balance stays on the sub line in every state, since the headline is the cap.
+        const alerts = key.quarantined
           ? quarantine('openrouter', key) + low
-          : alerts
-          ? `${alerts}<span>${escapeHtml([resets, creditText].filter(Boolean).join(' · '))}</span>`
-          : `<span>${escapeHtml([resets, creditText, concurrency].filter(Boolean).join(' · '))}</span>`;
+          : (warn ? status(warnIcon, '快用完') : '') + low;
+        const details = alerts ? [resets, creditText] : [resets, creditText, concurrency];
+        const sub = `${alerts}<span>${escapeHtml(details.filter(Boolean).join(' · '))}</span>`;
         return tile(key.key_monthly_limit.summary, false, upstreamKpiMeterHtml(fraction, warn), sub);
       };
       return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
