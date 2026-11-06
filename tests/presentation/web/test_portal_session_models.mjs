@@ -25,7 +25,7 @@ function extractNamedFunction(source, name) {
 }
 
 function load() {
-  const names = ["escapeHtml", "upstreamLogoHtml", "sessionModelListHtml"];
+  const names = ["escapeHtml", "modelIdPrefix", "upstreamLogoHtml", "sessionModelListHtml"];
   const context = {};
   vm.createContext(context);
   vm.runInContext(names.map((name) => extractNamedFunction(portalHtml, name)).join("\n"), context);
@@ -88,6 +88,19 @@ test("an upstream without a logo is named in text", () => {
   const { sessionModelListHtml } = load();
   const html = sessionModelListHtml([{ id: "openai@gpt-image-1", name: "gpt-image-1" }]);
   assert.deepEqual(rows(html), [["openai", "gpt-image-1", "openai@gpt-image-1"]]);
+});
+
+test("a model id without an upstream is grouped under 其他", () => {
+  const { sessionModelListHtml } = load();
+  const html = sessionModelListHtml([{ id: "local-model", name: "local-model" }]);
+  assert.deepEqual(rows(html), [["其他", "local-model", "local-model"]]);
+});
+
+test("hovering anywhere on a row, logo included, shows the full model id", () => {
+  const { sessionModelListHtml } = load();
+  const html = sessionModelListHtml([{ id: "openrouter@openai/gpt-5", name: "gpt-5" }]);
+  assert.equal((html.match(/title="/g) || []).length, 1);
+  assert.match(html, /<div class="session-model-row" title="openrouter@openai\/gpt-5">/);
 });
 
 test("names and ids are escaped", () => {

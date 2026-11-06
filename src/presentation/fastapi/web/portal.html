@@ -925,22 +925,26 @@
       return rows;
     }
 
-    // An upstream's logo, named for screen readers and on hover; an upstream without a logo is named in text.
-    function upstreamLogoHtml(upstream) {
-      const logos = { ollama_cloud: ['Ollama', 'ollama'], openrouter: ['OpenRouter', 'openrouter'] };
-      const known = logos[upstream];
-      if (!known) return `<span class="session-model-upstream">${escapeHtml(upstream)}</span>`;
-      const [label, file] = known;
-      return `<i class="upstream-logo upstream-logo-${file}" role="img" aria-label="${label}" title="${label}"></i>`;
+    // An upstream's logo, named for screen readers (and on hover unless `hover` is false, so a
+    // surrounding title wins); an upstream without a logo is named in text.
+    function upstreamLogoHtml(upstream, { hover = true } = {}) {
+      const logos = {
+        ollama_cloud: { label: 'Ollama', file: 'ollama' },
+        openrouter: { label: 'OpenRouter', file: 'openrouter' },
+      };
+      const logo = logos[upstream];
+      if (!logo) return `<span class="session-model-upstream">${escapeHtml(upstream)}</span>`;
+      const title = hover ? ` title="${logo.label}"` : '';
+      return `<i class="upstream-logo upstream-logo-${logo.file}" role="img" aria-label="${logo.label}"${title}></i>`;
     }
 
-    // Chat models as a multi-column list, grouped by upstream (the part of the id before `@`).
-    // A teacher-given name is shown as written; otherwise a short form of the upstream model id.
+    // Chat models as a multi-column list, grouped by upstream (the Model ID's provider segment,
+    // before `@`; 其他 when there is none). A teacher-given name is shown as written; otherwise a
+    // short form of the upstream model id. The row's title (full id) is the only hover text.
     function sessionModelListHtml(models) {
       const groups = new Map();
       for (const model of models) {
-        const at = model.id.indexOf('@');
-        const upstream = at > 0 ? model.id.slice(0, at) : '';
+        const upstream = model.id.includes('@') ? modelIdPrefix(model.id) : '其他';
         if (!groups.has(upstream)) groups.set(upstream, []);
         groups.get(upstream).push(model);
       }
@@ -950,7 +954,7 @@
         .replace(/:([^:]+)$/, ' $1');
       const rows = [...groups].flatMap(([upstream, group]) => group.map((model) => {
         const name = model.name || shortName(model.id);
-        return `<div class="session-model-row" title="${escapeHtml(model.id)}">${upstream ? upstreamLogoHtml(upstream) : ''}<span class="session-model-name">${escapeHtml(name)}</span></div>`;
+        return `<div class="session-model-row" title="${escapeHtml(model.id)}">${upstreamLogoHtml(upstream, { hover: false })}<span class="session-model-name">${escapeHtml(name)}</span></div>`;
       }));
       return `<div class="session-model-list">${rows.join('')}</div>`;
     }
@@ -958,7 +962,7 @@
     function sessionModelAllowlistCell(classId, session) {
       const edit = `<button type="button" class="btn-link session-model-settings-btn" onclick="beginEditSessionChatLanguageModels(${classId}, ${session.id})">模型設定</button>`;
       const chat = sessionTextModels(session);
-      const list = chat.length ? sessionModelListHtml(chat) : '<p class="hint">尚未勾選對話模型</p>';
+      const list = chat.length ? sessionModelListHtml(chat) : '<span class="hint">尚未勾選對話模型</span>';
       return `<div class="session-models">
         <div class="session-models-head">
           <span class="session-kicker">對話模型 ${edit} ${sessionAutoSelectionBadge(session)}</span>
