@@ -4,7 +4,7 @@
       --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
       --font-mono: "Fira Code", ui-monospace, "SF Mono", Consolas, monospace;
       --radius: 6px;
-      --nav-height: 68px;
+      --nav-height: 64px;
       --bg-base: #ffffff;
       --bg-card: #ffffff;
       --bg-muted: #f3f4f6;
@@ -162,7 +162,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 24px;
+      height: var(--nav-height);
+      padding: 0 24px;
       background: var(--nav-bg);
       backdrop-filter: var(--glass-blur);
       -webkit-backdrop-filter: var(--glass-blur);
@@ -184,7 +185,7 @@
       justify-content: center;
       width: 32px;
       height: 32px;
-      padding: 4px;
+      padding: 0;
       border-radius: var(--radius);
       background: var(--logo-badge-bg);
       overflow: hidden;
@@ -243,8 +244,8 @@
     }
 
     .nav-title {
-      font-size: 20px;
-      font-weight: 700;
+      font-size: 16px;
+      font-weight: 600;
       letter-spacing: -0.02em;
     }
 
@@ -333,7 +334,7 @@
     .login-card .login-subtitle {
       color: var(--text-muted);
       margin-bottom: 24px;
-      font-size: 16px;
+      font-size: 14px;
     }
 
     .page-main {
@@ -1447,7 +1448,7 @@
 
     .auto-tier-btn { margin: 0; padding: 4px 8px; font-size: 14px; }
 
-    .wizard-subhead { margin: 16px 0 8px; font-size: 16px; }
+    .wizard-subhead { margin: 16px 0 8px; font-size: 14px; font-weight: 600; }
 
     .model-tier-table-wrap { overflow-x: auto; }
 
@@ -1635,10 +1636,12 @@
     .admin-block { margin-top: 16px; }
 
     .tag {
-      display: inline-block;
-      padding: 4px 8px;
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
       border-radius: 999px;
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 600;
       white-space: nowrap;
     }
@@ -1882,17 +1885,15 @@
       gap: 24px;
       align-items: start;
     }
-    .class-layout:has(> .upstream-kpi-board:empty) { grid-template-columns: minmax(0, 1fr); }
     .class-main { min-width: 0; }
     .upstream-kpi-board {
       position: sticky;
-      top: calc(var(--nav-height) + 20px);
-      max-height: calc(100vh - var(--nav-height) - 36px);
+      top: calc(var(--nav-height) + 24px);
+      max-height: calc(100vh - var(--nav-height) - 48px);
       overflow-y: auto;
       margin: 0;
       padding: 0;
     }
-    .upstream-kpi-board:empty { display: none; }
     .upstream-kpi-head {
       display: flex;
       align-items: center;
@@ -2025,7 +2026,7 @@
 
     #appShell.has-teacher-menu .app-sidebar {
       position: fixed;
-      top: 68px;
+      top: var(--nav-height);
       left: 0;
       bottom: 0;
       z-index: 40;
@@ -2068,7 +2069,7 @@
         display: block;
         position: fixed;
         z-index: 110;
-        inset: 68px 0 0 0;
+        inset: var(--nav-height) 0 0 0;
         background: rgba(0, 0, 0, 0.45);
       }
     }
@@ -2583,7 +2584,7 @@
     .session-redemptions .roster-nowrap { white-space: nowrap; }
 
     /* 我的課程: one card per Class Session, settings left and usage right (layout F, ADR 0041). */
-    .course-totals { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0; font-size: 14px; color: var(--text-muted); }
+    .course-totals { display: flex; flex-wrap: wrap; gap: 32px; margin: 8px 0; font-size: 14px; color: var(--text-muted); }
     .course-totals b { margin-left: 4px; font-size: 20px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
     .course-totals:empty { display: none; }
     .course-card {
@@ -2601,7 +2602,7 @@
       gap: 8px;
       width: 100%;
       margin: 0;
-      padding: 8px 12px;
+      padding: 12px 16px;
       border: 0;
       border-radius: var(--radius);
       box-shadow: none;
@@ -2614,12 +2615,12 @@
     .course-card.is-open button.course-card-summary { border-radius: var(--radius) var(--radius) 0 0; }
     button.course-card-summary .sl-name { flex: 1 1 160px; font-weight: 700; }
     button.course-card-summary .session-name-sub { display: inline; margin: 0; }
-    .sl-tokens { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--accent-text); font-weight: 700; }
+    .sl-tokens { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--accent-text); font-weight: 700; }
     .course-card-body {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 16px;
-      padding: 12px 12px;
+      padding: 16px;
       border-top: 1px solid var(--border-glass);
     }
     .course-card-activity { border-left: 1px solid var(--border-glass); padding-left: 16px; min-width: 0; }
@@ -2638,8 +2639,8 @@
     .course-card-usage { max-height: 240px; overflow: auto; }
     .course-card-usage-row {
       display: grid;
-      grid-template-columns: minmax(5.5rem, 34%) 1fr 3.6rem;
-      gap: 4px;
+      grid-template-columns: minmax(96px, 34%) 1fr 56px;
+      gap: 12px;
       align-items: center;
       width: 100%;
       margin: 0;
@@ -2649,7 +2650,7 @@
       box-shadow: none;
       background: transparent;
       color: var(--text-primary);
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 400;
       text-align: left;
     }
@@ -2661,7 +2662,7 @@
     .course-card-usage-row .num { text-align: right; font-variant-numeric: tabular-nums; }
     .course-card-bar-track { display: block; min-width: 0; }
     .course-card-bar { display: block; height: 8px; min-width: 2px; border-radius: 4px; background: var(--accent); }
-    .course-card-log { padding: 4px 4px; border-bottom: 1px solid var(--border-glass); font-size: 14px; }
+    .course-card-log { padding: 8px 0; border-bottom: 1px solid var(--border-glass); font-size: 14px; }
     .course-card-log:last-child { border-bottom: 0; }
     .course-card-log-text { overflow-wrap: anywhere; }
     .course-card-log .meta { margin-top: 4px; color: var(--text-muted); font-size: 12px; }

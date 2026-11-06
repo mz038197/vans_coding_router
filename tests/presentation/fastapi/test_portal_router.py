@@ -2328,11 +2328,11 @@ def test_portal_css_font_sizes_sit_on_the_type_scale(tmp_path):
     # ADR 0045 / design-system SKILL.md: type scale 12/14/16/20/24/32, in px.
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
-    off_scale = [
-        value
-        for value in re.findall(r"font-size:\s*([^;}\n]+)", css)
-        if not (value.strip().endswith("px") and int(value.strip()[:-2]) in TYPE_SCALE_PX)
-    ]
+    off_scale = []
+    for value in re.findall(r"font-size:\s*([^;}\n]+)", css):
+        size = value.replace("!important", "").strip()
+        if not (re.fullmatch(r"\d+(\.\d+)?px", size) and float(size[:-2]) in TYPE_SCALE_PX):
+            off_scale.append(value.strip())
     assert off_scale == []
 
 
@@ -2342,7 +2342,7 @@ def test_portal_css_spacing_sits_on_the_spacing_scale(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
     off_scale = []
-    for prop, value in re.findall(r"\b((?:row-|column-)?gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?):\s*([^;}\n]+)", css):
+    for prop, value in re.findall(r"(?<![\w-])((?:row-|column-)?gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?):\s*([^;}\n]+)", css):
         for number, unit in re.findall(r"(-?\d*\.?\d+)(px|rem|em)\b", value):
             size = abs(float(number))
             if unit != "px":
