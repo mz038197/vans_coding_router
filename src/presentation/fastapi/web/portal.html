@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=rail-right-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=kpi-light-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -1486,8 +1486,17 @@
       return credit != null && credit < 5;
     }
 
-    function upstreamKpiConcurrencyText(key) {
-      return `併發 ${Number(key.in_flight ?? 0)}/${key.cap ?? '—'}`;
+    // The in-flight light beside a tile's label: it breathes while the key has requests in
+    // flight and holds steady at its concurrency cap. The count sits beside the light only
+    // while the key is busy. --load lets the breath grow with how full the key is.
+    function upstreamKpiLightHtml(key) {
+      const inflight = Math.max(0, Number(key.in_flight) || 0);
+      const cap = Number(key.cap) > 0 ? Number(key.cap) : null;
+      const count = cap != null ? `${inflight}/${cap}` : String(inflight);
+      const full = cap != null && inflight >= cap;
+      const [state, spoken] = full ? [' is-full', `滿載 ${count}`] : inflight > 0 ? [' is-active', `工作中 ${count}`] : ['', '閒置'];
+      const load = cap != null ? Math.min(1, inflight / cap) : 1;
+      return `<span class="upstream-kpi-load">${inflight > 0 ? count : ''}<i class="upstream-kpi-light${state}" role="img" aria-label="${spoken}" style="--load:${load.toFixed(2)}"></i></span>`;
     }
 
     function upstreamKpiQuarantineText(key) {
@@ -1511,15 +1520,14 @@
         const usedFraction = upstreamKpiUsedFraction(key);
         const known = usedFraction != null;
         const warn = upstreamKpiUsageNearlyUsed(usedFraction);
-        const concurrency = upstreamKpiConcurrencyText(key);
         const sub = key.quarantined
           ? quarantine('ollama_cloud', key)
           : warn
           ? `${status(warnIcon, '快用完')}${resets ? `<span>${escapeHtml(resets)}</span>` : ''}`
-          : `<span>${escapeHtml([resets, concurrency].filter(Boolean).join(' · '))}</span>`;
+          : resets ? `<span>${escapeHtml(resets)}</span>` : '';
         const meter = known ? upstreamKpiMeterHtml(usedFraction, warn) : '';
         return `<div class="upstream-kpi">
-          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('ollama_cloud')}<span>#${Number(key.index)}</span></span></div>
+          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('ollama_cloud')}<span>#${Number(key.index)}</span></span>${upstreamKpiLightHtml(key)}</div>
           <div class="val${known ? '' : ' val-muted'}">${escapeHtml(summary)}</div>
           ${meter}
           <div class="sub">${sub}</div>
@@ -1534,10 +1542,9 @@
         const credit = upstreamKpiCredit(key);
         const creditText = formatAccountCreditRemaining(credit);
         const low = upstreamKpiLowCredit(credit) ? status(warnIcon, '餘額偏低') : '';
-        const concurrency = upstreamKpiConcurrencyText(key);
         const fraction = upstreamKpiKeyLimitFraction(key);
         const tile = (val, valMuted, meter, sub) => `<div class="upstream-kpi">
-          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('openrouter')}<span>#${Number(key.index)}</span></span></div>
+          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('openrouter')}<span>#${Number(key.index)}</span></span>${upstreamKpiLightHtml(key)}</div>
           <div class="val${valMuted ? ' val-muted' : ''}">${escapeHtml(val)}</div>
           ${meter}
           <div class="sub">${sub}</div>
@@ -1545,7 +1552,7 @@
         if (fraction == null) {
           const sub = key.quarantined
             ? quarantine('openrouter', key) + low
-            : low || `<span>${escapeHtml(concurrency)}</span>`;
+            : low;
           return tile(creditText, credit == null, '', sub);
         }
         const warn = upstreamKpiUsageNearlyUsed(fraction);
@@ -1555,8 +1562,7 @@
           ? quarantine('openrouter', key) + low
           : (warn ? status(warnIcon, '快用完') : '') + low;
         const cap = `月上限 ${key.key_monthly_limit.summary}`;
-        const details = alerts ? [cap, resets] : [cap, resets, concurrency];
-        const sub = `${alerts}<span>${escapeHtml(details.filter(Boolean).join(' · '))}</span>`;
+        const sub = `${alerts}<span>${escapeHtml([cap, resets].filter(Boolean).join(' · '))}</span>`;
         return tile(creditText, credit == null, upstreamKpiMeterHtml(fraction, warn), sub);
       };
       return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
@@ -1609,6 +1615,10 @@
       }
       board.innerHTML = `<div class="upstream-kpi-head">上游狀態</div>
         <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers)}</div>`;
+      // The board is redrawn every poll. Start each light partway through the 4s breath, at
+      // the page clock's phase, so lights keep breathing in step instead of restarting.
+      const phase = `${-Math.round(performance.now() % 4000)}ms`;
+      board.querySelectorAll('.upstream-kpi-light.is-active').forEach((light) => { light.style.animationDelay = phase; });
     }
 
     function bindUpstreamKpiBoard(board) {

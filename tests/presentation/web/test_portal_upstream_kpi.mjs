@@ -40,7 +40,7 @@ function loadKpi() {
     "upstreamKpiMonthlyUsageParts",
     "upstreamKpiUsageNearlyUsed",
     "upstreamKpiLowCredit",
-    "upstreamKpiConcurrencyText",
+    "upstreamKpiLightHtml",
     "upstreamKpiQuarantineText",
     "upstreamKpiCredit",
     "upstreamKpiTilesHtml",
@@ -110,7 +110,7 @@ function label(tile) {
   return `${logo} ${number}`;
 }
 
-test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and its concurrency", () => {
+test("a healthy Ollama key tile shows $X of $Y used, a meter and Resets in …", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const html = upstreamKpiTilesHtml(providers());
   const ollama = tiles(html)[0];
@@ -118,7 +118,7 @@ test("a healthy Ollama key tile shows $X of $Y used, a meter, Resets in … and 
   assert.equal(label(ollama), "Ollama #0");
   assert.match(ollama, /\$12\.40 of \$60 used/);
   assert.match(ollama, /<div class="meter"><i style="width:21%"><\/i><\/div>/);
-  assert.match(ollama, /Resets in 9 days · 併發 1\/3/);
+  assert.match(ollama, /<span>Resets in 9 days<\/span>/);
   assert.doesNotMatch(ollama, /\. ·/);
   assert.doesNotMatch(ollama, /\d%<|月用量 \d|天後重置/);
   assert.doesNotMatch(ollama, /upstream-kpi-status/);
@@ -158,7 +158,6 @@ test("an Ollama key without Included Monthly Usage says it is unavailable instea
   const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [key] })))[0];
 
   assert.match(ollama, /月用量無法取得/);
-  assert.match(ollama, /併發 1\/3/);
   assert.doesNotMatch(ollama, /NaN|null|undefined/);
   assert.doesNotMatch(ollama, /class="meter/);
 });
@@ -247,11 +246,51 @@ test("a low balance on the second OpenRouter account warns on that key's tile on
   assert.deepEqual(statuses(second), ["餘額偏低"]);
 });
 
-test("a healthy OpenRouter tile shows that key's concurrency", () => {
-  const { upstreamKpiTilesHtml } = loadKpi();
-  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: [openrouterKey({ in_flight: 2 })] })))[1];
+// A tile's in-flight light: [state class, count shown beside it, spoken label].
+function light(tile) {
+  const lbl = tile.match(/<div class="lbl">([\s\S]*?)<\/div>/)[1];
+  const m = lbl.match(/<span class="upstream-kpi-load">([^<]*)<i class="upstream-kpi-light( is-[a-z]+)?" role="img" aria-label="([^"]*)"/);
+  return m && [m[2]?.trim() ?? "", m[1], m[3]];
+}
 
-  assert.match(openrouter, /併發 2\/4/);
+test("a key with requests in flight breathes next to its label and shows in-flight/cap there", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const [ollama, openrouter] = tiles(
+    upstreamKpiTilesHtml(providers({ ollamaKeys: [ollamaKey({ in_flight: 1 })], openrouterKeys: [openrouterKey({ in_flight: 2 })] })),
+  );
+
+  assert.deepEqual(light(ollama), ["is-active", "1/3", "工作中 1/3"]);
+  assert.deepEqual(light(openrouter), ["is-active", "2/4", "工作中 2/4"]);
+});
+
+test("an idle key shows a quiet light and no count", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: [openrouterKey({ in_flight: 0 })] })))[1];
+
+  assert.deepEqual(light(openrouter), ["", "", "閒置"]);
+});
+
+test("a key at its concurrency cap shows a steady full light", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [ollamaKey({ in_flight: 3 })] })))[0];
+
+  assert.deepEqual(light(ollama), ["is-full", "3/3", "滿載 3/3"]);
+});
+
+test("a key without a concurrency cap counts its requests but is never full", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const ollama = tiles(upstreamKpiTilesHtml(providers({ ollamaKeys: [ollamaKey({ cap: null, in_flight: 5 })] })))[0];
+
+  assert.deepEqual(light(ollama), ["is-active", "5", "工作中 5"]);
+});
+
+test("concurrency is no longer repeated in a tile's sub line", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const html = upstreamKpiTilesHtml(
+    providers({ openrouterKeys: [openrouterKey({ in_flight: 2 }), openrouterKey({ index: 1, key_monthly_limit: keyMonthlyLimit(1, 20) })] }),
+  );
+
+  assert.doesNotMatch(html, /併發/);
 });
 
 // Key Monthly Limit as the pool status reports it (src/domain/extra_usage.py).
@@ -266,7 +305,7 @@ function keyMonthlyLimit(used, limit) {
   };
 }
 
-test("an OpenRouter key with a monthly cap leads with its balance and shows the cap, a meter, Resets in … and concurrency below", () => {
+test("an OpenRouter key with a monthly cap leads with its balance and shows the cap, a meter and Resets in … below", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ in_flight: 1, key_monthly_limit: keyMonthlyLimit(8.2, 20) })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
@@ -274,7 +313,7 @@ test("an OpenRouter key with a monthly cap leads with its balance and shows the 
   assert.equal(label(openrouter), "OpenRouter #0");
   assert.match(openrouter, /<div class="val">餘額 \$23\.50<\/div>/);
   assert.match(openrouter, /<div class="meter"><i style="width:41%"><\/i><\/div>/);
-  assert.match(openrouter, /月上限 \$8\.20 of \$20 used · Resets in 9 days · 併發 1\/4/);
+  assert.match(openrouter, /<span>月上限 \$8\.20 of \$20 used · Resets in 9 days<\/span>/);
   assert.deepEqual(statuses(openrouter), []);
 });
 

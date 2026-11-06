@@ -1,6 +1,6 @@
 # 我的課程 keeps upstream status in a sticky left rail
 
-Status: accepted. Amended by ADR 0046 (rail on the right, 208px).
+Status: accepted. Amended by ADR 0046 (rail on the right, 208px) and ADR 0047 (in-flight light beside the label).
 
 Amends ADR 0041. 我的課程 is now two columns. The left column (260px) is the upstream status: one compact tile per key, stacked, under the heading 上游狀態. It sticks below the site header while the page scrolls, and scrolls on its own when there are more keys than fit. The right column is everything ADR 0041 describes, unchanged: course toolbar, course header with 結束課程, totals, new-class form, then one card per Class Session. The two columns share one top edge and nothing spans above them, so the page has no part that juts out to one side.
 
