@@ -16,11 +16,11 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=course-cards-f-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=redesign-d-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -159,7 +159,9 @@
           <button class="btn-secondary hidden" id="copyTeacherKeyBtn" onclick="copyText(this, lastTeacherKey)">複製 API Key</button>
         </div>
         <div id="classTab" class="hidden">
-          <section id="upstreamKpi" class="upstream-kpi-board" aria-label="上游狀態"></section>
+          <div class="class-layout">
+          <aside id="upstreamKpi" class="upstream-kpi-board" aria-label="上游狀態"></aside>
+          <div class="class-main">
           <div class="course-toolbar">
             <input id="courseSearch" placeholder="搜尋課程" oninput="onCourseFilterChange()" />
             <select id="courseStatusFilter" aria-label="課程狀態" onchange="onCourseFilterChange()">
@@ -178,6 +180,8 @@
             <button type="button" class="btn-secondary course-toolbar-template" onclick="beginEditRouterModelTemplate()">預設模型設定</button>
           </div>
           <div id="courseDetail"><p class="hint">請選擇課程</p></div>
+          </div>
+          </div>
         </div>
         <div id="monitorTab" class="hidden">
           <div id="upstreamPools" class="upstream-pools">
@@ -1463,60 +1467,6 @@
       return typeof value === 'number' && Number.isFinite(value) ? value : null;
     }
 
-    function upstreamKpiLineHtml(providers) {
-      const status = upstreamKpiStatus;
-      const warnIcon = 'fa-triangle-exclamation';
-      const items = [];
-      const warnings = [];
-      for (const key of providers?.ollama_cloud?.pool?.keys || []) {
-        const fraction = upstreamKpiUsedFraction(key);
-        const name = `Ollama #${Number(key.index)}`;
-        items.push(`${name} ${upstreamKpiMonthlyUsageParts(key).summary}`);
-        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
-        else if (upstreamKpiUsageNearlyUsed(fraction)) warnings.push(status(warnIcon, `${name} 快用完`));
-      }
-      for (const key of providers?.openrouter?.pool?.keys || []) {
-        const credit = upstreamKpiCredit(key);
-        const name = `OpenRouter #${Number(key.index)}`;
-        const fraction = upstreamKpiKeyLimitFraction(key);
-        const creditText = formatAccountCreditRemaining(credit);
-        items.push(fraction == null ? `${name} ${creditText}` : `${name} ${key.key_monthly_limit.summary} · ${creditText}`);
-        // Low credit does not clear by itself the way a quarantine does, so both show.
-        if (key.quarantined) warnings.push(status('fa-ban', `${name} ${upstreamKpiQuarantineText(key)}`));
-        else if (upstreamKpiUsageNearlyUsed(fraction)) warnings.push(status(warnIcon, `${name} 快用完`));
-        if (upstreamKpiLowCredit(credit)) warnings.push(status(warnIcon, `${name} 餘額偏低`));
-      }
-      return items.map(text => `<span class="upstream-kpi-line-item">${escapeHtml(text)}</span>`).join('') + warnings.join('');
-    }
-
-    function readUpstreamKpiCollapsed(storage) {
-      try {
-        return storage?.getItem('vcr_upstream_kpi_collapsed') === '1';
-      } catch (_) {
-        return false;
-      }
-    }
-
-    function writeUpstreamKpiCollapsed(storage, collapsed) {
-      try {
-        storage?.setItem('vcr_upstream_kpi_collapsed', collapsed ? '1' : '0');
-      } catch (_) {}
-    }
-
-    // The collapsed state lives in memory for the page; storage only seeds it and is written
-    // best-effort, so the toggle still works when localStorage is blocked or full.
-    function upstreamKpiCollapseState(storage) {
-      let collapsed = readUpstreamKpiCollapsed(storage);
-      return {
-        get collapsed() { return collapsed; },
-        toggle() {
-          collapsed = !collapsed;
-          writeUpstreamKpiCollapsed(storage, collapsed);
-          return collapsed;
-        },
-      };
-    }
-
     function upstreamKpiTilesHtml(providers) {
       const status = upstreamKpiStatus;
       const warnIcon = 'fa-triangle-exclamation';
@@ -1545,7 +1495,8 @@
       };
       // Each OpenRouter key may draw from its own account, so each key shows its own
       // Account Credit Remaining (CONTEXT.md) rather than one balance for the pool.
-      // A key with a monthly cap leads with its Key Monthly Limit meter instead.
+      // The balance is always the headline; a key with a monthly cap adds its Key Monthly
+      // Limit meter and a `月上限 …` sub line below it.
       const openrouterKeys = providers?.openrouter?.pool?.keys || [];
       const openrouterTile = (key) => {
         const credit = upstreamKpiCredit(key);
@@ -1567,13 +1518,14 @@
         }
         const warn = upstreamKpiUsageNearlyUsed(fraction);
         const resets = upstreamKpiResetsText(key.key_monthly_limit);
-        // The balance stays on the sub line in every state, since the headline is the cap.
+        // The cap and its reset stay on the sub line in every state, since the headline is the balance.
         const alerts = key.quarantined
           ? quarantine('openrouter', key) + low
           : (warn ? status(warnIcon, '快用完') : '') + low;
-        const details = alerts ? [resets, creditText] : [resets, creditText, concurrency];
+        const cap = `月上限 ${key.key_monthly_limit.summary}`;
+        const details = alerts ? [cap, resets] : [cap, resets, concurrency];
         const sub = `${alerts}<span>${escapeHtml(details.filter(Boolean).join(' · '))}</span>`;
-        return tile(key.key_monthly_limit.summary, false, upstreamKpiMeterHtml(fraction, warn), sub);
+        return tile(creditText, credit == null, upstreamKpiMeterHtml(fraction, warn), sub);
       };
       return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
     }
@@ -1623,34 +1575,14 @@
         board.innerHTML = '<p class="hint">目前沒有設定併發上限的上游</p>';
         return;
       }
-      const collapsed = upstreamKpiCollapse().collapsed;
-      const toggle = `<button type="button" class="upstream-kpi-toggle" data-upstream-kpi-toggle aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展開儀表板 <i class="fas fa-chevron-down" aria-hidden="true"></i>' : '收合成一行 <i class="fas fa-chevron-up" aria-hidden="true"></i>'}</button>`;
-      board.classList.toggle('is-collapsed', collapsed);
-      board.innerHTML = collapsed
-        ? `<div class="upstream-kpi-line"><span class="upstream-kpi-line-title">上游狀態</span>${upstreamKpiLineHtml(providers)}${toggle}</div>`
-        : `<div class="upstream-kpi-head"><span>上游狀態</span>${toggle}</div>
-          <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers)}</div>`;
-    }
-
-    function upstreamKpiStorage() {
-      try { return window.localStorage; } catch (_) { return null; }
-    }
-
-    let upstreamKpiCollapseStateForPage = null;
-    function upstreamKpiCollapse() {
-      if (!upstreamKpiCollapseStateForPage) upstreamKpiCollapseStateForPage = upstreamKpiCollapseState(upstreamKpiStorage());
-      return upstreamKpiCollapseStateForPage;
+      board.innerHTML = `<div class="upstream-kpi-head">上游狀態</div>
+        <div class="upstream-kpi-grid">${upstreamKpiTilesHtml(providers)}</div>`;
     }
 
     function bindUpstreamKpiBoard(board) {
       if (board.dataset.bound) return;
       board.dataset.bound = '1';
       board.addEventListener('click', async (event) => {
-        if (event.target.closest('[data-upstream-kpi-toggle]')) {
-          upstreamKpiCollapse().toggle();
-          renderUpstreamKpi();
-          return;
-        }
         const btn = event.target.closest('.upstream-quarantine-release');
         if (!btn) return;
         const provider = btn.getAttribute('data-provider');

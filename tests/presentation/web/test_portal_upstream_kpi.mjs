@@ -43,10 +43,6 @@ function loadKpi() {
     "upstreamKpiQuarantineText",
     "upstreamKpiCredit",
     "upstreamKpiTilesHtml",
-    "upstreamKpiLineHtml",
-    "readUpstreamKpiCollapsed",
-    "writeUpstreamKpiCollapsed",
-    "upstreamKpiCollapseState",
   ];
   const context = {};
   vm.createContext(context);
@@ -192,16 +188,12 @@ test("a quarantined OpenRouter key shows 隔離中 N 分 and a Quarantine Releas
 });
 
 test("a quarantined OpenRouter key low on credit shows both 隔離中 and 餘額偏低", () => {
-  const { upstreamKpiTilesHtml, upstreamKpiLineHtml } = loadKpi();
+  const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, account_credit_remaining: 1 })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
   assert.deepEqual(statuses(openrouter), ["隔離中 1 分", "餘額偏低"]);
   assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
-  assert.deepEqual(statuses(upstreamKpiLineHtml(providers({ ollamaKeys: [], openrouterKeys: keys }))), [
-    "OpenRouter #0 隔離中 1 分",
-    "OpenRouter #0 餘額偏低",
-  ]);
 });
 
 test("each OpenRouter key gets its own tile with its own Account Credit Remaining", () => {
@@ -265,15 +257,15 @@ function keyMonthlyLimit(used, limit) {
   };
 }
 
-test("an OpenRouter key with a monthly cap shows $X of $Y used, a meter, Resets in …, its balance and concurrency", () => {
+test("an OpenRouter key with a monthly cap leads with its balance and shows the cap, a meter, Resets in … and concurrency below", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [openrouterKey({ in_flight: 1, key_monthly_limit: keyMonthlyLimit(8.2, 20) })];
   const openrouter = tiles(upstreamKpiTilesHtml(providers({ openrouterKeys: keys })))[1];
 
   assert.match(openrouter, /OpenRouter #0/);
-  assert.match(openrouter, /<div class="val">\$8\.20 of \$20 used<\/div>/);
+  assert.match(openrouter, /<div class="val">餘額 \$23\.50<\/div>/);
   assert.match(openrouter, /<div class="meter"><i style="width:41%"><\/i><\/div>/);
-  assert.match(openrouter, /Resets in 9 days · 餘額 \$23\.50 · 併發 1\/4/);
+  assert.match(openrouter, /月上限 \$8\.20 of \$20 used · Resets in 9 days · 併發 1\/4/);
   assert.deepEqual(statuses(openrouter), []);
 });
 
@@ -287,12 +279,13 @@ test("an OpenRouter key at 90% of its monthly cap shows 快用完, and a low bal
 
   assert.deepEqual(statuses(nearlyUsed), ["快用完"]);
   assert.match(nearlyUsed, /meter warn/);
-  assert.match(nearlyUsed, /Resets in 9 days · 餘額 \$23\.50</);
+  assert.match(nearlyUsed, /<div class="val">餘額 \$23\.50<\/div>/);
+  assert.match(nearlyUsed, /月上限 \$18 of \$20 used · Resets in 9 days</);
   assert.deepEqual(statuses(lowCredit), ["餘額偏低"]);
   assert.doesNotMatch(lowCredit, /meter warn/);
 });
 
-test("a quarantined OpenRouter key with a monthly cap keeps its reset and balance beside 隔離中", () => {
+test("a quarantined OpenRouter key with a monthly cap keeps its balance, cap and reset beside 隔離中", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const keys = [
     openrouterKey({ quarantined: true, quarantine_remaining_sec: 60, key_monthly_limit: keyMonthlyLimit(18, 20) }),
@@ -301,7 +294,8 @@ test("a quarantined OpenRouter key with a monthly cap keeps its reset and balanc
 
   assert.deepEqual(statuses(openrouter), ["隔離中 1 分"]);
   assert.deepEqual(releaseButtons(openrouter), ["openrouter|0"]);
-  assert.match(openrouter, /Resets in 9 days · 餘額 \$23\.50</);
+  assert.match(openrouter, /<div class="val">餘額 \$23\.50<\/div>/);
+  assert.match(openrouter, /月上限 \$18 of \$20 used · Resets in 9 days</);
 });
 
 test("an OpenRouter key without a monthly cap keeps the balance tile and draws no meter", () => {
@@ -313,18 +307,6 @@ test("an OpenRouter key without a monthly cap keeps the balance tile and draws n
   assert.doesNotMatch(openrouter, /class="meter|used|月用量無法取得/);
 });
 
-test("the collapsed line shows an OpenRouter key's monthly cap beside its balance", () => {
-  const { upstreamKpiLineHtml } = loadKpi();
-  const keys = [
-    openrouterKey({ key_monthly_limit: keyMonthlyLimit(8.2, 20) }),
-    openrouterKey({ index: 1, key_monthly_limit: keyMonthlyLimit(19, 20) }),
-  ];
-  const line = upstreamKpiLineHtml(providers({ ollamaKeys: [], openrouterKeys: keys }));
-
-  assert.match(line, /OpenRouter #0 \$8\.20 of \$20 used · 餘額 \$23\.50/);
-  assert.deepEqual(statuses(line), ["OpenRouter #1 快用完"]);
-});
-
 test("the dashboard has no pool-wide concurrency tile", () => {
   const { upstreamKpiTilesHtml } = loadKpi();
   const html = upstreamKpiTilesHtml(providers({ waiting: 3 }));
@@ -333,97 +315,3 @@ test("the dashboard has no pool-wide concurrency tile", () => {
   assert.doesNotMatch(html, /<svg|無排隊|排隊 3|\/ 14/);
 });
 
-test("the collapsed line lists each key's usage or balance with no warnings when healthy", () => {
-  const { upstreamKpiLineHtml } = loadKpi();
-  const keys = [openrouterKey(), openrouterKey({ index: 1, account_credit_remaining: 41 })];
-  const line = upstreamKpiLineHtml(providers({ openrouterKeys: keys }));
-
-  assert.match(line, /Ollama #0 \$12\.40 of \$60 used/);
-  assert.doesNotMatch(line, /\d%/);
-  assert.match(line, /OpenRouter #0 餘額 \$23\.50/);
-  assert.match(line, /OpenRouter #1 餘額 \$41\.00/);
-  assert.doesNotMatch(line, /併發/);
-  assert.deepEqual(statuses(line), []);
-});
-
-test("the collapsed line keeps every warning as an icon plus text", () => {
-  const { upstreamKpiLineHtml } = loadKpi();
-  const line = upstreamKpiLineHtml(
-    providers({
-      waiting: 2,
-      ollamaKeys: [
-        ollamaKey({ included_monthly_usage: monthlyUsage(57, 60) }),
-        ollamaKey({ index: 1, quarantined: true, quarantine_remaining_sec: 600 }),
-      ],
-      openrouterKeys: [
-        openrouterKey(),
-        openrouterKey({ index: 1, account_credit_remaining: 1 }),
-        openrouterKey({ index: 2, quarantined: true, quarantine_remaining_sec: 120 }),
-      ],
-    }),
-  );
-
-  assert.deepEqual(statuses(line), [
-    "Ollama #0 快用完",
-    "Ollama #1 隔離中 10 分",
-    "OpenRouter #1 餘額偏低",
-    "OpenRouter #2 隔離中 2 分",
-  ]);
-});
-
-test("collapse state round-trips through storage", () => {
-  const { readUpstreamKpiCollapsed, writeUpstreamKpiCollapsed } = loadKpi();
-  const store = new Map();
-  const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
-
-  assert.equal(readUpstreamKpiCollapsed(storage), false);
-  writeUpstreamKpiCollapsed(storage, true);
-  assert.equal(readUpstreamKpiCollapsed(storage), true);
-  writeUpstreamKpiCollapsed(storage, false);
-  assert.equal(readUpstreamKpiCollapsed(storage), false);
-});
-
-test("a failing storage leaves the dashboard expanded and does not throw", () => {
-  const { readUpstreamKpiCollapsed, writeUpstreamKpiCollapsed } = loadKpi();
-  const broken = {
-    getItem() {
-      throw new Error("SecurityError");
-    },
-    setItem() {
-      throw new Error("QuotaExceededError");
-    },
-  };
-
-  assert.equal(readUpstreamKpiCollapsed(broken), false);
-  assert.equal(readUpstreamKpiCollapsed(undefined), false);
-  assert.doesNotThrow(() => writeUpstreamKpiCollapsed(broken, true));
-});
-
-test("the collapse toggle still works for the session when storage writes fail", () => {
-  const { upstreamKpiCollapseState } = loadKpi();
-  const broken = {
-    getItem() {
-      throw new Error("SecurityError");
-    },
-    setItem() {
-      throw new Error("QuotaExceededError");
-    },
-  };
-  const state = upstreamKpiCollapseState(broken);
-
-  assert.equal(state.collapsed, false);
-  assert.equal(state.toggle(), true);
-  assert.equal(state.collapsed, true);
-  assert.equal(state.toggle(), false);
-});
-
-test("the collapse state starts from storage and writes each toggle back", () => {
-  const { upstreamKpiCollapseState } = loadKpi();
-  const store = new Map([["vcr_upstream_kpi_collapsed", "1"]]);
-  const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
-  const state = upstreamKpiCollapseState(storage);
-
-  assert.equal(state.collapsed, true);
-  state.toggle();
-  assert.equal(store.get("vcr_upstream_kpi_collapsed"), "0");
-});
