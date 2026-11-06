@@ -2318,3 +2318,35 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
 def test_the_old_model_editor_prototype_is_gone(tmp_path):
     client, _, _ = _client(tmp_path)
     assert client.get("/portal/prototype/model-editor").status_code == 404
+
+
+TYPE_SCALE_PX = {12, 14, 16, 20, 24, 32}
+SPACING_SCALE_PX = {0, 4, 8, 12, 16, 24, 32}
+
+
+def test_portal_css_font_sizes_sit_on_the_type_scale(tmp_path):
+    # ADR 0045 / design-system SKILL.md: type scale 12/14/16/20/24/32, in px.
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    off_scale = [
+        value
+        for value in re.findall(r"font-size:\s*([^;}\n]+)", css)
+        if not (value.strip().endswith("px") and int(value.strip()[:-2]) in TYPE_SCALE_PX)
+    ]
+    assert off_scale == []
+
+
+def test_portal_css_spacing_sits_on_the_spacing_scale(tmp_path):
+    # Spacing scale 4/8/12/16/24/32. 1px hairlines and layout offsets above 32px are exempt;
+    # rem/em spacing is not allowed.
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    off_scale = []
+    for prop, value in re.findall(r"\b((?:row-|column-)?gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?):\s*([^;}\n]+)", css):
+        for number, unit in re.findall(r"(-?\d*\.?\d+)(px|rem|em)\b", value):
+            size = abs(float(number))
+            if unit != "px":
+                off_scale.append(f"{prop}: {value.strip()}")
+            elif size not in SPACING_SCALE_PX and size != 1 and size <= 32:
+                off_scale.append(f"{prop}: {value.strip()}")
+    assert off_scale == []
