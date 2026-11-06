@@ -310,13 +310,14 @@ def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
-    assert "--accent: #007070" in css
-    assert "--bg-base: #f3f7f7" in css
-    assert "--code-text: #0f172a" in css
+    # Monochrome shadcn tokens (ADR 0045): black on white, white on near-black.
+    assert "--accent: #111111" in css
+    assert "--bg-base: #ffffff" in css
+    assert "--code-text: #111827" in css
     assert 'data-theme="dark"' in css
-    assert "--accent: #4f46e5" in css
-    assert "--bg-base: #020617" in css
-    assert "--code-text: #d7f5e9" in css
+    assert "--accent: #fafafa" in css
+    assert "--bg-base: #0a0a0a" in css
+    assert "--code-text: #e4e4e7" in css
     assert "color: var(--code-text)" in css
     assert "color: #d7f5e9" not in css
 
@@ -373,15 +374,17 @@ def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path)
     assert light, "missing .oauth-btn rule"
     assert light_hover, "missing .oauth-btn:hover rule"
     assert "background: var(--accent)" in light.group(1)
-    assert "color: white" in light.group(1)
+    assert "color: var(--accent-fg)" in light.group(1)
     assert "box-shadow: var(--btn-shadow)" in light.group(1)
     assert "background: var(--accent-hover)" in light_hover.group(1)
     assert "transform: translateY(-2px)" in light_hover.group(1)
+    # Dark Theme: --accent is near-white and --accent-fg near-black, so the button stays white.
     assert dark, 'missing html[data-theme="dark"] .oauth-btn rule'
     assert dark_hover, 'missing html[data-theme="dark"] .oauth-btn:hover rule'
-    assert "background: white" in dark.group(1)
-    assert "color: #0f172a" in dark.group(1)
-    assert "background: #eef2ff" in dark_hover.group(1)
+    assert "background: var(--accent)" in dark.group(1)
+    assert "color: var(--accent-fg)" in dark.group(1)
+    assert "background: var(--accent-hover)" in dark_hover.group(1)
+    assert re.search(r'html\[data-theme="dark"\]\s*\{[^}]*--accent: #fafafa;[^}]*--accent-fg: #0a0a0a;', css, re.S)
 
 
 def test_portal_login_network_uses_theme_aware_colors(tmp_path):
