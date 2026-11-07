@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=login-split-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=login-dissolve-1" />
 </head>
 <body>
   <div id="loginShell">
@@ -504,13 +504,17 @@
     }
 
     /* Login Network: a 4x4-Bayer dithered swirl drawn with plain WebGL in the login brand panel.
-       Same palette on both Themes. Reduced motion draws one still frame. No WebGL: the panel's
-       solid background stays (silent degrade). */
+       Same palette on both Themes. The panel's edge that meets the login pane dissolves pixel by
+       pixel along a gentle wave, with a magenta rim on the swirl arms; the swirl calms to an eye
+       behind the brand words (ADR 0049). Reduced motion draws one still frame. No WebGL: the
+       panel's solid background stays (silent degrade). */
     const loginNetwork = (() => {
       const SWIRL_BACK = '#220011';
       const SWIRL_FRONT = '#00ffff';
+      const SWIRL_RIM = '#5c1a3d';
       const PX_SIZE = 4;
       const SPEED = 0.9;
+      const STACKED = '(max-width: 800px)';
       const VERTEX_SHADER = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
       const FRAGMENT_SHADER = `
         precision highp float;
@@ -519,7 +523,12 @@
         uniform float u_px;
         uniform vec3 u_back;
         uniform vec3 u_front;
+        uniform vec3 u_rim;
+        uniform float u_stacked;
+        uniform vec2 u_eyeCenter;
+        uniform vec2 u_eyeRadius;
         #define TWO_PI 6.28318530718
+        #define BAND 0.30
 
         float bayer4(vec2 c) {
           vec2 m = mod(floor(c), 4.0);
@@ -539,13 +548,29 @@
           float angle = 6.0 * atan(uv.y, uv.x) + 4.0 * u_time;
           float offset = pow(max(l, 1e-4), -1.2) + angle / TWO_PI;
           float shape = mix(0.0, fract(offset), smoothstep(0.0, 1.0, pow(l, 1.2)));
-          float lit = step(0.5, shape + bayer4(cell) - 0.5);
-          gl_FragColor = vec4(mix(u_back, u_front, lit), 1.0);
+          // Eye: the swirl calms to the back colour behind the brand words.
+          shape *= smoothstep(0.75, 1.35, length(((cell + 0.5) * u_px - u_eyeCenter) / u_eyeRadius));
+          float dither = bayer4(cell);
+          float lit = step(0.5, shape + dither - 0.5);
+
+          // Dissolve: edge is 0 where the panel meets the login pane (right side, or bottom when stacked).
+          vec2 cells = u_res / u_px;
+          float edge = u_stacked > 0.5 ? (cell.y + 0.5) / cells.y : 1.0 - (cell.x + 0.5) / cells.x;
+          float along = u_stacked > 0.5 ? cell.x / cells.x : cell.y / cells.y;
+          float wave = BAND * (0.15 * sin(along * 9.0 + u_time * 1.5) + 0.08 * sin(along * 23.0 - u_time));
+          float kept = clamp((edge + wave) / BAND * 1.25 - 0.25, 0.0, 1.0);
+          float alpha = step(dither, kept - 0.03);
+          // Rim: inside the band, back pixels just off a swirl arm turn magenta and turn with the arms.
+          float nearArm = step(0.5, shape + dither - 0.5 + 0.45 * (1.0 - kept));
+          vec3 color = mix(u_back, u_front, lit);
+          if (lit < 0.5 && kept < 1.0 && nearArm > 0.5) color = u_rim;
+          gl_FragColor = vec4(color * alpha, alpha);
         }
       `;
 
       let reducedMotion = false;
       let container = null;
+      let panel = null;
       let canvas = null;
       let gl = null;
       let uniforms = null;
@@ -588,10 +613,16 @@
           res: gl.getUniformLocation(program, 'u_res'),
           time: gl.getUniformLocation(program, 'u_time'),
           px: gl.getUniformLocation(program, 'u_px'),
+          stacked: gl.getUniformLocation(program, 'u_stacked'),
+          eyeCenter: gl.getUniformLocation(program, 'u_eyeCenter'),
+          eyeRadius: gl.getUniformLocation(program, 'u_eyeRadius'),
         };
         gl.uniform3fv(gl.getUniformLocation(program, 'u_back'), rgb(SWIRL_BACK));
         gl.uniform3fv(gl.getUniformLocation(program, 'u_front'), rgb(SWIRL_FRONT));
+        gl.uniform3fv(gl.getUniformLocation(program, 'u_rim'), rgb(SWIRL_RIM));
         container.appendChild(canvas);
+        // The panel's solid background gives way to the dissolving canvas only once it draws.
+        panel.classList.add('has-swirl');
         return true;
       }
 
@@ -603,6 +634,16 @@
         gl.viewport(0, 0, canvas.width, canvas.height);
         gl.uniform2f(uniforms.res, canvas.width, canvas.height);
         gl.uniform1f(uniforms.px, PX_SIZE * ratio);
+        gl.uniform1f(uniforms.stacked, window.matchMedia(STACKED).matches ? 1 : 0);
+        const title = panel.querySelector('.login-brand-title');
+        if (title) {
+          // GL y runs bottom-up.
+          const words = title.getBoundingClientRect();
+          gl.uniform2f(uniforms.eyeCenter,
+            (words.left + words.width / 2 - rect.left) * ratio,
+            (rect.bottom - words.top - words.height / 2) * ratio);
+          gl.uniform2f(uniforms.eyeRadius, (words.width / 2 + 24) * ratio, (words.height / 2 + 40) * ratio);
+        }
         if (reducedMotion) draw(0);
       }
 
@@ -631,6 +672,7 @@
         const lose = gl && gl.getExtension('WEBGL_lose_context');
         if (lose) lose.loseContext();
         if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+        if (panel) panel.classList.remove('has-swirl');
         resizeObserver = null;
         canvas = null;
         gl = null;
@@ -641,6 +683,7 @@
         start() {
           if (running) return;
           container = document.getElementById('loginNetworkRoot');
+          panel = container && container.parentNode;
           if (!container || !window.requestAnimationFrame) return;
           if (!mount()) {
             dispose();
@@ -650,6 +693,9 @@
           startedAt = performance.now();
           resizeObserver = new ResizeObserver(resize);
           resizeObserver.observe(container);
+          // The words reflow when the web font lands; the eye follows them.
+          const title = panel.querySelector('.login-brand-title');
+          if (title) resizeObserver.observe(title);
           resize();
           document.addEventListener('visibilitychange', onVisibilityChange);
           if (!reducedMotion) rafId = requestAnimationFrame(tick);
@@ -658,6 +704,7 @@
           running = false;
           dispose();
           container = null;
+          panel = null;
         },
         init() {
           reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
