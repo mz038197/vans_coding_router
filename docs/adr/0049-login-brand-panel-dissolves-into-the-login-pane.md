@@ -9,7 +9,7 @@ Amends ADR 0048. The hard edge between the login brand panel and the login pane 
 - **Eye.** The swirl calms to the back colour inside an ellipse around "Vans Coding Router", so the white words sit on a quiet ground. The ellipse is measured from the words and follows them when they reflow.
 - **Layout.** The panel widens to 1.35fr against the pane's 1fr. While the swirl draws, the panel is transparent and pads its pane side by 17% of its own width, so the words clear the wave of the dissolve band. Stacked, it pads its bottom by 12vh instead, so the words stay above the dissolving bottom edge. Without WebGL the panel keeps its solid `#220011` background, unpadded (silent degrade, as before).
 
-Chosen from prototype variants on the `prototype/login-dissolve` branch: variant A2c-T1 (`/portal?variant=A2c-T1`).
+Chosen from prototype variants at commit `680aa77` (the deleted local branch `prototype/login-dissolve`; recover with `git branch prototype/login-dissolve 680aa77`): variant A2c-T1 (`/portal?variant=A2c-T1`).
 
 ## Considered Options
 

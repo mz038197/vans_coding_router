@@ -6,7 +6,7 @@ Supersedes ADR 0002 and amends ADR 0045. The Portal login shell is a split page 
 
 The Login Network is now a swirl shaded with a 4x4 Bayer dither, drawn with plain WebGL. It has no Three.js and no CDN load. Its palette is fixed at `#220011` / `#00ffff` on both Themes. Only the small dither accent above 歡迎回來 and the sign-in button's focus ring follow the Theme; they reuse the two swirl colours. With reduced motion it draws one still frame. Without WebGL the panel keeps its `#220011` background (silent degrade, as before).
 
-Chosen from prototype variants on the `prototype/login-swirl` branch: variant B4 (`/portal?variant=B4`). It was iterated to its final form there, with the logo moved above the brand words.
+Chosen from prototype variants at commit `3e170cc` (the deleted local branch `prototype/login-swirl`; recover with `git branch prototype/login-swirl 3e170cc`): variant B4 (`/portal?variant=B4`). It was iterated to its final form there, with the logo moved above the brand words.
 
 ## Considered Options
 
