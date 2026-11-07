@@ -1,5 +1,7 @@
 # A service role connects to its own database only
 
+Status: accepted. Amended by ADR 0080 (the key check is the cut before the table move).
+
 On 2026-10-08 the Neon project VCRouter-db had one production branch and one role, `neondb_owner`, owning both `neondb` and `vans_signals`. The router, vans-mcp-server, pokemon-world-mcp's connection to the router, and vans-signals all use that role. The game data is the other Neon project, `pokemon_world_db`.
 
 `vans_mcp_server_app` can connect to `vans_mcp_server` and cannot connect to `neondb`. `vans_signals_app` can connect to `vans_signals` and cannot connect to `neondb`. `vans_coding_router_app` can connect to `neondb` and cannot connect to `vans_signals` or `vans_mcp_server`. A new role name is not enough. Neon may grant CONNECT to PUBLIC, and a role made in the console may be a member of `neon_superuser`. CONNECT is revoked from PUBLIC on these databases. Each service role is not a superuser and is not a member of `neon_superuser`. On its own database it may create objects in `public` and read and write them. Acceptance for `vans_mcp_server_app` and `vans_signals_app` is a real connection attempt to `neondb` that is refused. Acceptance for the router role is a real connection attempt to `vans_signals` and to `vans_mcp_server`, both refused. `neondb_owner` stays an admin account and is not placed in a running service.
