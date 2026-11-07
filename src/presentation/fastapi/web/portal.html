@@ -550,8 +550,8 @@
           float shape = mix(0.0, fract(offset), smoothstep(0.0, 1.0, pow(l, 1.2)));
           // Eye: the swirl calms to the back colour behind the brand words.
           shape *= smoothstep(0.75, 1.35, length(((cell + 0.5) * u_px - u_eyeCenter) / u_eyeRadius));
-          float b = bayer4(cell);
-          float lit = step(0.5, shape + b - 0.5);
+          float dither = bayer4(cell);
+          float lit = step(0.5, shape + dither - 0.5);
 
           // Dissolve: edge is 0 where the panel meets the login pane (right side, or bottom when stacked).
           vec2 cells = u_res / u_px;
@@ -559,9 +559,9 @@
           float along = u_stacked > 0.5 ? cell.x / cells.x : cell.y / cells.y;
           float wave = BAND * (0.15 * sin(along * 9.0 + u_time * 1.5) + 0.08 * sin(along * 23.0 - u_time));
           float kept = clamp((edge + wave) / BAND * 1.25 - 0.25, 0.0, 1.0);
-          float alpha = step(b, kept - 0.03);
+          float alpha = step(dither, kept - 0.03);
           // Rim: inside the band, back pixels just off a swirl arm turn magenta and turn with the arms.
-          float nearArm = step(0.5, shape + b - 0.5 + 0.45 * (1.0 - kept));
+          float nearArm = step(0.5, shape + dither - 0.5 + 0.45 * (1.0 - kept));
           vec3 color = mix(u_back, u_front, lit);
           if (lit < 0.5 && kept < 1.0 && nearArm > 0.5) color = u_rim;
           gl_FragColor = vec4(color * alpha, alpha);
@@ -570,6 +570,7 @@
 
       let reducedMotion = false;
       let container = null;
+      let panel = null;
       let canvas = null;
       let gl = null;
       let uniforms = null;
@@ -621,7 +622,7 @@
         gl.uniform3fv(gl.getUniformLocation(program, 'u_rim'), rgb(SWIRL_RIM));
         container.appendChild(canvas);
         // The panel's solid background gives way to the dissolving canvas only once it draws.
-        container.parentNode.classList.add('has-swirl');
+        panel.classList.add('has-swirl');
         return true;
       }
 
@@ -634,7 +635,7 @@
         gl.uniform2f(uniforms.res, canvas.width, canvas.height);
         gl.uniform1f(uniforms.px, PX_SIZE * ratio);
         gl.uniform1f(uniforms.stacked, window.matchMedia(STACKED).matches ? 1 : 0);
-        const title = container.parentNode.querySelector('.login-brand-title');
+        const title = panel.querySelector('.login-brand-title');
         if (title) {
           // GL y runs bottom-up.
           const words = title.getBoundingClientRect();
@@ -671,7 +672,7 @@
         const lose = gl && gl.getExtension('WEBGL_lose_context');
         if (lose) lose.loseContext();
         if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
-        if (container && container.parentNode) container.parentNode.classList.remove('has-swirl');
+        if (panel) panel.classList.remove('has-swirl');
         resizeObserver = null;
         canvas = null;
         gl = null;
@@ -682,6 +683,7 @@
         start() {
           if (running) return;
           container = document.getElementById('loginNetworkRoot');
+          panel = container && container.parentNode;
           if (!container || !window.requestAnimationFrame) return;
           if (!mount()) {
             dispose();
@@ -692,7 +694,7 @@
           resizeObserver = new ResizeObserver(resize);
           resizeObserver.observe(container);
           // The words reflow when the web font lands; the eye follows them.
-          const title = container.parentNode.querySelector('.login-brand-title');
+          const title = panel.querySelector('.login-brand-title');
           if (title) resizeObserver.observe(title);
           resize();
           document.addEventListener('visibilitychange', onVisibilityChange);
@@ -702,6 +704,7 @@
           running = false;
           dispose();
           container = null;
+          panel = null;
         },
         init() {
           reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

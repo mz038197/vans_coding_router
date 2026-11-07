@@ -267,8 +267,8 @@
     }
 
     /* While the swirl draws, its outer 30% dissolves into the login pane (ADR 0049): the panel
-       turns see-through and the brand words centre in the part that stays whole. Padding %
-       resolves against the split's width, of which the panel is 1.35/2.35, so 17% ≈ 30% of it. */
+       turns see-through and the brand words shift toward the part that stays whole. The padding
+       (a grid item's %, so 17% of the panel) is tuned so the words just clear the wave. */
     .login-brand-panel.has-swirl {
       background: transparent;
       padding-right: 17%;
