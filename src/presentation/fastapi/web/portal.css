@@ -248,7 +248,7 @@
 
     .login-split {
       display: grid;
-      grid-template-columns: 1.15fr 1fr;
+      grid-template-columns: 1.35fr 1fr;
       min-height: 100vh;
       background-color: var(--bg-base);
     }
@@ -264,6 +264,14 @@
       padding: 48px 16px;
       /* Swirl back colour: also what shows when WebGL is unavailable. */
       background: #220011;
+    }
+
+    /* While the swirl draws, its outer 30% dissolves into the login pane (ADR 0049): the panel
+       turns see-through and the brand words centre in the part that stays whole. Padding %
+       resolves against the split's width, of which the panel is 1.35/2.35, so 17% ≈ 30% of it. */
+    .login-brand-panel.has-swirl {
+      background: transparent;
+      padding-right: 17%;
     }
 
     .login-network-canvas {
@@ -366,6 +374,8 @@
     @media (max-width: 800px) {
       .login-split { grid-template-columns: 1fr; }
       .login-brand-panel { min-height: 40vh; }
+      /* Stacked, the bottom edge dissolves instead. */
+      .login-brand-panel.has-swirl { padding-right: 16px; padding-bottom: 12vh; }
       .login-pane { justify-content: flex-start; padding: 32px 16px 48px; }
     }
 
