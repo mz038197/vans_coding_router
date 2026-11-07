@@ -283,7 +283,6 @@
       width: clamp(44px, 4.5vw, 60px);
       height: clamp(44px, 4.5vw, 60px);
       margin-bottom: 4px;
-      border-radius: 14px;
       box-shadow: 0 10px 30px rgba(34, 0, 17, 0.6);
     }
 

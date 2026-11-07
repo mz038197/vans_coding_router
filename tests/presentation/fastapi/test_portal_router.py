@@ -25,6 +25,7 @@ def _settings(
     google_client_id: str = "",
     google_client_secret: str = "",
     dev_auth_enabled: bool = True,
+    open_registration: bool = True,
 ) -> RouterSettings:
     return RouterSettings(
         path=str(tmp_path / "router.yaml"),
@@ -37,6 +38,7 @@ def _settings(
             google_client_id=google_client_id,
             google_client_secret=google_client_secret,
             dev_auth_enabled=dev_auth_enabled,
+            open_registration=open_registration,
         ),
     )
 
@@ -106,6 +108,7 @@ def test_auth_config_reports_oauth_disabled(tmp_path):
         "oauth_enabled": False,
         "redirect_uri": None,
         "public_url": "http://testserver",
+        "open_registration": True,
     }
 
 
@@ -117,7 +120,13 @@ def test_auth_config_reports_oauth_enabled(tmp_path):
         "oauth_enabled": True,
         "redirect_uri": "http://testserver/auth/google/callback",
         "public_url": "http://testserver",
+        "open_registration": True,
     }
+
+
+def test_auth_config_reports_closed_registration(tmp_path):
+    client, _, _ = _client(tmp_path, open_registration=False)
+    assert client.get("/auth/config").json()["open_registration"] is False
 
 
 def test_portal_brand_logo_served(tmp_path):
@@ -128,7 +137,7 @@ def test_portal_brand_logo_served(tmp_path):
     assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
+def test_portal_page_uses_brand_logo_in_login_panel_and_app_nav(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     assert html.count('src="/portal/static/brand-logo.png"') == 2
@@ -139,8 +148,10 @@ def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
 def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
+    toggle = r"<button[^>]*data-theme-toggle"
     # One toggle on the login shell, one on the app shell.
-    assert html.count("data-theme-toggle aria-label") == 2
+    assert len(re.findall(toggle, _login_shell(html))) == 1
+    assert len(re.findall(toggle, html)) == 2
     assert "portal-theme" in html
     assert 'data-theme' in html
 
@@ -405,6 +416,8 @@ def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
     assert "<h1>歡迎回來</h1>" in pane
     assert "Vans Coding" not in pane
     assert "/auth/google/login" in pane
+    # Only shown when /auth/config says registration is open.
+    assert 'id="loginHint" class="login-hint hidden"' in pane
 
 
 def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):

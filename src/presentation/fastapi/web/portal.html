@@ -51,7 +51,7 @@
           <button onclick="login()">開發模式登入</button>
           <p class="dev-note">僅在未設定 Google OAuth 時可用，請勿在正式環境使用。</p>
         </div>
-        <p class="login-hint">第一次登入會自動建立帳號</p>
+        <p id="loginHint" class="login-hint hidden">第一次登入會自動建立帳號</p>
       </section>
     </main>
   </div>
@@ -1152,6 +1152,7 @@
       if (config.public_url) portalPublicUrl = config.public_url;
       document.getElementById('oauthLogin').classList.toggle('hidden', !config.oauth_enabled);
       document.getElementById('devLogin').classList.toggle('hidden', config.oauth_enabled);
+      document.getElementById('loginHint').classList.toggle('hidden', !config.open_registration);
       if (!document.getElementById('loginShell').classList.contains('hidden')) {
         startLoginNetwork();
       }

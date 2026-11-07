@@ -329,6 +329,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             "oauth_enabled": oauth.is_configured(),
             "redirect_uri": oauth.redirect_uri if oauth.is_configured() else None,
             "public_url": settings.public_url.rstrip("/"),
+            "open_registration": portal_use_case.settings.auth.open_registration,
         }
 
     @router.get("/auth/google/login")
