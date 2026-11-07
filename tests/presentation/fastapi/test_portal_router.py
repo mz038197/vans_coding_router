@@ -25,6 +25,7 @@ def _settings(
     google_client_id: str = "",
     google_client_secret: str = "",
     dev_auth_enabled: bool = True,
+    open_registration: bool = True,
 ) -> RouterSettings:
     return RouterSettings(
         path=str(tmp_path / "router.yaml"),
@@ -37,6 +38,7 @@ def _settings(
             google_client_id=google_client_id,
             google_client_secret=google_client_secret,
             dev_auth_enabled=dev_auth_enabled,
+            open_registration=open_registration,
         ),
     )
 
@@ -106,6 +108,7 @@ def test_auth_config_reports_oauth_disabled(tmp_path):
         "oauth_enabled": False,
         "redirect_uri": None,
         "public_url": "http://testserver",
+        "open_registration": True,
     }
 
 
@@ -117,7 +120,13 @@ def test_auth_config_reports_oauth_enabled(tmp_path):
         "oauth_enabled": True,
         "redirect_uri": "http://testserver/auth/google/callback",
         "public_url": "http://testserver",
+        "open_registration": True,
     }
+
+
+def test_auth_config_reports_closed_registration(tmp_path):
+    client, _, _ = _client(tmp_path, open_registration=False)
+    assert client.get("/auth/config").json()["open_registration"] is False
 
 
 def test_portal_brand_logo_served(tmp_path):
@@ -128,7 +137,7 @@ def test_portal_brand_logo_served(tmp_path):
     assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
+def test_portal_page_uses_brand_logo_in_login_panel_and_app_nav(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     assert html.count('src="/portal/static/brand-logo.png"') == 2
@@ -139,8 +148,10 @@ def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
 def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert html.count('class="nav-theme-toggle"') == 2
-    assert 'data-theme-toggle' in html
+    toggle = r"<button[^>]*data-theme-toggle"
+    # One toggle on the login shell, one on the app shell.
+    assert len(re.findall(toggle, _login_shell(html))) == 1
+    assert len(re.findall(toggle, html)) == 2
     assert "portal-theme" in html
     assert 'data-theme' in html
 
@@ -387,18 +398,38 @@ def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path)
     assert re.search(r'html\[data-theme="dark"\]\s*\{[^}]*--accent: #fafafa;[^}]*--accent-fg: #0a0a0a;', css, re.S)
 
 
-def test_portal_login_network_uses_theme_aware_colors(tmp_path):
+def _login_shell(html: str) -> str:
+    start = html.index('<div id="loginShell">')
+    return html[start:html.index('id="appShell"', start)]
+
+
+def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
+    client, _, _ = _client(tmp_path)
+    shell = _login_shell(client.get("/portal").text)
+    assert "site-nav" not in shell
+    assert "data-theme-toggle" in shell
+    panel = shell[shell.index('class="login-brand-panel"'):shell.index('id="login"')]
+    assert 'id="loginNetworkRoot"' in panel
+    assert "/portal/static/brand-logo.png" in panel
+    assert "Vans Coding<br>Router" in panel
+    pane = shell[shell.index('id="login"'):]
+    assert "<h1>歡迎回來</h1>" in pane
+    assert "Vans Coding" not in pane
+    assert "/auth/google/login" in pane
+    # Only shown when /auth/config says registration is open.
+    assert 'id="loginHint" class="login-hint hidden"' in pane
+
+
+def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert 'id="loginNetworkRoot"' in html
-    assert "themeLook" in html
-    assert "ShaderMaterial" in html
+    assert "three.min.js" not in html
+    assert "getContext('webgl'" in html
+    assert "bayer4" in html
+    # Same swirl palette on both Themes.
+    assert "'#220011'" in html
+    assert "'#00ffff'" in html
     assert "prefers-reduced-motion" in html
-    # Light Theme Login Network: brighter cyan-teal on light field
-    assert "g: 0.92" in html
-    assert "intensity: 1.65" in html
-    # Dark Theme Login Network: white / full tint
-    assert "r: 1.0, g: 1.0, b: 1.0" in html
 
 
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
@@ -2328,6 +2359,8 @@ def test_portal_css_font_sizes_sit_on_the_type_scale(tmp_path):
     # ADR 0045 / design-system SKILL.md: type scale 12/14/16/20/24/32, in px.
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
+    # ADR 0048: the login brand panel's product name is display type, above the scale on purpose.
+    css = re.sub(r"\.login-brand-title\s*\{[^}]*\}", "", css)
     off_scale = []
     for value in re.findall(r"font-size:\s*([^;}\n]+)", css):
         size = value.replace("!important", "").strip()

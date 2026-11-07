@@ -21,4 +21,4 @@ Every page that loads `portal.css` (Portal, Agent Lobby, the login page) now dra
 
 - Every font size in `portal.css` is on the 12/14/16/20/24/32 scale and every gap, padding and margin on the 4/8/12/16/24/32 scale; each old value went to the nearest step, a tie to the smaller one, and a non-zero gap never to 0. 1px hairlines and layout offsets above 32px (the header clearance) are exempt. A portal CSS test enforces both scales.
 - The Router Model Template editor keeps its gold frame, because the frame is what tells it apart from a sitting's settings, not decoration.
-- The login page's animated background shader is unchanged.
+- The login page's animated background shader is unchanged. (ADR 0048 later replaced it and exempts the login brand name from the type scale.)
