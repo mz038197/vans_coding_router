@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.domain.auto_tier import TierSelection
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
@@ -24,6 +25,7 @@ def _settings(
     google_client_id: str = "",
     google_client_secret: str = "",
     dev_auth_enabled: bool = True,
+    open_registration: bool = True,
 ) -> RouterSettings:
     return RouterSettings(
         path=str(tmp_path / "router.yaml"),
@@ -36,6 +38,7 @@ def _settings(
             google_client_id=google_client_id,
             google_client_secret=google_client_secret,
             dev_auth_enabled=dev_auth_enabled,
+            open_registration=open_registration,
         ),
     )
 
@@ -105,6 +108,7 @@ def test_auth_config_reports_oauth_disabled(tmp_path):
         "oauth_enabled": False,
         "redirect_uri": None,
         "public_url": "http://testserver",
+        "open_registration": True,
     }
 
 
@@ -116,7 +120,13 @@ def test_auth_config_reports_oauth_enabled(tmp_path):
         "oauth_enabled": True,
         "redirect_uri": "http://testserver/auth/google/callback",
         "public_url": "http://testserver",
+        "open_registration": True,
     }
+
+
+def test_auth_config_reports_closed_registration(tmp_path):
+    client, _, _ = _client(tmp_path, open_registration=False)
+    assert client.get("/auth/config").json()["open_registration"] is False
 
 
 def test_portal_brand_logo_served(tmp_path):
@@ -127,7 +137,7 @@ def test_portal_brand_logo_served(tmp_path):
     assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
+def test_portal_page_uses_brand_logo_in_login_panel_and_app_nav(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     assert html.count('src="/portal/static/brand-logo.png"') == 2
@@ -138,8 +148,10 @@ def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
 def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert html.count('class="nav-theme-toggle"') == 2
-    assert 'data-theme-toggle' in html
+    toggle = r"<button[^>]*data-theme-toggle"
+    # One toggle on the login shell, one on the app shell.
+    assert len(re.findall(toggle, _login_shell(html))) == 1
+    assert len(re.findall(toggle, html)) == 2
     assert "portal-theme" in html
     assert 'data-theme' in html
 
@@ -232,6 +244,27 @@ def test_portal_course_toolbar_matches_the_compact_prototype(tmp_path):
     assert "新課堂名稱" in html
 
 
+def test_portal_my_courses_shows_one_card_per_class_session(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    css = client.get("/portal/static/portal.css").text
+    class_tab = html.split('id="classTab"', 1)[1].split('id="monitorTab"', 1)[0]
+    assert class_tab.index('id="upstreamKpi"') < class_tab.index('class="course-toolbar"') < class_tab.index('id="courseDetail"')
+    panel = html[html.index("function renderCourseDetailPanel("):html.index("function monitorSessionOptionLabel(")]
+    assert panel.index("endCourseButtonHtml(course)") < panel.index('id="courseTotals"') < panel.index("session-form-compact") < panel.index('id="sessions-panel"')
+    loader = html[html.index("async function loadClassSessions("):html.index("function sessionLayoutState(")]
+    assert "renderCourseCards(" in loader
+    assert "renderSessionTable(" not in loader
+    card = html[html.index("function courseCardHtml("):html.index("function renderCourseCards(")]
+    assert "sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })" in card
+    assert "學生用量" in card
+    assert "最新紀錄" in card
+    assert "此課堂未記錄 Prompt 內容" in html
+    assert "showPromptDetail" not in card
+    assert ".course-card-body" in css
+    assert "@container (max-width: 760px)" in css
+
+
 def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
@@ -241,7 +274,7 @@ def test_portal_session_list_uses_wide_inspector_and_narrow_rows(tmp_path):
     assert "toggleSessionLayoutBand" in html
     assert "return width >= 700" in html
     assert "width >= 640" in html
-    assert "session-model-pill" in html
+    assert "session-model-list" in html
     assert "尚未勾選對話模型" in html
     assert "<th>課堂座位</th>" not in html
 
@@ -260,10 +293,10 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert "seat_limit" in html
     assert '{"seat_limit"' in html or "{ seat_limit" in html
     assert "該席仍佔用課堂座位" in html
-    fields = html[html.index("const fields = (session)"):html.index("const rowButton")]
-    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox(session)}") < fields.index('session-kicker">安裝清單')
+    fields = html[html.index("function sessionFieldsHtml("):html.index("function renderSessionTable(")]
+    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox}") < fields.index('session-kicker">安裝清單')
     assert "${sessionSeatLimitCell(classId, session)}</div>" in fields
-    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox(session)}" not in html
+    assert "${sessionSeatLimitCell(classId, session)}${redemptionBox}" not in html
     assert 'class="session-field session-field-wide session-redemptions hidden"' in html
     assert 'class="roster-nowrap"' in html
     css = client.get("/portal/static/portal.css").text
@@ -288,13 +321,14 @@ def test_portal_session_row_shows_model_allowlist_editor(tmp_path):
 def test_portal_css_defines_light_and_dark_themes(tmp_path):
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
-    assert "--accent: #007070" in css
-    assert "--bg-base: #f3f7f7" in css
-    assert "--code-text: #0f172a" in css
+    # Monochrome shadcn tokens (ADR 0045): black on white, white on near-black.
+    assert "--accent: #111111" in css
+    assert "--bg-base: #ffffff" in css
+    assert "--code-text: #111827" in css
     assert 'data-theme="dark"' in css
-    assert "--accent: #4f46e5" in css
-    assert "--bg-base: #020617" in css
-    assert "--code-text: #d7f5e9" in css
+    assert "--accent: #fafafa" in css
+    assert "--bg-base: #0a0a0a" in css
+    assert "--code-text: #e4e4e7" in css
     assert "color: var(--code-text)" in css
     assert "color: #d7f5e9" not in css
 
@@ -351,29 +385,51 @@ def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path)
     assert light, "missing .oauth-btn rule"
     assert light_hover, "missing .oauth-btn:hover rule"
     assert "background: var(--accent)" in light.group(1)
-    assert "color: white" in light.group(1)
+    assert "color: var(--accent-fg)" in light.group(1)
     assert "box-shadow: var(--btn-shadow)" in light.group(1)
     assert "background: var(--accent-hover)" in light_hover.group(1)
     assert "transform: translateY(-2px)" in light_hover.group(1)
+    # Dark Theme: --accent is near-white and --accent-fg near-black, so the button stays white.
     assert dark, 'missing html[data-theme="dark"] .oauth-btn rule'
     assert dark_hover, 'missing html[data-theme="dark"] .oauth-btn:hover rule'
-    assert "background: white" in dark.group(1)
-    assert "color: #0f172a" in dark.group(1)
-    assert "background: #eef2ff" in dark_hover.group(1)
+    assert "background: var(--accent)" in dark.group(1)
+    assert "color: var(--accent-fg)" in dark.group(1)
+    assert "background: var(--accent-hover)" in dark_hover.group(1)
+    assert re.search(r'html\[data-theme="dark"\]\s*\{[^}]*--accent: #fafafa;[^}]*--accent-fg: #0a0a0a;', css, re.S)
 
 
-def test_portal_login_network_uses_theme_aware_colors(tmp_path):
+def _login_shell(html: str) -> str:
+    start = html.index('<div id="loginShell">')
+    return html[start:html.index('id="appShell"', start)]
+
+
+def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
+    client, _, _ = _client(tmp_path)
+    shell = _login_shell(client.get("/portal").text)
+    assert "site-nav" not in shell
+    assert "data-theme-toggle" in shell
+    panel = shell[shell.index('class="login-brand-panel"'):shell.index('id="login"')]
+    assert 'id="loginNetworkRoot"' in panel
+    assert "/portal/static/brand-logo.png" in panel
+    assert "Vans Coding<br>Router" in panel
+    pane = shell[shell.index('id="login"'):]
+    assert "<h1>歡迎回來</h1>" in pane
+    assert "Vans Coding" not in pane
+    assert "/auth/google/login" in pane
+    # Only shown when /auth/config says registration is open.
+    assert 'id="loginHint" class="login-hint hidden"' in pane
+
+
+def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert 'id="loginNetworkRoot"' in html
-    assert "themeLook" in html
-    assert "ShaderMaterial" in html
+    assert "three.min.js" not in html
+    assert "getContext('webgl'" in html
+    assert "bayer4" in html
+    # Same swirl palette on both Themes.
+    assert "'#220011'" in html
+    assert "'#00ffff'" in html
     assert "prefers-reduced-motion" in html
-    # Light Theme Login Network: brighter cyan-teal on light field
-    assert "g: 0.92" in html
-    assert "intensity: 1.65" in html
-    # Dark Theme Login Network: white / full tint
-    assert "r: 1.0, g: 1.0, b: 1.0" in html
 
 
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
@@ -784,7 +840,7 @@ def test_admin_prompt_log_usage_and_delete_by_user(tmp_path):
         json={"user_ids": [user_a["id"]]},
     )
     assert delete_response.status_code == 200
-    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0}
+    assert delete_response.json() == {"deleted_live": 1, "deleted_archive": 0, "deleted_token_usage": 0}
 
     remaining = repo.list_prompt_logs(teacher["id"], klass["id"])
     assert [row["raw_prompt"] for row in remaining] == ["b log"]
@@ -841,6 +897,88 @@ def test_admin_update_class_endpoint(tmp_path):
     assert response.json()["status"] == "ended"
 
 
+def _teacher_class_status(client, repo, teacher, class_id):
+    response = client.get("/teacher/classes", cookies=_portal_cookie(repo, teacher))
+    assert response.status_code == 200
+    return next(item["status"] for item in response.json()["items"] if item["id"] == class_id)
+
+
+def test_teacher_ends_own_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ended"
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_teacher_cannot_end_another_teachers_course(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    owner = repo.upsert_google_user("owner@example.com", "Owner")
+    repo.update_user(owner["id"], role="teacher")
+    other = repo.upsert_google_user("other@example.com", "Other")
+    repo.update_user(other["id"], role="teacher")
+    klass = repo.create_class(owner["id"], "AI", None, 2)
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, other),
+        json={"status": "ended"},
+    )
+
+    assert response.status_code == 404
+    assert _teacher_class_status(client, repo, owner, klass["id"]) == "active"
+
+
+@pytest.mark.parametrize("status", ["active", "archived"])
+def test_teacher_end_course_accepts_only_ended(tmp_path, status):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    repo.set_class_status(klass["id"], "ended")
+
+    response = client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": status},
+    )
+
+    assert response.status_code == 400
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "ended"
+
+
+def test_admin_still_reopens_course_a_teacher_ended(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    admin = repo.upsert_google_user("admin@example.com", "Admin")
+    repo.update_user(admin["id"], role="admin")
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    client.patch(
+        f"/teacher/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, teacher),
+        json={"status": "ended"},
+    )
+
+    response = client.patch(
+        f"/admin/classes/{klass['id']}",
+        cookies=_portal_cookie(repo, admin),
+        json={"status": "active"},
+    )
+
+    assert response.status_code == 200
+    assert _teacher_class_status(client, repo, teacher, klass["id"]) == "active"
+
+
 def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     from src.domain.entities.auth import AuthContext
 
@@ -880,6 +1018,31 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     assert payload["items"][0]["response_preview"] == "assistant reply"
     assert payload["items"][0]["api_endpoint"] == "/v1/responses"
     assert "raw_prompt" not in payload["items"][0]
+
+
+def test_teacher_prompt_logs_carry_the_tier_name_and_confidence(tmp_path):
+    from src.domain.entities.auth import AuthContext
+
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    auth_context = AuthContext(user_id=teacher["id"], email=teacher["email"], name=teacher["name"], class_id=klass["id"])
+    repo.log_prompt(
+        auth=auth_context,
+        raw_prompt="hi",
+        final_prompt="hi",
+        model="openrouter@vendor/strong",
+        status="ok",
+        client_ip="127.0.0.1",
+        tier=TierSelection("t-strong", "進階", 0.92),
+    )
+
+    response = client.get(f"/teacher/classes/{klass['id']}/prompt-logs", cookies=_portal_cookie(repo, teacher))
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert (item["model"], item["tier_name"], item["tier_confidence"]) == ("openrouter@vendor/strong", "進階", 0.92)
 
 
 def test_prompt_logs_can_filter_by_session_id(tmp_path):
@@ -2037,18 +2200,32 @@ def _ollama_usage_router(tmp_path, monkeypatch, handler, envs: dict[str, str]):
     return client, repo
 
 
-def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeypatch):
-    def handler(request: httpx.Request) -> httpx.Response:
-        key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-        monthly = 0.125 if key == "secret-a" else 0
+def _meter_documents(request: httpx.Request, used_usd: float) -> httpx.Response:
+    from datetime import datetime, timezone
+
+    url = str(request.url)
+    if url == "https://ollama.com/api/me":
+        return httpx.Response(
+            200,
+            json={"Plan": "pro", "renews_at": "2020-01-01T00:00:00Z"},
+        )
+    if url == "https://ollama.com/api/usage?range=30d":
+        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         return httpx.Response(
             200,
             json={
-                "limits": {
-                    "monthly": {"usage": monthly, "models": []},
-                }
+                "from": "2020-01-01T00:00:00Z",
+                "buckets": [{"from": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "usage_usd": used_usd}],
             },
         )
+    return httpx.Response(404, json={"error": "unexpected"})
+
+
+def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+        used = 2.14271 if key == "secret-a" else 0
+        return _meter_documents(request, used)
 
     http, repo = _ollama_usage_router(
         tmp_path,
@@ -2060,7 +2237,10 @@ def test_teacher_upstream_pools_include_included_monthly_usage(tmp_path, monkeyp
     response = http.get("/teacher/upstream-pools", cookies=_portal_cookie(repo, teacher))
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert [item["included_monthly_usage"] for item in keys] == [0.125, 0.0]
+    assert [item["included_monthly_usage"]["summary"] for item in keys] == [
+        "$2.14 of $60 used",
+        "$0 of $60 used",
+    ]
     assert "included_weekly_usage" not in keys[0]
     assert [item["in_flight"] for item in keys] == [0, 0]
     assert [item["quarantined"] for item in keys] == [False, False]
@@ -2081,8 +2261,12 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
             if key == "or-secret-a":
                 return httpx.Response(401, json={"error": "unauthorized"})
             return httpx.Response(200, json={"data": {"total_credits": 10, "total_usage": 10.5, "limit_remaining": 1}})
-        if url == "https://ollama.com/api/usage":
-            return httpx.Response(200, json={"limits": {"monthly": {"usage": 0.25, "models": []}}})
+        if url == "https://openrouter.ai/api/v1/key":
+            if key == "or-secret-a":
+                return httpx.Response(200, json={"data": {"limit": 20, "limit_reset": "monthly", "limit_remaining": 15}})
+            return httpx.Response(200, json={"data": {"limit": None, "limit_reset": None, "limit_remaining": None}})
+        if url.startswith("https://ollama.com/api/"):
+            return _meter_documents(request, 2.5)
         return httpx.Response(404, json={"error": "unexpected"})
 
     for name, value in {
@@ -2125,10 +2309,13 @@ def test_teacher_upstream_pools_include_account_credit_remaining(tmp_path, monke
     openrouter_keys = body["providers"]["openrouter"]["pool"]["keys"]
     ollama_keys = body["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["account_credit_remaining"] for item in openrouter_keys] == [None, -0.5]
+    assert openrouter_keys[0]["key_monthly_limit"]["summary"] == "$5 of $20 used"
+    assert openrouter_keys[1]["key_monthly_limit"] is None
+    assert "key_monthly_limit" not in ollama_keys[0]
     assert "included_monthly_usage" not in openrouter_keys[1]
     assert [item["in_flight"] for item in openrouter_keys] == [0, 0]
     assert [item["quarantined"] for item in openrouter_keys] == [False, False]
-    assert ollama_keys[0]["included_monthly_usage"] == 0.25
+    assert ollama_keys[0]["included_monthly_usage"]["summary"] == "$2.50 of $60 used"
     assert "account_credit_remaining" not in ollama_keys[0]
     text = response.text
     assert "or-secret-a" not in text
@@ -2141,10 +2328,7 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
         key = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
         if key == "secret-a":
             return httpx.Response(401, json={"error": "unauthorized"})
-        return httpx.Response(
-            200,
-            json={"limits": {"monthly": {"usage": 0.08, "models": []}}},
-        )
+        return _meter_documents(request, 0.08)
 
     http, repo = _ollama_usage_router(
         tmp_path,
@@ -2157,6 +2341,55 @@ def test_teacher_upstream_pools_isolates_usage_error_per_key(tmp_path, monkeypat
     assert response.status_code == 200
     keys = response.json()["providers"]["ollama_cloud"]["pool"]["keys"]
     assert keys[0]["included_monthly_usage"] is None
-    assert keys[1]["included_monthly_usage"] == 0.08
+    assert keys[1]["included_monthly_usage"]["summary"] == "$0.08 of $60 used"
     assert [item["in_flight"] for item in keys] == [0, 0]
 
+
+
+def test_the_old_model_editor_prototype_is_gone(tmp_path):
+    client, _, _ = _client(tmp_path)
+    assert client.get("/portal/prototype/model-editor").status_code == 404
+
+
+TYPE_SCALE_PX = {12, 14, 16, 20, 24, 32}
+SPACING_SCALE_PX = {0, 4, 8, 12, 16, 24, 32}
+
+
+def test_portal_css_font_sizes_sit_on_the_type_scale(tmp_path):
+    # ADR 0045 / design-system SKILL.md: type scale 12/14/16/20/24/32, in px.
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    # ADR 0048: the login brand panel's product name is display type, above the scale on purpose.
+    css = re.sub(r"\.login-brand-title\s*\{[^}]*\}", "", css)
+    off_scale = []
+    for value in re.findall(r"font-size:\s*([^;}\n]+)", css):
+        size = value.replace("!important", "").strip()
+        if not (re.fullmatch(r"\d+(\.\d+)?px", size) and float(size[:-2]) in TYPE_SCALE_PX):
+            off_scale.append(value.strip())
+    assert off_scale == []
+
+
+def test_portal_css_spacing_sits_on_the_spacing_scale(tmp_path):
+    # Spacing scale 4/8/12/16/24/32. 1px hairlines and layout offsets above 32px are exempt;
+    # rem/em spacing is not allowed.
+    client, _, _ = _client(tmp_path)
+    css = client.get("/portal/static/portal.css").text
+    off_scale = []
+    for prop, value in re.findall(r"(?<![\w-])((?:row-|column-)?gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?):\s*([^;}\n]+)", css):
+        for number, unit in re.findall(r"(-?\d*\.?\d+)(px|rem|em)\b", value):
+            size = abs(float(number))
+            if unit != "px":
+                off_scale.append(f"{prop}: {value.strip()}")
+            elif size not in SPACING_SCALE_PX and size != 1 and size <= 32:
+                off_scale.append(f"{prop}: {value.strip()}")
+    assert off_scale == []
+
+
+def test_portal_serves_upstream_logos_as_svg(tmp_path):
+    client, _, _ = _client(tmp_path)
+    for name in ("ollama", "openrouter"):
+        response = client.get(f"/portal/static/provider-{name}.svg")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/svg+xml")
+        assert response.text.startswith("<svg")
+    assert client.get("/portal/static/provider-other.svg").status_code == 404

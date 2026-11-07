@@ -32,6 +32,19 @@ class PromptLogSettings:
     delete_after_days: int = 30
 
 
+@dataclass(frozen=True)
+class WebSearchSettings:
+    """One search key, held as a secret. The config names the env var, never the key."""
+
+    api_key_env: str = ""
+
+
+def resolve_web_search_api_key(web_search: WebSearchSettings) -> str:
+    if not web_search.api_key_env:
+        return ""
+    return os.getenv(web_search.api_key_env) or ""
+
+
 CAPABILITY_AUDIO_SPEECH = "audio_speech"
 CAPABILITY_AUDIO_TRANSCRIPTION = "audio_transcription"
 
@@ -129,6 +142,7 @@ class RouterSettings:
     prompt_logs: PromptLogSettings = field(default_factory=PromptLogSettings)
     providers: dict[str, ProviderSettings] = field(default_factory=dict)
     routing: RoutingSettings = field(default_factory=RoutingSettings)
+    web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
 
 
 def is_loopback_url(url: str) -> bool:
@@ -175,6 +189,7 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
     prompt_logs = data.get("prompt_logs") or {}
     providers = _load_providers(data.get("providers") or {})
     routing = data.get("routing") or {}
+    web_search = data.get("web_search") or {}
 
     return _apply_env_overrides(RouterSettings(
         path=str(config_path),
@@ -198,6 +213,9 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
         providers=providers,
         routing=RoutingSettings(
             default_provider=str(routing.get("default_provider", "")),
+        ),
+        web_search=WebSearchSettings(
+            api_key_env=str(web_search.get("api_key_env", "")),
         ),
     ))
 
@@ -264,6 +282,7 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
         prompt_logs=settings.prompt_logs,
         providers=settings.providers,
         routing=settings.routing,
+        web_search=settings.web_search,
     )
 
 
@@ -297,6 +316,7 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         ),
         providers=base.providers,
         routing=base.routing,
+        web_search=base.web_search,
     )
 
 

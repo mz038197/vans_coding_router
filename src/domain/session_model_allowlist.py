@@ -4,7 +4,12 @@ import copy
 import json
 from typing import Any
 
-from src.domain.model_shelf import enforce_single_shelf, is_non_text_shelf_model
+from src.domain.auto_tier import AUTO_TIER_KEY
+from src.domain.model_shelf import (
+    ROUTER_ONLY_DOCUMENT_KEYS,
+    enforce_single_shelf,
+    is_non_text_shelf_model,
+)
 
 MODEL_ALLOWLIST_UNCHANGED = object()
 SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED = object()
@@ -147,9 +152,13 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
         raise ValueError("Session Chat Language Models 必須是陣列")
     collected: list[dict[str, Any]] = []
     seen: set[str] = set()
+    router_only: dict[str, Any] = {}
     for provider in document:
         if not isinstance(provider, dict):
             raise ValueError("Session Chat Language Models 必須是一個 VCRouter customendpoint 提供者")
+        for key in ROUTER_ONLY_DOCUMENT_KEYS:
+            if key in provider and key not in router_only:
+                router_only[key] = copy.deepcopy(provider[key])
         models = provider.get("models")
         if models is None:
             continue
@@ -169,6 +178,8 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
             restenciled["url"] = VCROUTER_STENCIL["url"]
             restenciled["requestHeaders"] = copy.deepcopy(VCROUTER_STENCIL["requestHeaders"])
             enforce_single_shelf(restenciled)
+            if is_non_text_shelf_model(restenciled):
+                restenciled.pop(AUTO_TIER_KEY, None)
             collected.append(restenciled)
     return [
         {
@@ -176,6 +187,7 @@ def normalize_session_chat_language_models(document: Any) -> list[dict[str, Any]
             "vendor": VCROUTER_STENCIL["vendor"],
             "apiKey": VCROUTER_STENCIL["apiKey"],
             "apiType": VCROUTER_STENCIL["apiType"],
+            **router_only,
             "models": collected,
         }
     ]

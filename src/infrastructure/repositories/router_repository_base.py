@@ -16,7 +16,8 @@ from src.domain.decision_model import (
     decision_model_ids,
     normalize_decision_model,
 )
-from src.domain.model_shelf import omit_non_text_shelf_models, shelf_model_ids
+from src.domain.auto_tier import TierSelection, without_auto_tiers
+from src.domain.model_shelf import student_side_document, shelf_model_ids
 from src.domain.classroom_model_choice import (
     AUTOMATIC_MODELS,
     CLASSROOM_MODEL_CHOICE_UNCHANGED,
@@ -38,6 +39,14 @@ _ARCHIVE_BATCH_SIZE = 20
 
 
 class RouterRepositoryBase(ABC):
+    # Every write into token_usage (live recording and both dialects' backfills) uses this
+    # column list, in this order.
+    TOKEN_USAGE_INSERT = (
+        "INSERT INTO token_usage("
+        "user_id, class_id, session_id, model, api_endpoint, "
+        "prompt_tokens, completion_tokens, total_tokens, created_at)"
+    )
+
     def __init__(self, settings: RouterSettings):
         self.settings = settings
 
@@ -526,9 +535,7 @@ class RouterRepositoryBase(ABC):
             )
 
     def _backfill_session_chat_language_models(self, conn: Any) -> None:
-        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
-
-        document_json = dump_session_chat_language_models_json(load_vans_template())
+        document_json = self._starter_sitting_json()
         conn.execute(
             self._sql(
                 """
@@ -545,6 +552,12 @@ class RouterRepositoryBase(ABC):
         from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
         return dump_session_chat_language_models_json(load_vans_template()) or "[]"
+
+    def _starter_sitting_json(self) -> str:
+        """The starter as a sitting receives it: only a new Router Model Template gets its Auto Tiers."""
+        from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+
+        return dump_session_chat_language_models_json(without_auto_tiers(load_vans_template())) or "[]"
 
     def _ensure_router_model_template(self, conn: Any, user_id: int, roles: tuple[str, ...] | list[str]) -> None:
         if "teacher" not in roles and "admin" not in roles:
@@ -812,6 +825,7 @@ class RouterRepositoryBase(ABC):
                     """
                     SELECT k.*, u.email, u.name, u.role, u.status AS user_status,
                            s.class_id, s.expires_at AS session_expires_at, s.status AS session_status,
+                           s.session_at AS session_starts_at,
                            c.status AS class_status, c.ends_at AS class_ends_at
                     FROM api_keys k
                     JOIN users u ON u.id = k.user_id
@@ -836,6 +850,9 @@ class RouterRepositoryBase(ABC):
             # Session lifecycle is expires_at (status is a derived/legacy field).
             if row["session_id"] and session_expires_at and now >= session_expires_at:
                 return None, "expired"
+            session_starts_at = parse_dt(row["session_starts_at"])
+            if row["session_id"] and session_starts_at and now < session_starts_at:
+                return None, "not_started"
             if row["session_id"] and (
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
             ):
@@ -1005,7 +1022,7 @@ class RouterRepositoryBase(ABC):
 
         owner_template = self.get_router_model_template(int(klass["teacher_id"]))
         document_json = dump_session_chat_language_models_json(
-            owner_template if owner_template is not None else json.loads(self._starter_template_json())
+            owner_template if owner_template is not None else json.loads(self._starter_sitting_json())
         )
 
         with self._connect() as conn:
@@ -1079,7 +1096,7 @@ class RouterRepositoryBase(ABC):
         )
         data["session_chat_language_models"] = document
         data["model_allowlist"] = allowlist_from_document(
-            omit_non_text_shelf_models(document)
+            student_side_document(document)
         )
         stored = data.get("decision_model")
         data["decision_model"] = stored if isinstance(stored, str) else ""
@@ -1120,6 +1137,7 @@ class RouterRepositoryBase(ABC):
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -1136,6 +1154,7 @@ class RouterRepositoryBase(ABC):
             and tts_enabled is None
             and speech_transcription_enabled is None
             and prompt_logging_enabled is None
+            and web_search_enabled is None
             and status is None
             and course_catalog_yaml is None
             and seat_limit is None
@@ -1198,6 +1217,11 @@ class RouterRepositoryBase(ABC):
                 conn.execute(
                     self._sql("UPDATE class_sessions SET prompt_logging_enabled = ? WHERE id = ?"),
                     (self._bool_storage_value(prompt_logging_enabled), session_id),
+                )
+            if web_search_enabled is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET web_search_enabled = ? WHERE id = ?"),
+                    (self._bool_storage_value(web_search_enabled), session_id),
                 )
             if course_catalog_yaml is not None:
                 from src.domain.course_catalog import normalize_course_catalog_yaml
@@ -1277,7 +1301,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return []
-            return allowlist_from_document(omit_non_text_shelf_models(document))
+            return allowlist_from_document(student_side_document(document))
 
     def classroom_api_key_session_allowlist(
         self, api_key: str
@@ -1320,7 +1344,7 @@ class RouterRepositoryBase(ABC):
             )
             if document is None:
                 return True, []
-            return True, omit_non_text_shelf_models(document)
+            return True, student_side_document(document)
 
     def get_course_catalog_yaml_for_api_key(self, api_key: str) -> str | None:
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
@@ -1405,6 +1429,21 @@ class RouterRepositoryBase(ABC):
             )
             return decision_model_ids(document)
 
+    def get_session_chat_language_models(self, session_id: int) -> list[Any] | None:
+        """The stored Session Chat Language Models document, as saved (router-only fields kept)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                self._sql(
+                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
+                ),
+                (session_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return parse_session_chat_language_models_json(
+                row["session_chat_language_models_json"]
+            )
+
     def get_shelf_model_ids(self, session_id: int, shelf_key: str) -> list[str]:
         with self._connect() as conn:
             row = conn.execute(
@@ -1436,16 +1475,22 @@ class RouterRepositoryBase(ABC):
             return bool(int(value or 0))
 
     def is_prompt_logging_enabled(self, session_id: int) -> bool:
+        return self._session_switch(session_id, "prompt_logging_enabled", default=True)
+
+    def is_web_search_enabled(self, session_id: int) -> bool:
+        return self._session_switch(session_id, "web_search_enabled", default=False)
+
+    def _session_switch(self, session_id: int, column: str, *, default: bool) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT prompt_logging_enabled FROM class_sessions WHERE id = ?"),
+                self._sql(f"SELECT {column} FROM class_sessions WHERE id = ?"),
                 (session_id,),
             ).fetchone()
             if not row:
-                return True
-            value = row["prompt_logging_enabled"]
+                return default
+            value = row[column]
             if value is None:
-                return True
+                return default
             if isinstance(value, bool):
                 return value
             return bool(int(value or 0))
@@ -1466,6 +1511,9 @@ class RouterRepositoryBase(ABC):
         expires = parse_dt(session["expires_at"])
         if expires is None or utc_now() >= expires:
             raise ValueError("expired invite")
+        starts = parse_dt(session["session_at"])
+        if starts is not None and utc_now() < starts:
+            raise ValueError(f"課堂尚未開始，開始時間 {dt(starts)}，請在開始後再領取")
         return dict(session)
 
     def _synthetic_nickname_email(self, class_id: int, nickname: str) -> str:
@@ -1676,6 +1724,7 @@ class RouterRepositoryBase(ABC):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
+        tier: TierSelection | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -1684,9 +1733,10 @@ class RouterRepositoryBase(ABC):
                     INSERT INTO prompt_logs(
                         user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                         prompt_tokens, completion_tokens, total_tokens, client_ip, created_at,
-                        message_preview, messages_json, api_endpoint, response_preview
+                        message_preview, messages_json, api_endpoint, response_preview,
+                        tier_name, tier_confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -1706,8 +1756,54 @@ class RouterRepositoryBase(ABC):
                     messages_json,
                     api_endpoint,
                     response_preview,
+                    tier.name if tier else None,
+                    tier.confidence if tier else None,
                 ),
             )
+
+    def record_token_usage(
+        self,
+        auth: AuthContext,
+        model: str,
+        api_endpoint: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        if auth.user_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                self._sql(f"{self.TOKEN_USAGE_INSERT} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+                (
+                    auth.user_id,
+                    auth.class_id,
+                    auth.session_id,
+                    model,
+                    api_endpoint,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    dt(utc_now()),
+                ),
+            )
+
+    def _backfill_token_usage_from_prompt_logs(self, conn: Any) -> None:
+        """Run once, when the token_usage table is first created.
+
+        Copies every successful live Prompt Log. Each dialect copies its archive separately.
+        """
+        conn.execute(
+            f"""
+            {self.TOKEN_USAGE_INSERT}
+            SELECT user_id, class_id, session_id, model, COALESCE(api_endpoint, ''),
+                   COALESCE(prompt_tokens, 0), COALESCE(completion_tokens, 0),
+                   COALESCE(total_tokens, 0), created_at
+            FROM prompt_logs
+            WHERE status = 'ok' AND user_id IS NOT NULL
+            ORDER BY created_at, id
+            """
+        )
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -1715,13 +1811,14 @@ class RouterRepositoryBase(ABC):
                 self._sql(
                     """
                     SELECT u.id AS user_id, u.name, u.email,
-                           COALESCE(SUM(l.prompt_tokens), 0) AS prompt_tokens,
-                           COALESCE(SUM(l.completion_tokens), 0) AS completion_tokens,
-                           COALESCE(SUM(l.total_tokens), 0) AS total_tokens
+                           COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
+                           COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
+                           COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                           COUNT(t.id) AS request_count
                     FROM class_members m
                     JOIN users u ON u.id = m.user_id
                     JOIN classes c ON c.id = m.class_id
-                    LEFT JOIN prompt_logs l ON l.user_id = u.id AND l.class_id = m.class_id AND l.status = 'ok'
+                    LEFT JOIN token_usage t ON t.user_id = u.id AND t.class_id = m.class_id
                     WHERE m.class_id = ? AND c.teacher_id = ?
                     GROUP BY u.id, u.name, u.email
                     ORDER BY total_tokens DESC, u.name
@@ -1731,16 +1828,17 @@ class RouterRepositoryBase(ABC):
             ).fetchall()
             result = []
             for row in rows:
-                item = dict(row)
+                item = _usage_ints(dict(row))
                 sessions = conn.execute(
                     self._sql(
                         """
                         SELECT s.id AS session_id, s.invite_code,
-                               COALESCE(SUM(l.prompt_tokens), 0) AS prompt_tokens,
-                               COALESCE(SUM(l.completion_tokens), 0) AS completion_tokens,
-                               COALESCE(SUM(l.total_tokens), 0) AS total_tokens
+                               COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
+                               COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
+                               COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                               COUNT(t.id) AS request_count
                         FROM class_sessions s
-                        LEFT JOIN prompt_logs l ON l.session_id = s.id AND l.user_id = ? AND l.status = 'ok'
+                        LEFT JOIN token_usage t ON t.session_id = s.id AND t.user_id = ?
                         WHERE s.class_id = ?
                         GROUP BY s.id, s.invite_code
                         ORDER BY s.created_at DESC
@@ -1748,7 +1846,7 @@ class RouterRepositoryBase(ABC):
                     ),
                     (item["user_id"], class_id),
                 ).fetchall()
-                item["sessions"] = [dict(session) for session in sessions]
+                item["sessions"] = [_usage_ints(dict(session)) for session in sessions]
                 result.append(item)
             return result
 
@@ -1780,6 +1878,8 @@ class RouterRepositoryBase(ABC):
                 l.message_preview,
                 l.response_preview,
                 l.api_endpoint,
+                l.tier_name,
+                l.tier_confidence,
                 u.name AS user_name,
                 u.email AS user_email
             FROM prompt_logs l
@@ -1970,7 +2070,7 @@ class RouterRepositoryBase(ABC):
     def delete_prompt_logs_for_users(self, user_ids: list[int]) -> dict[str, Any]:
         ids = sorted({int(user_id) for user_id in user_ids})
         if not ids:
-            return {"deleted_live": 0, "deleted_archive": 0}
+            return {"deleted_live": 0, "deleted_archive": 0, "deleted_token_usage": 0}
         placeholders = ", ".join("?" for _ in ids)
         with self._connect() as conn:
             cur = conn.execute(
@@ -1978,10 +2078,19 @@ class RouterRepositoryBase(ABC):
                 tuple(ids),
             )
             deleted_live = int(cur.rowcount or 0)
+            cur = conn.execute(
+                self._sql(f"DELETE FROM token_usage WHERE user_id IN ({placeholders})"),
+                tuple(ids),
+            )
+            deleted_token_usage = int(cur.rowcount or 0)
         deleted_archive = self._delete_archived_for_users(ids)
         if deleted_live > 0:
             self._after_user_prompt_delete(deleted_live)
-        return {"deleted_live": deleted_live, "deleted_archive": deleted_archive}
+        return {
+            "deleted_live": deleted_live,
+            "deleted_archive": deleted_archive,
+            "deleted_token_usage": deleted_token_usage,
+        }
 
     def _archived_counts_by_user(self) -> dict[int, int]:
         raise NotImplementedError
@@ -2000,3 +2109,9 @@ class RouterRepositoryBase(ABC):
 
     def _after_archive(self, archived_count: int) -> None:
         return
+
+
+def _usage_ints(item: dict[str, Any]) -> dict[str, Any]:
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens", "request_count"):
+        item[key] = int(item[key] or 0)
+    return item

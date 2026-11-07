@@ -46,6 +46,5 @@ def sample_chat_request() -> ChatCompletionRequest:
         model="fake-model",
         messages=[ChatMessage(role="user", content="hello")],
         stream=False,
-        temperature=0.7,
-        max_tokens=16,
+        extra={"temperature": 0.7, "max_tokens": 16},
     )

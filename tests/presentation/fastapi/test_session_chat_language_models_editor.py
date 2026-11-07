@@ -99,6 +99,7 @@ def _client(
     providers=None,
     api_gateway=None,
     catalog_fetch_timeout_sec: float = 30.0,
+    catalog_retry_delays_sec: tuple[float, ...] = (0.0, 0.0),
 ):
     settings = _settings(tmp_path, providers=providers)
     repo = SqliteRouterRepository(settings.database.path, settings)
@@ -107,6 +108,7 @@ def _client(
         settings,
         llm_gateway=llm_gateway,
         catalog_fetch_timeout_sec=catalog_fetch_timeout_sec,
+        catalog_retry_delays_sec=catalog_retry_delays_sec,
     )
 
     @asynccontextmanager
@@ -232,6 +234,53 @@ def test_owner_and_admin_can_save_session_document_other_teacher_cannot(tmp_path
     )
     assert by_admin.status_code == 200
     assert by_admin.json()["session_chat_language_models"][0]["models"] == []
+
+
+def test_auto_tiers_tier_fields_and_selector_shelf_are_saved_as_given(tmp_path):
+    gateway = _catalog_gateway()
+    gateway.gateways["openrouter"].models_by_modality = {
+        "decisions": {"object": "list", "data": [{"id": "typesafe/jev-1.14", "name": "Jev"}]},
+    }
+    client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
+    teacher, klass, session = _owner_session(repo)
+    cookies = _portal_cookie(repo, teacher["id"])
+    tiers = [
+        {"id": "t-light", "name": "輕量", "description": "語法小問題"},
+        {"id": "t-strong", "name": "困難", "description": "跨檔案除錯"},
+    ]
+    jev = "openrouter@typesafe/jev-1.14"
+    document = [
+        {
+            "name": "VCRouter",
+            "vendor": "customendpoint",
+            "autoTiers": tiers,
+            "selectorShelf": [jev],
+            "models": [
+                {"id": "ollama_cloud@light:cloud", "name": "light", "autoTier": "t-light"},
+                {"id": "ollama_cloud@strong:cloud", "name": "strong", "autoTier": "t-strong"},
+                {"id": jev, "name": "jev", "decisionShelf": True},
+            ],
+        }
+    ]
+    url = f"/teacher/classes/{klass['id']}/sessions/{session['id']}"
+
+    saved = client.patch(url, cookies=cookies, json={"session_chat_language_models": document})
+    template = client.put(
+        "/teacher/router-model-template",
+        cookies=cookies,
+        json={"router_model_template": document},
+    )
+
+    assert saved.status_code == 200
+    assert template.status_code == 200
+    for stored in (
+        client.get(url, cookies=cookies).json()["session_chat_language_models"],
+        client.get("/teacher/router-model-template", cookies=cookies).json(),
+    ):
+        assert stored[0]["autoTiers"] == tiers
+        assert stored[0]["selectorShelf"] == [jev]
+        assert [m.get("autoTier") for m in stored[0]["models"]] == ["t-light", "t-strong", None]
+        assert stored[0]["models"][2]["decisionShelf"] is True
 
 
 def test_invalid_upload_is_rejected_and_stored_document_is_unchanged(tmp_path):
@@ -499,6 +548,10 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
             "object": "list",
             "data": [{"id": "openai/whisper-large-v3", "name": "Whisper"}],
         },
+        "embeddings": {
+            "object": "list",
+            "data": [{"id": "openai/text-embedding-3-small", "name": "Embed"}],
+        },
     }
     client, repo, _ = _client(tmp_path, llm_gateway=gateway, providers=_classroom_providers())
     teacher, _, _ = _owner_session(repo)
@@ -530,6 +583,16 @@ def test_upstream_model_catalog_lists_image_speech_and_transcription_shelves(tmp
     assert transcription.json()["providers"] == ["openrouter"]
     assert [item["id"] for item in transcription.json()["models"]] == [
         "openrouter@openai/whisper-large-v3"
+    ]
+
+    embeddings = client.get(
+        "/teacher/upstream-model-catalog?output_modalities=embeddings",
+        cookies=cookies,
+    )
+    assert embeddings.status_code == 200
+    assert embeddings.json()["providers"] == ["openrouter"]
+    assert [item["id"] for item in embeddings.json()["models"]] == [
+        "openrouter@openai/text-embedding-3-small"
     ]
 
 
@@ -689,12 +752,12 @@ def test_portal_session_row_shows_session_chat_language_models_editor(tmp_path):
     assert "downloadSessionChatModelsTemplate" in html
     assert "downloadCurrentSessionChatModels" in html
     assert 'id="sessionChatModelsUploadBtn"' in html
-    assert 'aria-label="下載範本"' in html
-    assert 'aria-label="下載目前清單"' in html
-    assert 'aria-label="上傳"' in html
-    assert 'aria-label="取消"' in html
-    assert 'aria-label="儲存"' in html
-    assert "model-editor-col-candidates" in html
-    assert "model-editor-col-draft" in html
+    assert 'role="menuitem" id="sessionChatModelsUploadBtn">上傳清單…' in html
+    assert "downloadSessionChatModelsTemplate()\">下載範本" in html
+    assert "downloadCurrentSessionChatModels()\">下載目前清單" in html
+    assert 'onclick="requestCloseSessionChatModelsModal()">取消' in html
+    assert 'onclick="saveSessionChatLanguageModels()">儲存' in html
+    assert 'id="modelWizardSteps"' in html
+    assert "model-editor-col" not in html
     assert "session_chat_language_models" in html
     assert 'id="sessionChatModelsJson"' not in html

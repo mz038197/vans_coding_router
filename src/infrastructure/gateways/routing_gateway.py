@@ -19,6 +19,11 @@ from src.infrastructure.routing.model_id import format_model_id, parse_model_id
 _OLLAMA_CLOUD_PROVIDER = "ollama_cloud"
 
 
+def _without_models_field(fields: dict[str, Any]) -> dict[str, Any]:
+    """`models` 讓上游改用別的模型回答，會繞過 router 對 `model` 的權限檢查，所以不轉發。"""
+    return {key: value for key, value in fields.items() if key != "models"}
+
+
 class RoutingGateway:
     def __init__(self, gateways: dict[str, LLMGatewayPort]):
         self.gateways = gateways
@@ -54,6 +59,9 @@ class RoutingGateway:
 
     async def overlay_account_credit_remaining(self, status: dict[str, Any]) -> dict[str, Any]:
         return await self._overlay_pool_attach(status, "attach_account_credit_remaining")
+
+    async def overlay_key_monthly_limit(self, status: dict[str, Any]) -> dict[str, Any]:
+        return await self._overlay_pool_attach(status, "attach_key_monthly_limit")
 
     async def _overlay_pool_attach(self, status: dict[str, Any], attach_name: str) -> dict[str, Any]:
         providers = status.get("providers")
@@ -97,20 +105,14 @@ class RoutingGateway:
         *,
         output_modalities: str | None = None,
     ) -> dict[str, Any]:
+        """One provider's model list. An upstream failure raises."""
         gateway = self.gateways.get(provider)
         if gateway is None:
-            return {
-                "object": "list",
-                "data": [],
-                "provider_errors": {provider: "unknown provider"},
-            }
-        try:
-            if provider == "openrouter" and output_modalities:
-                models = await gateway.models(output_modalities=output_modalities)
-            else:
-                models = await gateway.models()
-        except Exception as exc:
-            return {"object": "list", "data": [], "provider_errors": {provider: str(exc)}}
+            raise ValueError(f"未知 provider：{provider}")
+        if provider == "openrouter" and output_modalities:
+            models = await gateway.models(output_modalities=output_modalities)
+        else:
+            models = await gateway.models()
         data: list[dict[str, Any]] = []
         for item in models.get("data", []):
             if not isinstance(item, dict):
@@ -131,9 +133,12 @@ class RoutingGateway:
         data: list[dict[str, Any]] = []
         errors: dict[str, Any] = {}
         for name in self.gateways:
-            portion = await self.provider_models(name, output_modalities=output_modalities)
+            try:
+                portion = await self.provider_models(name, output_modalities=output_modalities)
+            except Exception as exc:
+                errors[name] = str(exc)
+                continue
             data.extend(portion.get("data") or [])
-            errors.update(portion.get("provider_errors") or {})
         result: dict[str, Any] = {"object": "list", "data": data}
         if errors:
             result["provider_errors"] = errors
@@ -172,6 +177,23 @@ class RoutingGateway:
     async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
         gateway, payload = self._resolve_decision_body(body)
         return await gateway.decisions_create(payload)
+
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        gateway, payload = self._resolve_images_body(body)
+        return await gateway.embeddings_create(payload)
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        listed = await self.models(output_modalities="embeddings")
+        data = [
+            item
+            for item in listed.get("data") or []
+            if isinstance(item, dict) and item.get("provider") == "openrouter"
+        ]
+        result: dict[str, Any] = {"object": "list", "data": data}
+        errors = listed.get("provider_errors") or {}
+        if "openrouter" in errors:
+            result["provider_errors"] = {"openrouter": errors["openrouter"]}
+        return result
 
     async def images_models(self) -> dict[str, Any]:
         listed = await self.models(output_modalities="image")
@@ -265,11 +287,11 @@ class RoutingGateway:
         provider_name, upstream_model = parse_model_id(req.model, self._known_providers())
         gateway = self.gateways[provider_name]
         upstream_model = self._normalize_upstream_model(provider_name, upstream_model)
-        return gateway, replace(req, model=upstream_model)
+        return gateway, replace(req, model=upstream_model, extra=_without_models_field(req.extra))
 
     def _resolve_responses_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        payload = dict(body)
+        payload = _without_models_field(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
 

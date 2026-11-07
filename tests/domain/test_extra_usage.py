@@ -1,9 +1,12 @@
+from datetime import datetime, timezone
+
 from src.domain.extra_usage import (
     account_credit_remaining_from_credits_payload,
     extra_usage_remaining_from_usage_payload,
-    included_monthly_usage_from_usage_payload,
+    included_monthly_usage_from_documents,
     is_credit_exhaustion,
     is_extra_usage_exhaustion,
+    key_monthly_limit_from_key_payload,
 )
 
 
@@ -121,38 +124,105 @@ def test_does_not_treat_session_weekly_or_activity_cost_as_extra_usage_remaining
     assert extra_usage_remaining_from_usage_payload(payload) is None
 
 
-def test_maps_included_monthly_usage_and_treats_zero_as_used():
-    payload = {
-        "activity": {"cost": "9.99"},
-        "extra_usage": {"remaining": 12.5},
-        "limits": {
-            "monthly": {"usage": 0.153, "models": []},
-        },
-    }
-    assert included_monthly_usage_from_usage_payload(payload) == 0.153
-    assert included_monthly_usage_from_usage_payload(
-        {"limits": {"monthly": {"usage": 0}}}
-    ) == 0.0
-    assert included_monthly_usage_from_usage_payload(
-        {"limits": {"monthly": {"usage": 1}}}
-    ) == 1.0
-
-
-def test_falls_back_to_weekly_usage_when_monthly_absent():
-    assert included_monthly_usage_from_usage_payload(
-        {"limits": {"weekly": {"usage": 0.051, "models": []}}}
-    ) == 0.051
-
-
-def test_prefers_monthly_usage_over_weekly():
-    assert included_monthly_usage_from_usage_payload(
+def test_maps_settings_meter_and_treats_zero_spend_as_used():
+    now = datetime(2026, 10, 7, 9, 22, tzinfo=timezone.utc)
+    meter = included_monthly_usage_from_documents(
         {
-            "limits": {
-                "monthly": {"usage": 0.153, "models": []},
-                "weekly": {"usage": 0.9, "models": []},
-            }
-        }
-    ) == 0.153
+            "from": "2026-09-07T00:00:00Z",
+            "buckets": [
+                {"from": "2026-09-20T00:00:00Z", "usage_usd": 18.0},
+                {"from": "2026-09-21T00:00:00Z", "usage_usd": 2.14271},
+            ],
+        },
+        {"Plan": "pro", "renews_at": "2026-01-21T01:23:55Z", "Email": "hidden@example.com"},
+        now=now,
+    )
+    assert meter["summary"] == "$2.14 of $60 used"
+    assert meter["resets"] == "Resets in 1 week."
+    assert meter["resets_at"] == "2026-10-21T01:23:55Z"
+    assert "hidden@example.com" not in str(meter)
+    zero = included_monthly_usage_from_documents(
+        {"from": "2026-09-07T00:00:00Z", "buckets": [{"from": "2026-10-01T00:00:00Z", "usage_usd": 0}]},
+        {"Plan": "max", "renews_at": "2026-10-01T00:00:00Z"},
+        now=now,
+    )
+    assert zero["summary"] == "$0 of $300 used"
+
+
+def test_recovers_anniversary_from_the_settings_meter_for_that_signup():
+    now = datetime(2026, 10, 7, 9, 22, tzinfo=timezone.utc)
+    usage = {
+        "from": "2026-09-07T00:00:00Z",
+        "buckets": [
+            {"from": "2026-09-19T00:00:00Z", "usage_usd": 5.53},
+            {"from": "2026-09-20T00:00:00Z", "usage_usd": 0.2},
+            {"from": "2026-09-21T00:00:00Z", "usage_usd": 2.14271},
+        ],
+    }
+    meter = included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "pro", "CreatedAt": "2026-01-19T06:56:45.74848Z"},
+        now=now,
+    )
+    assert meter["summary"] == "$2.14 of $60 used"
+    assert meter["resets"] == "Resets in 1 week."
+    assert meter["resets_at"] == "2026-10-21T01:23:55Z"
+    later = included_monthly_usage_from_documents(
+        {
+            "from": "2026-09-07T00:00:00Z",
+            "buckets": usage["buckets"] + [{"from": "2026-10-08T00:00:00Z", "usage_usd": 1}],
+        },
+        {"Plan": "pro", "CreatedAt": "2026-01-19T06:56:45.74848Z"},
+        now=datetime(2026, 10, 8, 9, 22, tzinfo=timezone.utc),
+    )
+    assert later["summary"] == "$3.14 of $60 used"
+    assert later["resets_at"] == "2026-10-21T01:23:55Z"
+    assert included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "pro", "CreatedAt": "2026-02-02T00:00:00Z"},
+        now=now,
+    ) is None
+
+
+def test_recovers_second_account_anniversary_from_its_settings_meter():
+    now = datetime(2026, 10, 7, 10, 6, tzinfo=timezone.utc)
+    meter = included_monthly_usage_from_documents(
+        {
+            "from": "2026-09-07T00:00:00Z",
+            "buckets": [
+                {"from": "2026-09-16T00:00:00Z", "usage_usd": 40},
+                {"from": "2026-09-17T00:00:00Z", "usage_usd": 11.15},
+            ],
+        },
+        {"Plan": "pro", "Name": "vanscoding"},
+        now=now,
+    )
+    assert meter["summary"] == "$11.15 of $60 used"
+    assert meter["resets"] == "Resets in 1 week."
+    assert meter["resets_at"] == "2026-10-17T12:02:38Z"
+
+
+def test_rejects_meter_when_plan_or_window_cannot_price_the_month():
+    now = datetime(2026, 10, 7, 9, 22, tzinfo=timezone.utc)
+    usage = {
+        "from": "2026-09-30T00:00:00Z",
+        "buckets": [{"from": "2026-10-01T00:00:00Z", "usage_usd": 1}],
+    }
+    assert included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "free", "renews_at": "2026-01-21T00:00:00Z"},
+        now=now,
+    ) is None
+    assert included_monthly_usage_from_documents(
+        usage,
+        {"Plan": "pro", "renews_at": "2026-01-21T00:00:00Z"},
+        now=now,
+    ) is None
+    assert included_monthly_usage_from_documents(
+        {"extra_usage": {"remaining": 8}},
+        {"Plan": "pro", "renews_at": "2026-01-21T00:00:00Z"},
+        now=now,
+    ) is None
 
 
 def test_does_not_treat_key_cap_or_key_usage_as_account_credit_remaining():
@@ -179,11 +249,55 @@ def test_maps_account_credit_remaining_including_zero_and_negative():
     ) == -0.5
 
 
-def test_rejects_session_only_or_out_of_range_included_usage():
-    assert included_monthly_usage_from_usage_payload(
-        {"limits": {"session": {"usage": 0.9, "models": []}}}
-    ) is None
-    assert included_monthly_usage_from_usage_payload(
-        {"limits": {"monthly": {"usage": 1.2}}}
-    ) is None
-    assert included_monthly_usage_from_usage_payload({"extra_usage": {"remaining": 8}}) is None
+def test_reset_phrase_uses_day_and_week_cutoffs():
+    usage = {
+        "from": "2026-09-01T00:00:00Z",
+        "buckets": [{"from": "2026-10-01T00:00:00Z", "usage_usd": 1}],
+    }
+    account = {"Plan": "team", "renews_at": "2026-01-15T00:00:00Z"}
+    six_days = included_monthly_usage_from_documents(
+        usage,
+        account,
+        now=datetime(2026, 10, 8, 21, 0, tzinfo=timezone.utc),
+    )
+    assert six_days["resets"] == "Resets in 6 days."
+    one_week = included_monthly_usage_from_documents(
+        usage,
+        account,
+        now=datetime(2026, 10, 4, 0, 0, tzinfo=timezone.utc),
+    )
+    assert one_week["resets"] == "Resets in 1 week."
+    assert one_week["summary"] == "$1 of $1000 used"
+
+
+def test_maps_key_monthly_limit_from_the_key_document():
+    now = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+    meter = key_monthly_limit_from_key_payload(
+        {"data": {"limit": 20, "limit_reset": "monthly", "limit_remaining": 11.8, "usage": 99.5}},
+        now=now,
+    )
+    assert meter["used_usd"] == 8.2
+    assert meter["limit_usd"] == 20.0
+    assert meter["summary"] == "$8.20 of $20 used"
+    assert meter["resets_at"] == "2026-12-01T00:00:00Z"
+    assert meter["resets"] == "Resets in 3 weeks."
+
+
+def test_key_monthly_limit_resets_on_the_first_across_a_year_end():
+    meter = key_monthly_limit_from_key_payload(
+        {"data": {"limit": 10, "limit_reset": "monthly", "limit_remaining": 10}},
+        now=datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc),
+    )
+    assert meter["summary"] == "$0 of $10 used"
+    assert meter["resets_at"] == "2027-01-01T00:00:00Z"
+    assert meter["resets"] == "Resets in 12 hours."
+
+
+def test_no_key_monthly_limit_without_a_monthly_cap_on_the_key():
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    unset = {"data": {"limit": None, "limit_reset": None, "limit_remaining": None, "usage": 6.37}}
+    weekly = {"data": {"limit": 5, "limit_reset": "weekly", "limit_remaining": 4}}
+    no_reset = {"data": {"limit": 5, "limit_reset": None, "limit_remaining": 4}}
+    credits_doc = {"data": {"total_credits": 10, "total_usage": 1}}
+    for payload in (unset, weekly, no_reset, credits_doc, {"limit": 5}, None):
+        assert key_monthly_limit_from_key_payload(payload, now=now) is None

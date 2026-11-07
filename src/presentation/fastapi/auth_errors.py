@@ -1,4 +1,4 @@
-from src.domain.errors import ApiKeyExpiredError, AppError, AuthenticationError, WrongCredentialTypeError
+from src.domain.errors import ApiKeyExpiredError, ApiKeyNotStartedError, AppError, AuthenticationError, WrongCredentialTypeError
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.infrastructure.auth.client_api_key import classify_client_api_key, normalize_api_key
 
@@ -20,6 +20,8 @@ def resolve_auth_error(api_key: str, api_key_repo: ApiKeyRepositoryPort) -> AppE
         _, failure = api_key_repo.verify_api_key_with_reason(api_key)
         if failure == "expired":
             return ApiKeyExpiredError()
+        if failure == "not_started":
+            return ApiKeyNotStartedError()
         if failure in {"invalid", "disabled", "missing"}:
             return AuthenticationError()
         return None

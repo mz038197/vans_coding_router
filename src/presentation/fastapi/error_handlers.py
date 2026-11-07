@@ -6,10 +6,13 @@ from fastapi.responses import JSONResponse
 from src.domain.errors import (
     AdminBusinessError,
     ApiKeyExpiredError,
+    ApiKeyNotStartedError,
     AppError,
     AuthenticationError,
+    EmbeddingsDisabledError,
     ImageGenerationDisabledError,
     ImageGenerationNotSupportedError,
+    InvalidJsonBodyError,
     InvalidModelIdError,
     ModelNotAllowedError,
     ServiceUnavailableError,
@@ -21,6 +24,9 @@ from src.domain.errors import (
     UpstreamBusyError,
     UpstreamServiceError,
     UnresolvedApiKeyPlaceholderError,
+    WebSearchDisabledError,
+    WebSearchRateLimitedError,
+    WebSearchUnavailableError,
     WrongCredentialTypeError,
 )
 from src.domain.extra_usage import is_key_failover_exhaustion
@@ -41,6 +47,13 @@ def _upstream_failure_reaches_the_operator(exc: UpstreamServiceError) -> bool:
         return True
     body = (exc.details or {}).get("body")
     return is_key_failover_exhaustion(exc.status_code, body)
+
+
+def _upstream_error_type(status_code: int) -> str:
+    # 上游說請求內容本身有問題時，錯在呼叫端；其餘（含 402 額度用完）仍是伺服器端的事。
+    if status_code in (400, 413, 415, 422):
+        return "invalid_request_error"
+    return "server_error"
 
 
 def log_operational_failure(method: str, path: str, exc: BaseException) -> None:
@@ -92,7 +105,10 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ApiKeyExpiredError)
-    async def handle_api_key_expired_error(request: Request, exc: ApiKeyExpiredError):
+    @app.exception_handler(ApiKeyNotStartedError)
+    async def handle_api_key_outside_session_window(
+        request: Request, exc: ApiKeyExpiredError | ApiKeyNotStartedError
+    ):
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 exc.status_code,
@@ -131,7 +147,7 @@ def register_error_handlers(app: FastAPI) -> None:
             return openai_error_response(
                 502 if exc.status_code in (401, 403) else exc.status_code,
                 exc.user_facing_message(),
-                error_type="server_error",
+                error_type=_upstream_error_type(exc.status_code),
                 code="upstream_authentication_error" if exc.status_code in (401, 403) else None,
             )
         details = exc.details or {}
@@ -193,6 +209,17 @@ def register_error_handlers(app: FastAPI) -> None:
             content={"detail": exc.message},
         )
 
+    @app.exception_handler(InvalidJsonBodyError)
+    async def handle_invalid_json_body_error(request: Request, exc: InvalidJsonBodyError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
     @app.exception_handler(ImageGenerationNotSupportedError)
     async def handle_image_generation_not_supported(request: Request, exc: ImageGenerationNotSupportedError):
         if is_openai_compatible_path(request.url.path):
@@ -200,6 +227,50 @@ def register_error_handlers(app: FastAPI) -> None:
                 exc.status_code,
                 exc.message,
                 error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(EmbeddingsDisabledError)
+    async def handle_embeddings_disabled(request: Request, exc: EmbeddingsDisabledError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchDisabledError)
+    async def handle_web_search_disabled(request: Request, exc: WebSearchDisabledError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchRateLimitedError)
+    async def handle_web_search_rate_limited(request: Request, exc: WebSearchRateLimitedError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="rate_limit_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WebSearchUnavailableError)
+    async def handle_web_search_unavailable(request: Request, exc: WebSearchUnavailableError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="server_error",
                 code=exc.code,
             )
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})

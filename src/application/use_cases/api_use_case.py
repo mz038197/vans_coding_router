@@ -7,6 +7,8 @@ from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
     AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
+    EMBEDDINGS_PATH,
+    IMAGE_ONLY_LABEL,
     IMAGES_PATH,
     RESPONSES_PATH,
     build_message_preview,
@@ -17,34 +19,53 @@ from src.infrastructure.logging.message_preview import (
     truncate_log_text,
 )
 
+from src.application.vcr_auto_selection_memory import VcrAutoSelectionMemory
+from src.application.vcr_auto_selector import VcrAutoSelector
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
+from src.domain.auto_tier import (
+    AutoTier,
+    TierSelection,
+    auto_tiers,
+    last_user_text_from_chat,
+    last_user_text_from_responses,
+    selection_tiers,
+    selector_shelf_ids,
+    tier_ordered_walk,
+)
 from src.domain.decision_model import DECISION_SHELF_KEY
 from src.domain.model_shelf import (
+    EMBEDDINGS_SHELF_KEY,
     IMAGE_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
-    omit_non_text_shelf_models,
+    student_side_document,
     shelf_model_ids,
 )
-from src.domain.classroom_model_choice import choice_accepts_model, student_list_ids
+from src.domain.classroom_model_choice import AUTOMATIC_MODELS, choice_accepts_model, student_list_ids
 from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import allowlist_from_document, is_model_allowed
 from src.domain.errors import (
     DecisionDisabledError,
+    EmbeddingsDisabledError,
     ImageGenerationDisabledError,
     ModelNotAllowedError,
     SpeechTranscriptionDisabledError,
     SpeechTranscriptionNotSupportedError,
     StatefulResponsesNotSupportedError,
     TtsDisabledError,
+    WebSearchDisabledError,
+    WebSearchRateLimitedError,
+    WebSearchUnavailableError,
 )
+from src.application.web_search_rate_limit import WebSearchRateLimiter
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
+from src.domain.ports.web_search import WebSearchPort
 
 
 class ApiUseCase:
@@ -53,10 +74,18 @@ class ApiUseCase:
         gateway: LLMGatewayPort,
         api_key_repo: ApiKeyRepositoryPort,
         logger: RequestLogPort,
+        web_search_backend: WebSearchPort | None = None,
+        web_search_limiter: WebSearchRateLimiter | None = None,
+        vcr_auto_selector: VcrAutoSelector | None = None,
+        vcr_auto_selection_memory: VcrAutoSelectionMemory | None = None,
     ):
         self.gateway = gateway
+        self.vcr_auto_selector = vcr_auto_selector or VcrAutoSelector(gateway)
+        self.vcr_auto_selection_memory = vcr_auto_selection_memory or VcrAutoSelectionMemory()
         self.api_key_repo = api_key_repo
         self.logger = logger
+        self.web_search_backend = web_search_backend
+        self.web_search_limiter = web_search_limiter or WebSearchRateLimiter()
 
     async def health(self) -> dict[str, Any]:
         return await self.gateway.health()
@@ -248,6 +277,95 @@ class ApiUseCase:
             student_list_ids(self._classroom_model_choice(auth_context), ids)
         )
 
+    async def embeddings_create(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        self._assert_embeddings_allowed(auth_context, body.get("model"))
+        if self._use_vcr_auto_walk(str(body.get("model") or ""), auth_context):
+            return await self._embeddings_vcr_auto(body, api_key, client_ip, auth_context)
+        response = await self.gateway.embeddings_create(body)
+        self._log_embeddings_request(
+            body,
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(response),
+        )
+        return response
+
+    async def _embeddings_vcr_auto(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> dict[str, Any]:
+        walker = VcrAutoWalk()
+
+        async def call(model_id: str) -> dict[str, Any]:
+            return await self.gateway.embeddings_create({**body, "model": model_id})
+
+        hit = await walker.run(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY), call)
+        self._log_embeddings_request(
+            {**body, "model": hit.model_id},
+            api_key,
+            client_ip,
+            auth_context,
+            _usage_from_response(hit.value),
+        )
+        return hit.value
+
+    async def embeddings_models(
+        self,
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        del api_key, client_ip
+        if self._held_personal_key(auth_context):
+            return self._openai_model_list(
+                self._personal_list_ids(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY))
+            )
+        if self._is_personal_api_key(auth_context):
+            return await self.gateway.embeddings_models()
+        ids = self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY)
+        if not ids:
+            raise EmbeddingsDisabledError()
+        return self._openai_model_list(
+            student_list_ids(self._classroom_model_choice(auth_context), ids)
+        )
+
+    async def web_search(
+        self,
+        queries: list[str],
+        api_key: str | None,
+        client_ip: str | None = None,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        del client_ip
+        self._assert_web_search_allowed(auth_context)
+        if self.web_search_backend is None:
+            raise WebSearchUnavailableError()
+        # After both refusals: a search that cannot run does not spend the key's minute.
+        if not self.web_search_limiter.allow(api_key or ""):
+            raise WebSearchRateLimitedError()
+        results = await self.web_search_backend.search(queries)
+        return {
+            "results": [
+                {
+                    "query": result.query,
+                    "title": result.title,
+                    "url": result.url,
+                    "text": result.text,
+                }
+                for result in results
+            ]
+        }
+
     async def speech_models(
         self,
         auth_context: AuthContext | None = None,
@@ -328,6 +446,26 @@ class ApiUseCase:
             model_id,
             ImageGenerationDisabledError,
         )
+
+    def _assert_embeddings_allowed(
+        self,
+        auth_context: AuthContext | None,
+        model_id: Any,
+    ) -> None:
+        self._assert_shelf_allowed(
+            auth_context,
+            EMBEDDINGS_SHELF_KEY,
+            model_id,
+            EmbeddingsDisabledError,
+        )
+
+    def _assert_web_search_allowed(self, auth_context: AuthContext | None) -> None:
+        # A switch on the sitting, not a shelf: there is no Model ID to check.
+        if self._is_personal_api_key(auth_context):
+            return
+        checker = getattr(self.api_key_repo, "is_web_search_enabled", None)
+        if auth_context is None or not callable(checker) or not checker(auth_context.session_id):
+            raise WebSearchDisabledError()
 
     def _assert_tts_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
         self._assert_shelf_allowed(
@@ -521,7 +659,7 @@ class ApiUseCase:
 
     def _text_model_ids(self, auth_context: AuthContext | None) -> list[str]:
         if self._is_personal_api_key(auth_context):
-            ids = allowlist_from_document(omit_non_text_shelf_models(self._holder_template(auth_context))) or []
+            ids = allowlist_from_document(student_side_document(self._holder_template(auth_context))) or []
             return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
         if auth_context is None or auth_context.session_id is None:
             return []
@@ -530,6 +668,66 @@ class ApiUseCase:
             return []
         ids = getter(auth_context.session_id) or []
         return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
+
+    async def _vcr_auto_text_walk(
+        self,
+        auth_context: AuthContext | None,
+        last_user_text: str,
+    ) -> tuple[list[str], TierSelection | None]:
+        """The text-shelf walk for a vcr-auto chat or Responses call, and the tier chosen.
+
+        The selection is None whenever selection did not run or failed; the walk then
+        keeps document order.
+        """
+        model_ids = self._text_model_ids(auth_context)
+        document, choice = self._selection_document(auth_context)
+        tiers = selection_tiers(document, choice)
+        if not tiers:
+            return model_ids, None
+        selection = await self._remembered_selection(auth_context, document, tiers, last_user_text)
+        if selection is None:
+            return model_ids, None
+        return tier_ordered_walk(document, model_ids, selection.tier_id), selection
+
+    async def _remembered_selection(
+        self,
+        auth_context: AuthContext | None,
+        document: list[Any] | None,
+        tiers: list[AutoTier],
+        last_user_text: str,
+    ) -> TierSelection | None:
+        """One question, one selection: reuse this key's choice for the same last user message.
+
+        A failed selection is not remembered, so the next call asks again.
+        """
+        memory_key = None
+        if auth_context is not None and auth_context.api_key_id is not None:
+            memory_key = str(auth_context.api_key_id)
+        all_tiers = auto_tiers(document)
+        if memory_key is not None:
+            remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, all_tiers)
+            if remembered is not None:
+                return remembered
+        selection = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        if selection is not None and memory_key is not None:
+            self.vcr_auto_selection_memory.remember(memory_key, last_user_text, all_tiers, selection)
+        return selection
+
+    def _selection_document(
+        self, auth_context: AuthContext | None
+    ) -> tuple[list[Any] | None, str | None]:
+        """The document whose Auto Tiers order the walk, and its Classroom Model Choice.
+
+        A Personal API Key uses its holder's Router Model Template, which always walks as
+        Automatic Models; a Classroom API Key uses its sitting's document and choice.
+        """
+        if self._is_personal_api_key(auth_context):
+            return self._holder_template(auth_context), AUTOMATIC_MODELS
+        choice = self._classroom_model_choice(auth_context)
+        getter = getattr(self.api_key_repo, "get_session_chat_language_models", None)
+        if choice != AUTOMATIC_MODELS or not callable(getter):
+            return None, choice
+        return getter(auth_context.session_id), choice
 
     async def _chat_nonstream_vcr_auto(
         self,
@@ -543,7 +741,10 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.chat_completions_nonstream(replace(req, model=model_id))
 
-        hit = await walker.run(self._text_model_ids(auth_context), call)
+        model_ids, selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_chat(req.messages)
+        )
+        hit = await walker.run(model_ids, call)
         self._log_request(
             replace(req, model=hit.model_id),
             api_key,
@@ -552,6 +753,7 @@ class ApiUseCase:
             _usage_from_response(hit.value),
             assistant_messages=extract_assistant_messages_for_log(hit.value, CHAT_COMPLETIONS_PATH),
             api_endpoint=CHAT_COMPLETIONS_PATH,
+            selection=selection,
         )
         return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
 
@@ -568,7 +770,10 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.chat_completions_stream(replace(req, model=model_id))
 
-        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+        model_ids, selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_chat(req.messages)
+        )
+        async for chunk in walker.stream(model_ids, open_stream):
             tracker.feed(chunk)
             yield chunk
         if walker.model_id is None:
@@ -581,6 +786,7 @@ class ApiUseCase:
             tracker.usage,
             assistant_messages=tracker.assistant_messages,
             api_endpoint=CHAT_COMPLETIONS_PATH,
+            selection=selection,
         )
 
     async def _responses_vcr_auto(
@@ -595,7 +801,10 @@ class ApiUseCase:
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.responses_create({**body, "model": model_id})
 
-        hit = await walker.run(self._text_model_ids(auth_context), call)
+        model_ids, selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_responses(body)
+        )
+        hit = await walker.run(model_ids, call)
         logged = {**body, "model": hit.model_id}
         self._log_responses_request(
             logged,
@@ -605,6 +814,7 @@ class ApiUseCase:
             _usage_from_response(hit.value),
             assistant_messages=extract_assistant_messages_for_log(hit.value, RESPONSES_PATH),
             api_endpoint=RESPONSES_PATH,
+            selection=selection,
         )
         return stamp_reply_model(hit.value, VCR_AUTO_MODEL_ID)
 
@@ -621,7 +831,10 @@ class ApiUseCase:
         def open_stream(model_id: str) -> AsyncGenerator[bytes, None]:
             return self.gateway.responses_create_stream({**body, "model": model_id})
 
-        async for chunk in walker.stream(self._text_model_ids(auth_context), open_stream):
+        model_ids, selection = await self._vcr_auto_text_walk(
+            auth_context, last_user_text_from_responses(body)
+        )
+        async for chunk in walker.stream(model_ids, open_stream):
             tracker.feed(chunk)
             yield chunk
         if walker.model_id is None:
@@ -634,6 +847,7 @@ class ApiUseCase:
             tracker.usage,
             assistant_messages=tracker.assistant_messages,
             api_endpoint=RESPONSES_PATH,
+            selection=selection,
         )
 
     async def _images_vcr_auto(
@@ -997,6 +1211,7 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = RESPONSES_PATH,
+        selection: TierSelection | None = None,
     ) -> None:
         model = body.get("model")
         model_name = model if isinstance(model, str) else "N/A"
@@ -1019,6 +1234,7 @@ class ApiUseCase:
             usage,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
+            selection=selection,
         )
 
     def _log_request(
@@ -1030,6 +1246,7 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = CHAT_COMPLETIONS_PATH,
+        selection: TierSelection | None = None,
     ) -> None:
         is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
         messages = [_message_to_log_dict(m) for m in req.messages]
@@ -1050,6 +1267,7 @@ class ApiUseCase:
             usage,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
+            selection=selection,
         )
 
     def _auth_for_log(
@@ -1080,7 +1298,14 @@ class ApiUseCase:
         usage: dict[str, int] | None,
         assistant_messages: list[dict[str, Any]] | None = None,
         api_endpoint: str = "",
+        selection: TierSelection | None = None,
     ) -> None:
+        """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty.
+
+        Token Usage is recorded first and independently of whether a Prompt Log is stored.
+        """
+        if status == "ok":
+            self._record_token_usage(auth_context, model, usage, api_endpoint)
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
         if auth_context and auth_context.session_id and hasattr(
@@ -1099,13 +1324,29 @@ class ApiUseCase:
             model=model,
             status=status,
             client_ip=client_ip,
-            prompt_tokens=int((usage or {}).get("prompt_tokens", 0) or 0),
-            completion_tokens=int((usage or {}).get("completion_tokens", 0) or 0),
-            total_tokens=int((usage or {}).get("total_tokens", 0) or 0),
+            **_token_counts(usage),
             message_preview=build_message_preview(logged_request),
             response_preview=build_response_preview(logged_messages),
             messages_json=json.dumps(logged_messages, ensure_ascii=False),
             api_endpoint=api_endpoint,
+            tier=selection,
+        )
+
+    def _record_token_usage(
+        self,
+        auth_context: AuthContext | None,
+        model: str,
+        usage: dict[str, int] | None,
+        api_endpoint: str,
+    ) -> None:
+        """One Token Usage row per successful request, whether or not prompt logging is on."""
+        if auth_context is None or not hasattr(self.api_key_repo, "record_token_usage"):
+            return
+        self.api_key_repo.record_token_usage(
+            auth=auth_context,
+            model=model,
+            api_endpoint=api_endpoint,
+            **_token_counts(usage),
         )
 
     def _log_images_request(
@@ -1147,6 +1388,38 @@ class ApiUseCase:
             usage,
             assistant_messages=assistant_messages,
             api_endpoint=api_endpoint,
+        )
+
+    def _log_embeddings_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        usage: dict[str, int] | None,
+    ) -> None:
+        model = body.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        messages = [{"role": "user", "content": _embeddings_log_input(body.get("input"))}]
+        assistant_messages = [{"role": "assistant", "content": "已產生嵌入"}]
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            usage,
+            assistant_messages=assistant_messages,
+            api_endpoint=EMBEDDINGS_PATH,
         )
 
     def _log_tts_request(
@@ -1212,8 +1485,21 @@ class ApiUseCase:
         )
 
 
+def _logged_text(content: str | list[Any]) -> str:
+    """Log 只留文字區塊；圖片等其他區塊的位元組不進 log。"""
+    if isinstance(content, str):
+        return content
+    parts = [part for part in content if isinstance(part, dict)]
+    text = " ".join(
+        part["text"] for part in parts if part.get("type") == "text" and isinstance(part.get("text"), str)
+    )
+    if not text.strip() and any(part.get("type") == "image_url" for part in parts):
+        return IMAGE_ONLY_LABEL
+    return text
+
+
 def _message_to_log_dict(m: ChatMessage) -> dict[str, Any]:
-    d: dict[str, Any] = {"role": m.role, "content": m.content}
+    d: dict[str, Any] = {"role": m.role, "content": _logged_text(m.content)}
     if m.tool_calls:
         d["tool_calls"] = m.tool_calls
     if m.tool_call_id:
@@ -1221,6 +1507,15 @@ def _message_to_log_dict(m: ChatMessage) -> dict[str, Any]:
     if m.tool_name:
         d["tool_name"] = m.tool_name
     return d
+
+
+def _token_counts(usage: dict[str, int] | None) -> dict[str, int]:
+    """prompt/completion/total tokens from an upstream usage block; missing or null counts are 0."""
+    usage = usage or {}
+    return {
+        name: int(usage.get(name, 0) or 0)
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+    }
 
 
 def _messages_to_text(messages: list[dict[str, Any]]) -> str:
@@ -1251,6 +1546,14 @@ def _usage_from_raw_usage(usage: dict[str, Any]) -> dict[str, int]:
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _embeddings_log_input(raw: Any) -> str:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        return "\n".join(raw)
+    return "［非文字嵌入輸入］"
 
 
 def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:

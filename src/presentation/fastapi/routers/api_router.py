@@ -11,6 +11,7 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.domain.errors import (
     AppError,
+    InvalidJsonBodyError,
     InvalidModelIdError,
     ModelNotAllowedError,
     ServiceUnavailableError,
@@ -31,8 +32,12 @@ from src.presentation.fastapi.openai_errors import (
     openai_stream_responses_error_bytes,
 )
 from src.infrastructure.gateways.realtime_proxy import UpstreamConnect, proxy_realtime_session
-from src.infrastructure.routing.token_limit import resolve_chat_output_token_limit
-from src.presentation.fastapi.schemas.api import AudioSpeechRequestSchema, ChatCompletionsRequestSchema, ImageGenerationRequestSchema
+from src.presentation.fastapi.schemas.api import (
+    AudioSpeechRequestSchema,
+    ChatCompletionsRequestSchema,
+    ImageGenerationRequestSchema,
+    WebSearchRequestSchema,
+)
 from src.presentation.fastapi.streaming import AclosingStreamingResponse
 
 
@@ -49,6 +54,17 @@ def _extract_api_key(request: Request) -> str | None:
         return value or None
     value = normalize_api_key(request.headers.get("X-API-Key"))
     return value or None
+
+
+async def _json_object_body(request: Request) -> dict[str, Any]:
+    # 壞掉的 UTF-8 或 JSON 是呼叫端的錯，不是伺服器錯誤。
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise InvalidJsonBodyError() from exc
+    if not isinstance(body, dict):
+        raise InvalidJsonBodyError()
+    return body
 
 
 def _upstream_error_message(exc: UpstreamServiceError) -> str:
@@ -155,12 +171,7 @@ def create_api_router(
             model=req.model,
             messages=[m.model_dump() for m in req.messages],
             stream=req.stream,
-            temperature=req.temperature,
-            max_tokens=resolve_chat_output_token_limit(req.max_tokens, req.max_completion_tokens),
-            user=req.user,
-            stop=req.stop,
-            tools=req.tools,
-            tool_choice=req.tool_choice,
+            extra=dict(req.model_extra or {}),
         )
         domain_req = input_dto.to_domain()
         api_use_case.validate_model_allowed(domain_req.model, auth_context)
@@ -183,7 +194,7 @@ def create_api_router(
             api_use_case.log_invalid_auth(api_key or "", client_ip)
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
-        body: dict[str, Any] = await request.json()
+        body = await _json_object_body(request)
         auth_context = getattr(request.state, "auth_context", None)
         api_use_case.validate_responses_request(body)
         api_use_case.validate_model_allowed(str(body.get("model") or ""), auth_context)
@@ -249,6 +260,58 @@ def create_api_router(
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
         data = await api_use_case.images_models(api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.post("/v1/embeddings")
+    async def embeddings_create(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        body = await _json_object_body(request)
+        data = await api_use_case.embeddings_create(body, api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.get("/v1/embeddings/models")
+    async def embeddings_models(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        data = await api_use_case.embeddings_models(api_key, client_ip, auth_context)
+        return JSONResponse(content=data)
+
+    @router.post("/v1/search")
+    async def web_search(request: Request):
+        api_key = _extract_api_key(request)
+        client_ip = _client_ip(request)
+        auth_context = getattr(request.state, "auth_context", None)
+
+        if getattr(request.state, "invalid_api_key", False):
+            api_use_case.log_invalid_auth(api_key or "", client_ip)
+            return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
+
+        # 不交給 FastAPI 驗證：它的 422 不是 OpenAI 相容的錯誤格式。
+        try:
+            req = WebSearchRequestSchema.model_validate(await request.json())
+        except ValueError:
+            return openai_error_response(
+                400,
+                "queries 必須是 1 到 3 個查詢，每個查詢 1 到 1000 個字元",
+                error_type="invalid_request_error",
+                code="invalid_queries",
+                param="queries",
+            )
+
+        data = await api_use_case.web_search(req.queries, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 
     async def _shelf_models(request: Request, loader):
@@ -410,7 +473,7 @@ def create_api_router(
             api_use_case.log_invalid_auth(api_key or "", client_ip)
             return openai_auth_error_response(api_key or "", api_use_case.api_key_repo)
 
-        body = await request.json()
+        body = await _json_object_body(request)
         data = await api_use_case.decisions_create(body, api_key, client_ip, auth_context)
         return JSONResponse(content=data)
 

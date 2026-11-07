@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -387,3 +389,35 @@ def test_legacy_decision_columns_do_not_enable_decision(tmp_path):
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "decision_disabled"
     assert gateway.last_decision_body is None
+
+
+@pytest.mark.parametrize(
+    ("status_code", "error_type"),
+    [
+        (400, "invalid_request_error"),
+        (413, "invalid_request_error"),
+        (422, "invalid_request_error"),
+        (402, "server_error"),
+        (500, "server_error"),
+    ],
+)
+def test_decision_refusal_type_follows_who_is_at_fault(tmp_path, status_code, error_type):
+    from src.domain.errors import UpstreamServiceError
+
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    openrouter.decision_error = UpstreamServiceError(
+        status_code=status_code,
+        backend="openrouter",
+        body={"detail": {"error_type": "api_usage_error", "message": "Invalid image dimensions."}},
+    )
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json=_DECISION_BODY,
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["error"]["type"] == error_type

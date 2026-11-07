@@ -1,14 +1,16 @@
+from dataclasses import asdict
 from datetime import UTC, datetime
 import time
 from typing import Any
 
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import PortalSessionContext
-from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
+from src.domain.errors import ApiKeyExpiredError, ApiKeyNotStartedError, MissingTargetError, QuarantineReleaseCooldownError
 from src.domain.ports.router_repository import RouterRepositoryPort
 from src.infrastructure.auth.extension_handoff import ExtensionHandoffService
 from src.application.upstream_model_catalog import (
     CATALOG_FETCH_TIMEOUT_SEC,
+    CATALOG_RETRY_DELAYS_SEC,
     KIND_SPLIT_MODALITIES,
     UpstreamModelCatalogMemory,
 )
@@ -22,6 +24,10 @@ from src.domain.classroom_model_choice import CLASSROOM_MODEL_CHOICE_UNCHANGED
 from src.domain.vcr_auto import classroom_student_chat_document, classroom_vscode_model_list
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.domain.decision_model import DECISION_MODEL_UNCHANGED
+from src.domain.auto_tier import auto_tiers, would_select
+from src.domain.model_shelf import student_side_document
+from src.domain.auto_tier_save_check import check_auto_tier_document
+from src.domain.model_document_upload import uploaded_model_document
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -43,6 +49,7 @@ _SESSION_CAPABILITY_FIELDS = frozenset(
         "tts_enabled",
         "speech_transcription_enabled",
         "prompt_logging_enabled",
+        "web_search_enabled",
     }
 )
 
@@ -54,6 +61,7 @@ class PortalUseCase:
         base_settings: RouterSettings,
         llm_gateway: Any | None = None,
         catalog_fetch_timeout_sec: float = CATALOG_FETCH_TIMEOUT_SEC,
+        catalog_retry_delays_sec: tuple[float, ...] = CATALOG_RETRY_DELAYS_SEC,
     ):
         self.repo = repo
         self._base_settings = base_settings
@@ -64,6 +72,7 @@ class PortalUseCase:
             lambda: self.settings,
             llm_gateway,
             fetch_timeout_sec=catalog_fetch_timeout_sec,
+            retry_delays_sec=catalog_retry_delays_sec,
         )
 
     async def fill_upstream_model_catalog(self) -> None:
@@ -157,7 +166,11 @@ class PortalUseCase:
         if not callable(status_fn):
             return {"providers": {}}
         result = status_fn(limited_only=True)
-        for method_name in ("overlay_included_monthly_usage", "overlay_account_credit_remaining"):
+        for method_name in (
+            "overlay_included_monthly_usage",
+            "overlay_account_credit_remaining",
+            "overlay_key_monthly_limit",
+        ):
             overlay = getattr(gateway, method_name, None)
             if not callable(overlay):
                 continue
@@ -175,7 +188,7 @@ class PortalUseCase:
         self._assert_teacher(user_id)
         if output_modalities not in (None, "all", *KIND_SPLIT_MODALITIES):
             raise ValueError(
-                "output_modalities 必須是 all、text、decisions、image、speech 或 speech_transcription"
+                "output_modalities 必須是 all、text、decisions、image、embeddings、speech 或 speech_transcription"
             )
         requested = output_modalities or "text"
         return self._upstream_catalog.read(requested)
@@ -387,7 +400,7 @@ class PortalUseCase:
 
     def list_sessions(self, user_id: int, class_id: int) -> list[dict[str, Any]]:
         self._assert_class_owner_or_admin(user_id, class_id)
-        return self.repo.list_class_sessions(class_id)
+        return [_with_auto_selection(session) for session in self.repo.list_class_sessions(class_id)]
 
     def get_session(
         self, user_id: int, class_id: int, session_id: int
@@ -412,6 +425,7 @@ class PortalUseCase:
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         decision_model: Any = DECISION_MODEL_UNCHANGED,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
@@ -435,8 +449,9 @@ class PortalUseCase:
             raise ValueError("座位上限必須為正整數")
         existing = self.get_session(user_id, class_id, session_id)
         if session_chat_language_models is not SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED:
-            session_chat_language_models = normalize_session_chat_language_models(
-                session_chat_language_models
+            session_chat_language_models = self._checked_document(
+                session_chat_language_models,
+                previous=(existing or {}).get("session_chat_language_models"),
             )
         if model_allowlist is not MODEL_ALLOWLIST_UNCHANGED and model_allowlist is not None:
             document = (existing or {}).get("session_chat_language_models") or []
@@ -448,6 +463,7 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            web_search_enabled=web_search_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
@@ -470,6 +486,7 @@ class PortalUseCase:
             tts_enabled=tts_enabled,
             speech_transcription_enabled=speech_transcription_enabled,
             prompt_logging_enabled=prompt_logging_enabled,
+            web_search_enabled=web_search_enabled,
             status=status,
             course_catalog_yaml=course_catalog_yaml,
             seat_limit=seat_limit,
@@ -486,7 +503,7 @@ class PortalUseCase:
                 invocation_channel=invocation_channel,
             ),
         )
-        return session
+        return _with_auto_selection(session) if session else session
 
     @staticmethod
     def _agent_action_audit(
@@ -554,14 +571,14 @@ class PortalUseCase:
         return {"course_catalog_yaml": yaml_text}
 
     def redeem(self, user_id: int, invite_code: str) -> dict[str, Any]:
-        return self.repo.redeem_invite(invite_code, user_id)
+        return _student_redemption(self.repo.redeem_invite(invite_code, user_id))
 
     def issue_extension_handoff(self, user_id: int) -> str:
         return self._handoff_service().create_token(user_id)
 
     def redeem_with_handoff(self, handoff_token: str, invite_code: str) -> dict[str, Any]:
         user_id = self._handoff_service().consume_token(handoff_token)
-        return self.repo.redeem_invite(invite_code, user_id)
+        return _student_redemption(self.repo.redeem_invite(invite_code, user_id))
 
     def redeem_with_nickname(self, invite_code: str, nickname: str) -> dict[str, Any]:
         cleaned = (nickname or "").strip()
@@ -569,7 +586,7 @@ class PortalUseCase:
             raise ValueError("classroom nickname is required")
         if len(cleaned) > _NICKNAME_MAX_LEN:
             raise ValueError("classroom nickname is too long")
-        return self.repo.redeem_invite_with_nickname(invite_code, cleaned)
+        return _student_redemption(self.repo.redeem_invite_with_nickname(invite_code, cleaned))
 
     def router_model_template(self, user_id: int) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)
@@ -578,10 +595,39 @@ class PortalUseCase:
             raise PermissionError("teacher only")
         return document
 
+    def auto_tier_defaults(self, user_id: int) -> dict[str, Any]:
+        """The shipped starter's tiers: an editor starting point, never read by the router."""
+        self._assert_teacher(user_id)
+        return {"items": [asdict(tier) for tier in auto_tiers(load_vans_template())]}
+
     def save_router_model_template(self, user_id: int, document: Any) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)
-        normalized = normalize_session_chat_language_models(document)
+        normalized = self._checked_document(
+            document,
+            previous=self.repo.get_router_model_template(user_id),
+        )
         return self.repo.save_router_model_template(user_id, normalized)
+
+    def draft_after_upload(
+        self, user_id: int, current: Any, uploaded: Any
+    ) -> list[dict[str, Any]]:
+        """The editor draft after an upload; nothing is stored until the teacher saves it."""
+        self._assert_teacher(user_id)
+        return uploaded_model_document(current, uploaded)
+
+    def _checked_document(self, document: Any, *, previous: Any) -> list[dict[str, Any]]:
+        """The save-time form of a sitting document or template; ValueError refuses the save."""
+        normalized = normalize_session_chat_language_models(document)
+        check_auto_tier_document(
+            normalized,
+            previous=previous,
+            decision_list_ids={
+                item["id"]
+                for item in self._upstream_catalog.read("decisions")["models"]
+                if item.get("provider") == "openrouter"
+            },
+        )
+        return normalized
 
     def chat_language_models_template(
         self,
@@ -599,7 +645,7 @@ class PortalUseCase:
                     load_vans_template(),
                 )
         if portal_user_id is not None:
-            return self.router_model_template(portal_user_id)
+            return student_side_document(self.router_model_template(portal_user_id)) or []
         raise PermissionError("需要 Portal 登入或 Classroom API Key")
 
     def vscode_install_models(self, api_key: str | None = None) -> list[dict[str, Any]]:
@@ -626,6 +672,8 @@ class PortalUseCase:
         _, failure = self.repo.verify_api_key_with_reason(api_key)
         if failure == "expired":
             raise ApiKeyExpiredError()
+        if failure == "not_started":
+            raise ApiKeyNotStartedError()
         if failure in {"invalid", "disabled", "missing"}:
             raise PermissionError("無效的 Classroom API Key")
 
@@ -711,6 +759,18 @@ class PortalUseCase:
         self._assert_admin(user_id)
         return self.repo.set_class_status(class_id, status)
 
+    def teacher_end_class(self, teacher_id: int, class_id: int, status: str) -> dict[str, Any] | None:
+        """The owner ends their own course. Reopening stays admin-only (admin_update_class).
+
+        Anyone but the owner sees the course as missing, so the endpoint does not reveal it exists.
+        """
+        klass = self.repo.get_class(class_id)
+        if not klass or klass["teacher_id"] != teacher_id:
+            raise MissingTargetError("找不到課程")
+        if status != "ended":
+            raise ValueError("老師只能結束課程；重新開啟請找管理員")
+        return self.repo.set_class_status(class_id, status)
+
     def admin_settings(self, user_id: int) -> dict[str, Any]:
         self._assert_admin(user_id)
         return settings_summary(self.settings)
@@ -791,3 +851,25 @@ class PortalUseCase:
 
     def _has_role(self, user: dict[str, Any], role: str) -> bool:
         return role in set(user.get("roles") or [user.get("role")])
+
+
+def _student_redemption(result: dict[str, Any]) -> dict[str, Any]:
+    """A redemption as the student sees it: the sitting's stored document stays with the teacher.
+
+    The student's model list comes from ``GET /extension/chat-language-models``.
+    """
+    session = {
+        key: value
+        for key, value in (result.get("session") or {}).items()
+        if key != "session_chat_language_models_json"
+    }
+    return {**result, "session": session}
+
+
+def _with_auto_selection(session: dict[str, Any]) -> dict[str, Any]:
+    """Add the class-list 「自動選模」 badge condition (#73): the router would run selection."""
+    active = would_select(
+        session.get("session_chat_language_models"),
+        session.get("classroom_model_choice"),
+    )
+    return {**session, "auto_selection_active": active}

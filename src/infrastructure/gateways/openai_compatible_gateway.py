@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from contextlib import aclosing
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -13,19 +14,22 @@ from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
     ServiceUnavailableError,
     UpstreamServiceError,
+    UpstreamTransportError,
     extract_upstream_error_text,
 )
 from src.domain.extra_usage import (
     DEFAULT_EXTRA_USAGE_MESSAGE,
     account_credit_remaining_from_credits_payload,
-    included_monthly_usage_from_usage_payload,
+    included_monthly_usage_from_documents,
     is_key_failover_exhaustion,
+    key_monthly_limit_from_key_payload,
 )
 from src.infrastructure.config import (
     ProviderSettings,
     resolve_provider_api_keys,
 )
 from src.infrastructure.gateways.copilot_compat import (
+    VALID_REASONING_EFFORTS,
     OllamaThinkingCache,
     derive_ollama_native_base,
     is_ollama_provider,
@@ -44,7 +48,9 @@ logger = logging.getLogger(__name__)
 
 _ollama_thinking_cache = OllamaThinkingCache()
 _OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
+_OLLAMA_CLOUD_ME_URL = "https://ollama.com/api/me"
 _OPENROUTER_CREDITS_PATH = "/credits"
+_OPENROUTER_KEY_PATH = "/key"
 _USAGE_TIMEOUT = httpx.Timeout(2.0)
 _USAGE_CACHE_TTL_SEC = 45.0
 
@@ -62,8 +68,9 @@ class OpenAICompatibleGateway:
         self._client: httpx.AsyncClient | None = None
         self._usage_client = usage_client
         self._created_usage_client = False
-        self._monthly_usage_cache: dict[int, tuple[float, float]] = {}
+        self._monthly_usage_cache: dict[int, tuple[dict[str, Any], float]] = {}
         self._account_credit_cache: dict[int, tuple[float, float]] = {}
+        self._key_monthly_limit_cache: dict[int, tuple[dict[str, Any], float]] = {}
         # Build once at construction so concurrent requests share one pool.
         self._pool = self._create_pool()
 
@@ -196,17 +203,45 @@ class OpenAICompatibleGateway:
             attached.append(row)
         return {**pool, "keys": attached}
 
+    async def attach_key_monthly_limit(self, pool: dict[str, Any]) -> dict[str, Any]:
+        """Overlay Key Monthly Limit onto openrouter pool keys without touching in-flight."""
+        if self.provider.name != "openrouter":
+            return pool
+        keys = list(pool.get("keys") or [])
+        limits = await asyncio.gather(
+            *(self._key_monthly_limit_for_index(int(item["index"])) for item in keys)
+        )
+        attached = []
+        for item, limit in zip(keys, limits, strict=True):
+            row = dict(item)
+            row["key_monthly_limit"] = limit
+            attached.append(row)
+        return {**pool, "keys": attached}
+
     async def _account_credit_remaining_for_index(self, index: int) -> float | None:
         now = time.monotonic()
         cached = self._account_credit_cache.get(index)
         if cached is not None and cached[1] > now:
             return cached[0]
-        remaining = await self._fetch_account_credit_remaining(index)
+        payload = await self._fetch_openrouter_document(index, _OPENROUTER_CREDITS_PATH)
+        remaining = account_credit_remaining_from_credits_payload(payload)
         if remaining is not None:
             self._account_credit_cache[index] = (remaining, now + _USAGE_CACHE_TTL_SEC)
         return remaining
 
-    async def _fetch_account_credit_remaining(self, index: int) -> float | None:
+    async def _key_monthly_limit_for_index(self, index: int) -> dict[str, Any] | None:
+        now = time.monotonic()
+        cached = self._key_monthly_limit_cache.get(index)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        payload = await self._fetch_openrouter_document(index, _OPENROUTER_KEY_PATH)
+        meter = key_monthly_limit_from_key_payload(payload, now=datetime.now(timezone.utc))
+        if meter is not None:
+            self._key_monthly_limit_cache[index] = (meter, now + _USAGE_CACHE_TTL_SEC)
+        return meter
+
+    async def _fetch_openrouter_document(self, index: int, path: str) -> Any:
+        """GET one OpenRouter account document with that key; None when unavailable."""
         pool = self._ensure_pool()
         if pool is None or not (0 <= index < pool.key_count):
             return None
@@ -216,7 +251,7 @@ class OpenAICompatibleGateway:
         try:
             client = await self._ensure_usage_client()
             response = await client.get(
-                self.provider.base_url.rstrip("/") + _OPENROUTER_CREDITS_PATH,
+                self.provider.base_url.rstrip("/") + path,
                 headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
                 timeout=_USAGE_TIMEOUT,
             )
@@ -224,18 +259,18 @@ class OpenAICompatibleGateway:
             raise
         except Exception:
             logger.info(
-                "account_credit_remaining_unavailable provider=%s index=%s",
+                "openrouter_document_unavailable provider=%s index=%s path=%s",
                 self.provider.name,
                 index,
+                path,
             )
             return None
         if response.status_code >= 400:
             return None
         try:
-            payload = response.json()
+            return response.json()
         except json.JSONDecodeError:
             return None
-        return account_credit_remaining_from_credits_payload(payload)
 
     async def _ensure_usage_client(self) -> httpx.AsyncClient:
         if self._usage_client is None:
@@ -243,7 +278,7 @@ class OpenAICompatibleGateway:
             self._created_usage_client = True
         return self._usage_client
 
-    async def _included_monthly_usage_for_index(self, index: int) -> float | None:
+    async def _included_monthly_usage_for_index(self, index: int) -> dict[str, Any] | None:
         now = time.monotonic()
         cached = self._monthly_usage_cache.get(index)
         if cached is not None and cached[1] > now:
@@ -253,19 +288,29 @@ class OpenAICompatibleGateway:
             self._monthly_usage_cache[index] = (usage, now + _USAGE_CACHE_TTL_SEC)
         return usage
 
-    async def _fetch_included_monthly_usage(self, index: int) -> float | None:
+    async def _fetch_included_monthly_usage(self, index: int) -> dict[str, Any] | None:
         pool = self._ensure_pool()
         if pool is None or not (0 <= index < pool.key_count):
             return None
         api_key = pool.key_at(index)
         if not api_key:
             return None
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
             client = await self._ensure_usage_client()
-            response = await client.get(
-                _OLLAMA_CLOUD_USAGE_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-                timeout=_USAGE_TIMEOUT,
+            account_response, usage_response = await asyncio.gather(
+                client.post(
+                    _OLLAMA_CLOUD_ME_URL,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json={},
+                    timeout=_USAGE_TIMEOUT,
+                ),
+                client.get(
+                    _OLLAMA_CLOUD_USAGE_URL,
+                    params={"range": "30d"},
+                    headers=headers,
+                    timeout=_USAGE_TIMEOUT,
+                ),
             )
         except asyncio.CancelledError:
             raise
@@ -276,13 +321,18 @@ class OpenAICompatibleGateway:
                 index,
             )
             return None
-        if response.status_code >= 400:
+        if account_response.status_code >= 400 or usage_response.status_code >= 400:
             return None
         try:
-            payload = response.json()
+            account_payload = account_response.json()
+            usage_payload = usage_response.json()
         except json.JSONDecodeError:
             return None
-        return included_monthly_usage_from_usage_payload(payload)
+        return included_monthly_usage_from_documents(
+            usage_payload,
+            account_payload,
+            now=datetime.now(timezone.utc),
+        )
 
     async def release_key_quarantine(self, index: int) -> None:
         pool = self._ensure_pool()
@@ -316,6 +366,7 @@ class OpenAICompatibleGateway:
             "text",
             "decisions",
             "image",
+            "embeddings",
             "speech",
             "transcription",
         }:
@@ -324,12 +375,12 @@ class OpenAICompatibleGateway:
         return self._json_or_error(response)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
-        response = await self._request("POST", "/chat/completions", json=_chat_payload(req, stream=False))
+        payload = await self._prepare_chat_payload(req, stream=False)
+        response = await self._request("POST", "/chat/completions", json=payload)
         return normalize_chat_completions_response(self._json_or_error(response))
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
-        payload = _chat_payload(req, stream=True)
-        payload.setdefault("stream_options", {"include_usage": True})
+        payload = await self._prepare_chat_payload(req, stream=True)
         upstream = self._stream("POST", "/chat/completions", json=payload)
         async with aclosing(normalize_chat_completions_sse(upstream)) as stream:
             async for chunk in stream:
@@ -367,6 +418,13 @@ class OpenAICompatibleGateway:
 
     async def images_models(self) -> dict[str, Any]:
         return await self.models(output_modalities="image")
+
+    async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request("POST", "/embeddings", json=body)
+        return self._json_or_error(response)
+
+    async def embeddings_models(self) -> dict[str, Any]:
+        return await self.models(output_modalities="embeddings")
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         async with aclosing(self._stream("POST", "/audio/speech", json=body)) as stream:
@@ -426,6 +484,7 @@ class OpenAICompatibleGateway:
     ) -> httpx.Response:
         await self.startup()
         assert self._client is not None
+        self._require_base_url()
         pool = self._ensure_pool() if use_pool else None
         if pool is None:
             index: int | None = None
@@ -438,7 +497,7 @@ class OpenAICompatibleGateway:
                     **kwargs,
                 )
             except httpx.RequestError as exc:
-                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
 
         tried: set[int] = set()
         last_error: UpstreamServiceError | None = None
@@ -482,7 +541,7 @@ class OpenAICompatibleGateway:
                     )
                 return response
             except httpx.RequestError as exc:
-                raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
 
@@ -496,6 +555,7 @@ class OpenAICompatibleGateway:
     ) -> AsyncGenerator[bytes, None]:
         await self.startup()
         assert self._client is not None
+        self._require_base_url()
         pool = self._ensure_pool() if use_pool else None
         if pool is None:
             index: int | None = None
@@ -518,7 +578,7 @@ class OpenAICompatibleGateway:
                         async for chunk in response.aiter_bytes():
                             yield chunk
                 except httpx.RequestError as exc:
-                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                    raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
             return
@@ -577,7 +637,7 @@ class OpenAICompatibleGateway:
                                 yield chunk
                             return
                 except httpx.RequestError as exc:
-                    raise ServiceUnavailableError(f"{self.provider.name} unavailable: {exc}") from exc
+                    raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
             finally:
                 await self._release_pool_slot(pool, index)
             if not failover:
@@ -592,6 +652,10 @@ class OpenAICompatibleGateway:
             raise UpstreamServiceError(status_code=response.status_code, backend=self.provider.name, body=body)
         return body if isinstance(body, dict) else {"data": body}
 
+    def _require_base_url(self) -> None:
+        if not self.provider.base_url:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
+
     def _headers(self, *, api_key: str | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json", **self.provider.extra_headers}
         key = api_key
@@ -602,6 +666,23 @@ class OpenAICompatibleGateway:
             headers["Authorization"] = f"Bearer {key}"
         return headers
 
+    async def _prepare_chat_payload(self, req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:
+        payload = _chat_payload(req, stream)
+        if not is_ollama_provider(self.provider.name, self.provider.base_url):
+            return payload
+
+        # Ollama 只讀 max_tokens，不補的話 max_completion_tokens 的上限會被忽略。
+        limit = payload.get("max_completion_tokens")
+        if limit is not None and payload.get("max_tokens") is None:
+            payload["max_tokens"] = limit
+
+        if "reasoning_effort" in payload:
+            effort = payload["reasoning_effort"]
+            valid = isinstance(effort, str) and effort in VALID_REASONING_EFFORTS
+            if not valid or await self._ollama_supports_thinking(req.model) is False:
+                del payload["reasoning_effort"]
+        return payload
+
     async def _prepare_responses_body(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = dict(body)
         if not is_ollama_provider(self.provider.name, self.provider.base_url):
@@ -611,21 +692,27 @@ class OpenAICompatibleGateway:
         if not isinstance(model, str) or not model.strip():
             return payload
 
+        supports_thinking = await self._ollama_supports_thinking(model)
+        if supports_thinking is None:
+            return payload
+        return sanitize_responses_request(payload, supports_thinking)
+
+    async def _ollama_supports_thinking(self, model: str) -> bool | None:
+        """None when this provider has no native Ollama address to ask."""
         native_base = derive_ollama_native_base(self.provider.base_url)
         if native_base is None:
-            return payload
+            return None
 
         await self.startup()
         assert self._client is not None
         show_model = strip_ollama_cloud_inference_suffix(model)
         # Probe uses first key without taking a concurrency slot (cached).
-        supports_thinking = await _ollama_thinking_cache.supports_thinking(
+        return await _ollama_thinking_cache.supports_thinking(
             self._client,
             native_base,
             show_model,
             self._headers(),
         )
-        return sanitize_responses_request(payload, supports_thinking)
 
 
 def _multipart_form_data(fields: dict[str, Any]) -> dict[str, str]:
@@ -647,24 +734,20 @@ def _multipart_file(file: tuple[str, bytes, str | None]) -> dict[str, tuple[str,
 
 def _chat_payload(req: ChatCompletionRequest, stream: bool) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        **req.extra,
         "model": req.model,
         "messages": [_message_payload(message) for message in req.messages],
         "stream": stream,
     }
-    optional = {
-        "temperature": req.temperature,
-        "max_tokens": req.max_tokens,
-        "user": req.user,
-        "stop": req.stop,
-        "tools": req.tools,
-        "tool_choice": req.tool_choice,
-    }
-    payload.update({key: value for key, value in optional.items() if value is not None})
+    if stream:
+        # Usage 是用量紀錄的來源，客戶端不能關掉。
+        sent = payload.get("stream_options")
+        payload["stream_options"] = {**(sent if isinstance(sent, dict) else {}), "include_usage": True}
     return payload
 
 
 def _message_payload(message: ChatMessage) -> dict[str, Any]:
-    payload: dict[str, Any] = {"role": message.role, "content": message.content}
+    payload: dict[str, Any] = {**message.extra, "role": message.role, "content": message.content}
     for key in ("tool_calls", "tool_call_id", "name"):
         value = getattr(message, key)
         if value is not None:

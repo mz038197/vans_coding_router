@@ -149,6 +149,6 @@ def test_portal_page_loads_the_logged_in_teachers_template(tmp_path):
     client, _, _ = _client(tmp_path)
     page = client.get("/portal")
     assert page.status_code == 200
-    assert "編輯模型範本" in page.text
+    assert "預設模型設定" in page.text
     assert "/teacher/router-model-template" in page.text
     assert "api('/extension/chat-language-models')" not in page.text

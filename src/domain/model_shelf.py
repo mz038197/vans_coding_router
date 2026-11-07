@@ -5,12 +5,19 @@ from typing import Any
 
 from src.domain.decision_model import is_decision_shelf_model
 
+# Auto Tier fields (ADR-0037); src.domain.auto_tier owns their meaning.
+AUTO_TIERS_KEY = "autoTiers"
+SELECTOR_SHELF_KEY = "selectorShelf"
+AUTO_TIER_KEY = "autoTier"
+
 IMAGE_SHELF_KEY = "imageShelf"
+EMBEDDINGS_SHELF_KEY = "embeddingsShelf"
 SPEECH_SHELF_KEY = "speechShelf"
 SPEECH_TRANSCRIPTION_SHELF_KEY = "speechTranscriptionShelf"
 SHELF_KEYS = (
     "decisionShelf",
     IMAGE_SHELF_KEY,
+    EMBEDDINGS_SHELF_KEY,
     SPEECH_SHELF_KEY,
     SPEECH_TRANSCRIPTION_SHELF_KEY,
 )
@@ -29,6 +36,10 @@ def is_image_shelf_model(model: Any) -> bool:
     return _is_flagged_model(model, IMAGE_SHELF_KEY)
 
 
+def is_embeddings_shelf_model(model: Any) -> bool:
+    return _is_flagged_model(model, EMBEDDINGS_SHELF_KEY)
+
+
 def is_speech_shelf_model(model: Any) -> bool:
     return _is_flagged_model(model, SPEECH_SHELF_KEY)
 
@@ -41,15 +52,41 @@ def is_non_text_shelf_model(model: Any) -> bool:
     return (
         is_decision_shelf_model(model)
         or is_image_shelf_model(model)
+        or is_embeddings_shelf_model(model)
         or is_speech_shelf_model(model)
         or is_speech_transcription_shelf_model(model)
     )
+
+
+def document_providers(document: list[Any] | None) -> list[dict[str, Any]]:
+    """The provider entries of a document, skipping anything that is not one."""
+    return [provider for provider in document or [] if isinstance(provider, dict)]
+
+
+def text_shelf_models(document: list[Any] | None) -> list[dict[str, Any]]:
+    """The text-shelf models of a document, in document order, first entry per Model ID."""
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for provider in document_providers(document):
+        models = provider.get("models")
+        if not isinstance(models, list):
+            continue
+        for model in models:
+            if not isinstance(model, dict) or is_non_text_shelf_model(model):
+                continue
+            model_id = model.get("id")
+            if not isinstance(model_id, str) or not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            found.append(model)
+    return found
 
 
 def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
     predicate = {
         "decisionShelf": is_decision_shelf_model,
         IMAGE_SHELF_KEY: is_image_shelf_model,
+        EMBEDDINGS_SHELF_KEY: is_embeddings_shelf_model,
         SPEECH_SHELF_KEY: is_speech_shelf_model,
         SPEECH_TRANSCRIPTION_SHELF_KEY: is_speech_transcription_shelf_model,
     }.get(shelf_key)
@@ -74,18 +111,37 @@ def shelf_model_ids(document: list[Any] | None, shelf_key: str) -> list[str]:
     return ids
 
 
-def omit_non_text_shelf_models(document: list[Any] | None) -> list[Any] | None:
+# Fields only the router reads. No list written for students or VS Code may carry them.
+ROUTER_ONLY_MODEL_KEYS = (*SHELF_KEYS, AUTO_TIER_KEY)
+# Document-level (provider entry) fields only the router reads.
+ROUTER_ONLY_DOCUMENT_KEYS = (AUTO_TIERS_KEY, SELECTOR_SHELF_KEY)
+
+
+def student_side_model(model: dict[str, Any]) -> dict[str, Any]:
+    """A copy of one model with every router-only field removed."""
+    entry = copy.deepcopy(model)
+    for key in ROUTER_ONLY_MODEL_KEYS:
+        entry.pop(key, None)
+    return entry
+
+
+def student_side_document(document: list[Any] | None) -> list[Any] | None:
+    """The one outlet for Copilot lists: text-shelf models only, router-only fields removed."""
     if document is None:
         return None
     result = copy.deepcopy(document)
     for provider in result:
         if not isinstance(provider, dict):
             continue
+        for key in ROUTER_ONLY_DOCUMENT_KEYS:
+            provider.pop(key, None)
         models = provider.get("models")
         if not isinstance(models, list):
             continue
         provider["models"] = [
-            model for model in models if not is_non_text_shelf_model(model)
+            student_side_model(model) if isinstance(model, dict) else model
+            for model in models
+            if not is_non_text_shelf_model(model)
         ]
     return result
 

@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from src.domain.auto_tier import TierSelection, without_auto_tiers
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
@@ -277,6 +278,44 @@ def test_archive_prompt_logs_moves_old_logs_and_keeps_young_logs_on_an_ended_cla
     assert archived_2025[0][1]
 
 
+def test_archive_keeps_the_tier_name_and_confidence_in_an_older_archive_file(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    (tmp_path / "archive").mkdir()
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        conn.execute(
+            """
+            CREATE TABLE prompt_logs_archive (
+                id INTEGER, user_id INTEGER, class_id INTEGER, session_id INTEGER,
+                raw_prompt TEXT NOT NULL, final_prompt TEXT NOT NULL, model TEXT NOT NULL,
+                status TEXT NOT NULL, client_ip TEXT, created_at TEXT NOT NULL,
+                archived_at TEXT NOT NULL, message_preview TEXT, messages_json TEXT
+            )
+            """
+        )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier=TierSelection("t-strong", "進階", 0.92))
+    repo.log_prompt(context, "untiered", "untiered", "openrouter@vendor/light", "ok", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ?", ("2025-01-01T00:00:00+00:00",))
+
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 2
+
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        rows = conn.execute(
+            "SELECT raw_prompt, tier_name, tier_confidence FROM prompt_logs_archive ORDER BY raw_prompt"
+        ).fetchall()
+    assert rows == [("tiered", "進階", 0.92), ("untiered", None, None)]
+
+
 def test_archive_prompt_logs_finishes_a_backlog_larger_than_one_batch(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
@@ -400,9 +439,9 @@ def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
     assert usage[user_b["id"]]["live_count"] == 1
     assert usage[user_b["id"]]["archive_count"] == 1
 
-    assert repo.delete_prompt_logs_for_users([]) == {"deleted_live": 0, "deleted_archive": 0}
+    assert repo.delete_prompt_logs_for_users([]) == {"deleted_live": 0, "deleted_archive": 0, "deleted_token_usage": 0}
     result = repo.delete_prompt_logs_for_users([user_a["id"]])
-    assert result == {"deleted_live": 1, "deleted_archive": 1}
+    assert result == {"deleted_live": 1, "deleted_archive": 1, "deleted_token_usage": 0}
 
     remaining = repo.list_prompt_logs(teacher["id"], live_class["id"])
     assert [row["raw_prompt"] for row in remaining] == ["b-again"]
@@ -480,6 +519,53 @@ def test_create_session_with_session_at_sets_expires_at(tmp_path):
     assert session["expires_at"] == datetime(2026, 6, 21, 17, 0, tzinfo=UTC).isoformat()
 
 
+def _class_with_session_starting_at(tmp_path, session_at: datetime):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(
+        klass["id"], teacher["id"], "第一堂", ttl_hours=3, session_at=session_at.isoformat()
+    )
+    return repo, session
+
+
+def test_classroom_api_key_is_not_started_before_session_at(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    student = repo.upsert_google_user("student@example.com", "Student")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_at = ? WHERE id = ?",
+            ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), session["id"]),
+        )
+
+    assert repo.verify_api_key_with_reason(key) == (None, "not_started")
+    assert repo.verify_api_key_context(key) is None
+
+
+def test_invite_cannot_be_redeemed_before_session_at(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) + timedelta(hours=1))
+    student = repo.upsert_google_user("student@example.com", "Student")
+
+    with pytest.raises(ValueError, match="尚未開始"):
+        repo.redeem_invite(session["invite_code"], student["id"])
+    with pytest.raises(ValueError, match="尚未開始"):
+        repo.redeem_invite_with_nickname(session["invite_code"], "小明")
+
+
+def test_classroom_api_key_works_once_session_at_has_passed(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=1))
+    student = repo.upsert_google_user("student@example.com", "Student")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+
+    context, failure = repo.verify_api_key_with_reason(key)
+    assert failure is None
+    assert context is not None
+
+
 def test_create_session_requires_name(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
@@ -513,7 +599,7 @@ def test_session_model_allowlist_round_trip(tmp_path):
     klass = repo.create_class(teacher["id"], "AI", None, 2)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     template = load_vans_template()
-    assert session["session_chat_language_models"] == template
+    assert session["session_chat_language_models"] == without_auto_tiers(template)
     assert session["model_allowlist"] == template_model_ids(template)
     assert repo.get_session_model_allowlist(session["id"]) == template_model_ids(template)
 
@@ -748,3 +834,82 @@ def test_update_session_expires_at_syncs_api_keys(tmp_path):
 
 def parse_dt_iso(value: str):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _carries_auto_tiers(document) -> bool:
+    return any(
+        "autoTiers" in provider or any("autoTier" in model for model in provider.get("models", []))
+        for provider in document
+    )
+
+
+def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
+    assert _carries_auto_tiers(load_vans_template()), "the starter ships default Auto Tiers"
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    owner = repo.upsert_google_user("owner@gmail.com", "Owner")
+    klass = repo.create_class(owner["id"], "No template", None, 2)
+    created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
+    backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = ?",
+            (backfilled["id"],),
+        )
+    reopened = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+
+    sittings = {s["id"]: s for s in reopened.list_class_sessions(klass["id"])}
+
+    for session_id in (created["id"], backfilled["id"]):
+        document = sittings[session_id]["session_chat_language_models"]
+        assert template_model_ids(document) == template_model_ids(load_vans_template())
+        assert not _carries_auto_tiers(document)
+
+
+def _usage_world(repo):
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Usage", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    assert context is not None
+    return teacher, student, klass, context
+
+
+def test_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    teacher, student, klass, context = _usage_world(repo)
+    repo.log_prompt(context, "archived ok", "archived ok", "m", "ok", None, 4, 4, 8)
+    repo.log_prompt(context, "live ok", "live ok", "m", "ok", None, 1, 2, 3)
+    repo.log_prompt(context, "live rejected", "live rejected", "m", "rejected", None, 5, 5, 10)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-05-01T00:00:00+00:00", "archived ok"))
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 1
+    # A database from before Token Usage existed.
+    with repo._connect() as conn:
+        conn.execute("DROP TABLE token_usage")
+
+    upgraded = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))  # a later restart
+
+    row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    # The SQLite archive never stored token counts, so an archived log adds a request but no tokens.
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (1, 2, 3)
+    assert row["request_count"] == 2
+    assert row["sessions"][0]["request_count"] == 2
+
+
+def test_token_usage_is_recorded_queried_and_deleted_per_user(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    teacher, student, klass, context = _usage_world(repo)
+    repo.record_token_usage(context, "m", "/v1/chat/completions", 1, 2, 3)
+    repo.record_token_usage(context, "m", "/v1/responses", 10, 20, 30)
+    personal = context.__class__(user_id=student["id"], email=None, name=None)
+    repo.record_token_usage(personal, "m", "/v1/chat/completions", 100, 100, 200)
+
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"], row["request_count"]) == (11, 22, 33, 2)
+
+    assert repo.delete_prompt_logs_for_users([student["id"]])["deleted_token_usage"] == 3
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
+    assert (row["total_tokens"], row["request_count"]) == (0, 0)

@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from pydantic import BaseModel
 
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.domain.errors import ApiKeyExpiredError, MissingTargetError, QuarantineReleaseCooldownError
+from src.domain.errors import ApiKeyExpiredError, ApiKeyNotStartedError, MissingTargetError, QuarantineReleaseCooldownError
 from src.infrastructure.auth.client_api_key import normalize_api_key
 from src.infrastructure.auth.extension_handoff import (
     build_extension_uri,
@@ -37,8 +37,9 @@ PORTAL_CSS_PATH = WEB_DIR / "portal.css"
 PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_JS = WEB_DIR / "session_layout_prototype.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML = WEB_DIR / "session_layout_prototype.html"
-PORTAL_MODEL_EDITOR_PROTOTYPE_HTML = WEB_DIR / "model_editor_prototype.html"
 PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
+# Upstream logos (from @lobehub/icons-static-svg, MIT), drawn in the text colour via CSS mask.
+PORTAL_UPSTREAM_LOGO_PATHS = {name: WEB_DIR / f"provider-{name}.svg" for name in ("ollama", "openrouter")}
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,11 @@ class RouterModelTemplateRequest(BaseModel):
     router_model_template: Any
 
 
+class ModelDocumentUploadRequest(BaseModel):
+    current: Any = None
+    uploaded: Any
+
+
 class ClassRequest(BaseModel):
     name: str
     ends_at: str | None = None
@@ -132,6 +138,7 @@ class SessionPatchRequest(BaseModel):
     tts_enabled: bool | None = None
     speech_transcription_enabled: bool | None = None
     prompt_logging_enabled: bool | None = None
+    web_search_enabled: bool | None = None
     decision_enabled: bool | None = None
     decision_model_allowlist: list[str] | None = None
     decision_model: str | None = None
@@ -192,7 +199,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             raise
         except MissingTargetError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
-        except ApiKeyExpiredError as exc:
+        except (ApiKeyExpiredError, ApiKeyNotStartedError) as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
         except PermissionError:
             raise HTTPException(status_code=403, detail="權限不足") from None
@@ -273,12 +280,6 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             raise HTTPException(status_code=404, detail="session layout prototype not found")
         return HTMLResponse(PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML.read_text(encoding="utf-8"))
 
-    @router.get("/portal/prototype/model-editor", response_class=HTMLResponse)
-    async def portal_model_editor_prototype_page():
-        if not PORTAL_MODEL_EDITOR_PROTOTYPE_HTML.is_file():
-            raise HTTPException(status_code=404, detail="model editor prototype not found")
-        return HTMLResponse(PORTAL_MODEL_EDITOR_PROTOTYPE_HTML.read_text(encoding="utf-8"))
-
     @router.get("/portal/static/session_layout_prototype.js")
     async def portal_session_layout_prototype_js():
         if not PORTAL_SESSION_LAYOUT_PROTOTYPE_JS.is_file():
@@ -315,12 +316,20 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             media_type="image/png",
         )
 
+    @router.get("/portal/static/provider-{name}.svg")
+    async def portal_upstream_logo(name: str):
+        path = PORTAL_UPSTREAM_LOGO_PATHS.get(name)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="upstream logo not found")
+        return Response(content=path.read_text(encoding="utf-8"), media_type="image/svg+xml")
+
     @router.get("/auth/config")
     async def auth_config():
         return {
             "oauth_enabled": oauth.is_configured(),
             "redirect_uri": oauth.redirect_uri if oauth.is_configured() else None,
             "public_url": settings.public_url.rstrip("/"),
+            "open_registration": portal_use_case.settings.auth.open_registration,
         }
 
     @router.get("/auth/google/login")
@@ -517,6 +526,14 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.router_model_template(current_user_id(session_user_id))
         )
 
+    @router.get("/teacher/auto-tier-defaults")
+    async def get_auto_tier_defaults(
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.auto_tier_defaults(current_user_id(session_user_id))
+        )
+
     @router.put("/teacher/router-model-template")
     async def put_router_model_template(
         data: RouterModelTemplateRequest,
@@ -526,6 +543,19 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             lambda: portal_use_case.save_router_model_template(
                 current_user_id(session_user_id),
                 data.router_model_template,
+            )
+        )
+
+    @router.post("/teacher/session-chat-language-models/upload")
+    async def post_model_document_upload(
+        data: ModelDocumentUploadRequest,
+        session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie),
+    ):
+        return portal_call(
+            lambda: portal_use_case.draft_after_upload(
+                current_user_id(session_user_id),
+                data.current,
+                data.uploaded,
             )
         )
 
@@ -545,6 +575,10 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         return portal_call(
             lambda: {"items": portal_use_case.list_classes(current_user_id(session_user_id))}
         )
+
+    @router.patch("/teacher/classes/{class_id}")
+    async def end_my_class(class_id: int, data: ClassPatchRequest, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
+        return portal_call(lambda: portal_use_case.teacher_end_class(current_user_id(session_user_id), class_id, data.status))
 
     @router.get("/teacher/classes/{class_id}/sessions")
     async def list_sessions(class_id: int, session_user_id: str | None = Cookie(default=None, alias=portal_session_cookie)):
@@ -649,6 +683,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 tts_enabled=data.tts_enabled,
                 speech_transcription_enabled=data.speech_transcription_enabled,
                 prompt_logging_enabled=data.prompt_logging_enabled,
+                web_search_enabled=data.web_search_enabled,
                 decision_model=decision_model,
                 status=data.status,
                 course_catalog_yaml=data.course_catalog_yaml,

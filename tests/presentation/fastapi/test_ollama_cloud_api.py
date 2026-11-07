@@ -35,7 +35,7 @@ def test_chat_completions_resolves_ollama_model(fake_repo, fake_logger):
     assert ollama.requests == ["minimax-m3:cloud"]
 
 
-def test_chat_completions_resolves_max_completion_tokens(fake_repo, fake_logger):
+def test_chat_completions_forwards_max_completion_tokens_as_sent(fake_repo, fake_logger):
     client, ollama, _ = _routing_client(fake_repo, fake_logger)
     response = client.post(
         "/v1/chat/completions",
@@ -49,7 +49,7 @@ def test_chat_completions_resolves_max_completion_tokens(fake_repo, fake_logger)
     )
     assert response.status_code == 200
     assert ollama.last_chat_req is not None
-    assert ollama.last_chat_req.max_tokens == 256
+    assert ollama.last_chat_req.extra == {"max_completion_tokens": 256}
 
 
 def test_chat_completions_omits_default_max_tokens(fake_repo, fake_logger):
@@ -65,7 +65,7 @@ def test_chat_completions_omits_default_max_tokens(fake_repo, fake_logger):
     )
     assert response.status_code == 200
     assert ollama.last_chat_req is not None
-    assert ollama.last_chat_req.max_tokens is None
+    assert ollama.last_chat_req.extra == {}
 
 
 def test_responses_resolves_ollama_model(fake_repo, fake_logger):
@@ -89,3 +89,39 @@ def test_responses_keeps_openrouter_colon_tag(fake_repo, fake_logger):
     assert response.status_code == 200
     assert openrouter.requests == ["openai/gpt-oss-120b:free"]
     assert ollama.requests == []
+
+
+def test_chat_completions_does_not_forward_an_upstream_fallback_model_list(fake_repo, fake_logger):
+    client, _, openrouter = _routing_client(fake_repo, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "openrouter@anthropic/claude-sonnet",
+            "messages": [{"role": "user", "content": "ping"}],
+            "models": ["openai/unlisted"],
+            "provider": {"sort": "price"},
+        },
+    )
+    assert response.status_code == 200
+    assert openrouter.last_chat_req.extra == {"provider": {"sort": "price"}}
+
+
+def test_responses_does_not_forward_an_upstream_fallback_model_list(fake_repo, fake_logger):
+    client, _, openrouter = _routing_client(fake_repo, fake_logger)
+    response = client.post(
+        "/v1/responses",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "openrouter@anthropic/claude-sonnet",
+            "input": "ping",
+            "models": ["openai/unlisted"],
+            "provider": {"sort": "price"},
+        },
+    )
+    assert response.status_code == 200
+    assert openrouter.last_responses_body == {
+        "model": "anthropic/claude-sonnet",
+        "input": "ping",
+        "provider": {"sort": "price"},
+    }

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from src.domain.auto_tier import TierSelection
 from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.session_model_allowlist import (
@@ -175,6 +176,7 @@ class RouterRepositoryPort(Protocol):
         tts_enabled: bool | None = None,
         speech_transcription_enabled: bool | None = None,
         prompt_logging_enabled: bool | None = None,
+        web_search_enabled: bool | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -224,6 +226,9 @@ class RouterRepositoryPort(Protocol):
     def is_prompt_logging_enabled(self, session_id: int) -> bool:
         ...
 
+    def is_web_search_enabled(self, session_id: int) -> bool:
+        ...
+
     def redeem_invite(self, invite_code: str, user_id: int) -> dict[str, Any]:
         ...
 
@@ -259,10 +264,31 @@ class RouterRepositoryPort(Protocol):
         messages_json: str = "",
         api_endpoint: str = "",
         response_preview: str = "",
+        tier: TierSelection | None = None,
     ) -> None:
+        """tier: the Auto Tier a vcr-auto selector chose, its name as it was then.
+
+        None when selection did not run or failed; the log's tier stays empty.
+        """
+        ...
+
+    def record_token_usage(
+        self,
+        auth: AuthContext,
+        model: str,
+        api_endpoint: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        """Record Token Usage for one successful request, whether or not prompt logging is on.
+
+        A Personal API Key request has no class or session. Never archived or auto-purged.
+        """
         ...
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
+        """Token Usage per class member: tokens, request_count, and a per-session breakdown."""
         ...
 
     def list_prompt_logs(

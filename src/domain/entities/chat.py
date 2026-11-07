@@ -1,16 +1,17 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 @dataclass
 class ChatMessage:
     role: str
-    content: str = ""
-    images: list[str] | None = None
+    content: str | list[Any] = ""
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
     name: str | None = None
+    # 客戶端在這則訊息上送的其他欄位，原樣轉發。
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -18,12 +19,8 @@ class ChatCompletionRequest:
     model: str
     messages: list[ChatMessage]
     stream: bool = False
-    temperature: float | None = 0.7
-    max_tokens: int | None = None
-    user: str | None = None
-    stop: object | None = None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: Any | None = None
+    # 客戶端送的其他頂層欄位，原樣轉發。
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

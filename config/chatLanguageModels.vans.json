@@ -4,6 +4,23 @@
     "vendor": "customendpoint",
     "apiKey": "",
     "apiType": "responses",
+    "autoTiers": [
+      {
+        "id": "light",
+        "name": "輕量",
+        "description": "簡單、範圍小的協助：解釋觀念、語法或錯誤訊息的意思、改寫一兩行程式、翻譯或整理文字。不需要找出錯誤原因，也不需要寫新的功能。"
+      },
+      {
+        "id": "standard",
+        "name": "一般",
+        "description": "一般的程式作業：撰寫或修改一個函式或小功能、找出並修正一小段程式裡原因明確的錯誤、補寫測試、檢查或重構一小段程式碼。"
+      },
+      {
+        "id": "hard",
+        "name": "困難",
+        "description": "困難或開放式的工作：跨多個檔案的設計、找出原因不明的錯誤、規劃大型修改、推敲複雜的演算法或效能問題。"
+      }
+    ],
     "models": [
       {
         "id": "ollama_cloud@minimax-m3:cloud",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -14,6 +16,7 @@ from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserClaims
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.domain.model_shelf import student_side_document
 from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.presentation.fastapi.error_handlers import register_error_handlers
@@ -76,6 +79,15 @@ def _end_session(client, repo, teacher_id: int, class_id: int, session_id: int) 
     assert ended.status_code == 200
 
 
+def _router_only_fields(document) -> set[str]:
+    found = set()
+    for provider in document:
+        found |= {"autoTiers", "selectorShelf"} & provider.keys()
+        for model in provider.get("models", []):
+            found |= {"autoTier"} & model.keys()
+    return found
+
+
 def _portal_cookie(repo, user_id: int) -> dict[str, str]:
     token, _ = repo.create_portal_session(user_id, "Test browser")
     return {"vcr_portal_session": token}
@@ -92,7 +104,27 @@ def test_chat_language_models_template_requires_a_teacher_session(tmp_path):
         cookies=_portal_cookie(repo, teacher["id"]),
     )
     assert loaded.status_code == 200
-    assert loaded.json() == load_vans_template()
+    assert loaded.json() == student_side_document(load_vans_template())
+
+
+def test_teacher_chat_language_models_carry_no_router_only_fields(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    cookies = _portal_cookie(repo, teacher["id"])
+    template = client.get("/teacher/router-model-template", cookies=cookies).json()
+    assert template[0]["autoTiers"], "the starter ships default Auto Tiers"
+    template[0]["models"][0]["autoTier"] = template[0]["autoTiers"][0]["id"]
+    saved = client.put(
+        "/teacher/router-model-template",
+        cookies=cookies,
+        json={"router_model_template": template},
+    )
+    assert saved.status_code == 200, saved.text
+
+    loaded = client.get("/extension/chat-language-models", cookies=cookies)
+
+    assert loaded.status_code == 200
+    assert _router_only_fields(loaded.json()) == set()
 
 
 def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
@@ -322,6 +354,8 @@ def test_extension_redeem_with_handoff(tmp_path):
     data = redeem.json()
     assert data["api_key"].startswith("vcr_sk_")
     assert data["session"]["invite_code"] == session["invite_code"]
+    assert "autoTiers" in json.dumps(session["session_chat_language_models"])
+    assert not any(word in redeem.text for word in ("autoTiers", "selectorShelf", "autoTier"))
 
     reuse = client.post(
         "/extension/sessions/redeem",
@@ -434,6 +468,56 @@ def test_v1_chat_still_fails_after_session_end(tmp_path):
     )
     assert chat.status_code == 401
     assert chat.json()["error"]["code"] == "api_key_expired"
+
+
+def test_key_is_refused_before_session_starts(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = _redeem_student_key(client, session["invite_code"])
+    # A key redeemed before this rule shipped, on a sitting scheduled later.
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE class_sessions SET session_at = ? WHERE id = ?",
+            ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), session["id"]),
+        )
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    chat = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"model": "ollama_cloud@minimax-m3:cloud", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert chat.status_code == 403
+    assert chat.json()["error"]["code"] == "api_key_not_started"
+
+    catalog = client.get("/extension/course-catalog", headers=headers)
+    assert catalog.status_code == 403
+    assert catalog.json()["detail"] == "課堂尚未開始，請在開始時間後再使用"
+
+    models = client.get("/extension/chat-language-models", headers=headers)
+    assert models.status_code == 403
+    assert models.json()["detail"] == "課堂尚未開始，請在開始時間後再使用"
+
+
+def test_nickname_redeem_is_refused_before_session_starts(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    session = repo.create_class_session(
+        klass["id"],
+        teacher["id"],
+        "Week 1",
+        session_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+    )
+
+    redeem = client.post(
+        "/extension/sessions/nickname-redeem",
+        json={"invite_code": session["invite_code"], "nickname": "小明"},
+    )
+    assert redeem.status_code == 400
+    assert "課堂尚未開始" in redeem.json()["detail"]
 
 
 def test_disabled_key_fails_extension_gets(tmp_path):

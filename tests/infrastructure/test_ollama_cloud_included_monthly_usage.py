@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
@@ -5,7 +7,8 @@ from src.infrastructure.config import ProviderSettings
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 
-OLLAMA_USAGE_URL = "https://ollama.com/api/usage"
+OLLAMA_USAGE_URL = "https://ollama.com/api/usage?range=30d"
+OLLAMA_ME_URL = "https://ollama.com/api/me"
 
 
 def _ollama_gateway(monkeypatch, *, envs: dict[str, str], usage_client: httpx.AsyncClient):
@@ -33,16 +36,29 @@ def _bearer_key(request: httpx.Request) -> str:
     return auth.removeprefix("Bearer ").strip()
 
 
-def _usage_payload(monthly: float, *, extra_remaining: float | None = 99.0) -> dict:
-    payload: dict = {
-        "activity": {"cost": "9.99"},
-        "limits": {
-            "monthly": {"usage": monthly, "models": []},
-        },
+def _month_start() -> str:
+    now = datetime.now(timezone.utc)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _usage_payload(used_usd: float) -> dict:
+    return {
+        "from": "2020-01-01T00:00:00Z",
+        "buckets": [{"from": _month_start(), "usage_usd": used_usd}],
     }
-    if extra_remaining is not None:
-        payload["extra_usage"] = {"remaining": extra_remaining}
-    return payload
+
+
+def _account_payload() -> dict:
+    return {"Plan": "pro", "renews_at": "2020-01-01T00:00:00Z", "Email": "hidden@example.com"}
+
+
+def _meter_response(request: httpx.Request, used_usd: float) -> httpx.Response:
+    url = str(request.url)
+    if url == OLLAMA_ME_URL:
+        return httpx.Response(200, json=_account_payload())
+    if url == OLLAMA_USAGE_URL:
+        return httpx.Response(200, json=_usage_payload(used_usd))
+    return httpx.Response(404, json={"error": "unexpected"})
 
 
 @pytest.mark.asyncio
@@ -50,11 +66,10 @@ async def test_overlay_attaches_included_monthly_usage_and_hides_secrets(monkeyp
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == OLLAMA_USAGE_URL
         key = _bearer_key(request)
         calls.append(key)
-        weekly = 0.125 if key == "secret-a" else 0.0
-        return httpx.Response(200, json=_usage_payload(weekly))
+        used = 2.14271 if key == "secret-a" else 0.0
+        return _meter_response(request, used)
 
     client = _usage_client(handler)
     ollama = _ollama_gateway(
@@ -66,12 +81,15 @@ async def test_overlay_attaches_included_monthly_usage_and_hides_secrets(monkeyp
     snapshot = routing.pool_status(limited_only=True)
     status = await routing.overlay_included_monthly_usage(snapshot)
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
-    assert [item["included_monthly_usage"] for item in keys] == [0.125, 0.0]
+    meters = [item["included_monthly_usage"] for item in keys]
+    assert [item["summary"] for item in meters] == ["$2.14 of $60 used", "$0 of $60 used"]
+    assert all(item["resets"].startswith("Resets in ") for item in meters)
     assert "extra_usage_remaining" not in keys[0]
     assert [item["in_flight"] for item in keys] == [0, 0]
     dumped = str(status)
     assert "secret-a" not in dumped
     assert "secret-b" not in dumped
+    assert "hidden@example.com" not in dumped
     assert set(calls) == {"secret-a", "secret-b"}
     await client.aclose()
 
@@ -82,7 +100,7 @@ async def test_one_key_usage_error_leaves_other_key_and_in_flight(monkeypatch):
         key = _bearer_key(request)
         if key == "secret-a":
             return httpx.Response(401, json={"error": "unauthorized"})
-        return httpx.Response(200, json=_usage_payload(0.08))
+        return _meter_response(request, 1.5)
 
     client = _usage_client(handler)
     ollama = _ollama_gateway(
@@ -95,7 +113,7 @@ async def test_one_key_usage_error_leaves_other_key_and_in_flight(monkeypatch):
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert len(keys) == 2
     assert keys[0]["included_monthly_usage"] is None
-    assert keys[1]["included_monthly_usage"] == 0.08
+    assert keys[1]["included_monthly_usage"]["summary"] == "$1.50 of $60 used"
     assert keys[0]["in_flight"] == 0
     assert keys[1]["in_flight"] == 0
     await client.aclose()
@@ -106,7 +124,7 @@ async def test_usage_timeout_marks_only_that_key_unavailable(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if _bearer_key(request) == "secret-a":
             raise httpx.TimeoutException("usage timed out")
-        return httpx.Response(200, json=_usage_payload(0.03))
+        return _meter_response(request, 0.5)
 
     client = _usage_client(handler)
     ollama = _ollama_gateway(
@@ -118,21 +136,16 @@ async def test_usage_timeout_marks_only_that_key_unavailable(monkeypatch):
     status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert keys[0]["included_monthly_usage"] is None
-    assert keys[1]["included_monthly_usage"] == 0.03
+    assert keys[1]["included_monthly_usage"]["summary"] == "$0.50 of $60 used"
     await client.aclose()
 
 
 @pytest.mark.asyncio
 async def test_session_only_usage_is_unavailable(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "limits": {
-                    "session": {"usage": 0.4, "models": []},
-                }
-            },
-        )
+        if str(request.url) == OLLAMA_ME_URL:
+            return httpx.Response(200, json=_account_payload())
+        return httpx.Response(200, json={"from": "2099-01-01T00:00:00Z", "buckets": []})
 
     client = _usage_client(handler)
     ollama = _ollama_gateway(
@@ -154,7 +167,7 @@ async def test_unset_second_key_fetches_only_configured_key(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(_bearer_key(request))
-        return httpx.Response(200, json=_usage_payload(0.01, extra_remaining=None))
+        return _meter_response(request, 0.01)
 
     client = _usage_client(handler)
     ollama = _ollama_gateway(
@@ -166,18 +179,20 @@ async def test_unset_second_key_fetches_only_configured_key(monkeypatch):
     status = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     keys = status["providers"]["ollama_cloud"]["pool"]["keys"]
     assert [item["label"] for item in keys] == ["OLLAMA_CLOUD 1"]
-    assert calls == ["secret-a"]
+    assert set(calls) == {"secret-a"}
     await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_successful_weekly_usage_is_cached_failures_are_retried(monkeypatch):
+async def test_successful_meter_is_cached_failures_are_retried(monkeypatch):
     usage_by_call = {"secret-a": [0.07], "secret-b": [httpx.Response(401), 0.04]}
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         key = _bearer_key(request)
         calls.append(key)
+        if str(request.url) == OLLAMA_ME_URL:
+            return httpx.Response(200, json=_account_payload())
         next_value = usage_by_call[key].pop(0)
         if isinstance(next_value, httpx.Response):
             return next_value
@@ -192,10 +207,10 @@ async def test_successful_weekly_usage_is_cached_failures_are_retried(monkeypatc
     routing = RoutingGateway({"ollama_cloud": ollama})
     first = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
     second = await routing.overlay_included_monthly_usage(routing.pool_status(limited_only=True))
-    assert first["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"] == 0.07
+    assert first["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"]["used_usd"] == 0.07
     assert first["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_monthly_usage"] is None
-    assert second["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"] == 0.07
-    assert second["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_monthly_usage"] == 0.04
-    assert calls.count("secret-a") == 1
-    assert calls.count("secret-b") == 2
+    assert second["providers"]["ollama_cloud"]["pool"]["keys"][0]["included_monthly_usage"]["used_usd"] == 0.07
+    assert second["providers"]["ollama_cloud"]["pool"]["keys"][1]["included_monthly_usage"]["used_usd"] == 0.04
+    assert calls.count("secret-a") == 2
+    assert calls.count("secret-b") == 4
     await client.aclose()

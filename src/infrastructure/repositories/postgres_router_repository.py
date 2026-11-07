@@ -180,6 +180,33 @@ class PostgresRouterRepository(RouterRepositoryBase):
             for table in ("prompt_logs", "prompt_logs_archive"):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS api_endpoint TEXT")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_name TEXT")
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_confidence DOUBLE PRECISION")
+            token_usage_is_new = (
+                conn.execute("SELECT to_regclass('token_usage') AS t").fetchone()["t"] is None
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    class_id INTEGER,
+                    session_id INTEGER,
+                    model TEXT NOT NULL,
+                    api_endpoint TEXT NOT NULL DEFAULT '',
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_class_user ON token_usage(class_id, user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_session_user ON token_usage(session_id, user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS token_usage_user ON token_usage(user_id)")
+            if token_usage_is_new:
+                self._backfill_token_usage_from_prompt_logs(conn)
+                self._backfill_token_usage_from_archive(conn)
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE"
             )
@@ -200,6 +227,9 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS prompt_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            conn.execute(
+                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE"
             )
             conn.execute(
                 "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []\n'"
@@ -312,6 +342,21 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             self._backfill_router_model_templates(conn)
 
+    def _backfill_token_usage_from_archive(self, conn: Any) -> None:
+        """Copy successful archived Prompt Logs; skip a row still in the live table."""
+        conn.execute(
+            f"""
+            {self.TOKEN_USAGE_INSERT}
+            SELECT a.user_id, a.class_id, a.session_id, a.model, COALESCE(a.api_endpoint, ''),
+                   COALESCE(a.prompt_tokens, 0), COALESCE(a.completion_tokens, 0),
+                   COALESCE(a.total_tokens, 0), a.created_at
+            FROM prompt_logs_archive a
+            WHERE a.status = 'ok' AND a.user_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM prompt_logs l WHERE l.id = a.id)
+            ORDER BY a.created_at, a.id
+            """
+        )
+
     def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -328,7 +373,8 @@ class PostgresRouterRepository(RouterRepositoryBase):
                         INSERT INTO prompt_logs_archive(
                             id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                             prompt_tokens, completion_tokens, total_tokens, client_ip, created_at, archived_at,
-                            message_preview, messages_json, api_endpoint, response_preview
+                            message_preview, messages_json, api_endpoint, response_preview,
+                            tier_name, tier_confidence
                         )
                         SELECT
                             l.id, l.user_id, l.class_id, l.session_id, l.raw_prompt, l.final_prompt,
@@ -337,7 +383,8 @@ class PostgresRouterRepository(RouterRepositoryBase):
                             COALESCE(l.total_tokens, 0),
                             l.client_ip, l.created_at, ?,
                             COALESCE(l.message_preview, ''), COALESCE(l.messages_json, ''),
-                            COALESCE(l.api_endpoint, ''), COALESCE(l.response_preview, '')
+                            COALESCE(l.api_endpoint, ''), COALESCE(l.response_preview, ''),
+                            l.tier_name, l.tier_confidence
                         FROM prompt_logs l
                         JOIN picked ON picked.id = l.id
                         RETURNING id
