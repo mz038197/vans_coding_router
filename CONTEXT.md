@@ -157,7 +157,7 @@ The fixed Vans character image mark shown in Portal navigation chrome and, on th
 _Avoid_: Icon, favicon, nav icon, school logo
 
 **Login Network**:
-The decorative animated dithered swirl behind the brand panel of the Portal login shell only. It is not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
+The decorative animated dithered swirl behind the brand panel of the Portal login shell only. Its edge dissolves into the login pane, and it calms behind the brand words. It is not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
 _Avoid_: Neural Grid, particle background, login animation, constellation, Shader Lines, Swirl
 
 **Class**:

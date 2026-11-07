@@ -432,6 +432,18 @@ def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
     assert "prefers-reduced-motion" in html
 
 
+def test_portal_login_brand_panel_dissolves_into_the_login_pane(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    # Magenta rim along the swirl arms where the panel dissolves (ADR 0049).
+    assert "'#5c1a3d'" in html
+    # Calm eye behind the brand words.
+    assert "u_eyeCenter" in html
+    css = client.get("/portal/static/portal.css").text
+    # The panel drops its solid background only while the swirl is drawn; without WebGL it stays.
+    assert ".login-brand-panel.has-swirl" in css
+
+
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
     client, repo, _ = _client(tmp_path)
     response = client.post("/auth/google", json={"email": "student@gmail.com", "name": "Student"})
