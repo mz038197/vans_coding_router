@@ -139,8 +139,8 @@ def test_portal_page_uses_brand_logo_in_both_navs(tmp_path):
 def test_portal_page_has_theme_toggle_and_bootstrap(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert html.count('class="nav-theme-toggle"') == 2
-    assert 'data-theme-toggle' in html
+    # One toggle on the login shell, one on the app shell.
+    assert html.count("data-theme-toggle aria-label") == 2
     assert "portal-theme" in html
     assert 'data-theme' in html
 
@@ -387,18 +387,36 @@ def test_portal_oauth_btn_matches_primary_in_light_keeps_white_in_dark(tmp_path)
     assert re.search(r'html\[data-theme="dark"\]\s*\{[^}]*--accent: #fafafa;[^}]*--accent-fg: #0a0a0a;', css, re.S)
 
 
-def test_portal_login_network_uses_theme_aware_colors(tmp_path):
+def _login_shell(html: str) -> str:
+    start = html.index('<div id="loginShell">')
+    return html[start:html.index('id="appShell"', start)]
+
+
+def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
+    client, _, _ = _client(tmp_path)
+    shell = _login_shell(client.get("/portal").text)
+    assert "site-nav" not in shell
+    assert "data-theme-toggle" in shell
+    panel = shell[shell.index('class="login-brand-panel"'):shell.index('id="login"')]
+    assert 'id="loginNetworkRoot"' in panel
+    assert "/portal/static/brand-logo.png" in panel
+    assert "Vans Coding<br>Router" in panel
+    pane = shell[shell.index('id="login"'):]
+    assert "<h1>歡迎回來</h1>" in pane
+    assert "Vans Coding" not in pane
+    assert "/auth/google/login" in pane
+
+
+def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert 'id="loginNetworkRoot"' in html
-    assert "themeLook" in html
-    assert "ShaderMaterial" in html
+    assert "three.min.js" not in html
+    assert "getContext('webgl'" in html
+    assert "bayer4" in html
+    # Same swirl palette on both Themes.
+    assert "'#220011'" in html
+    assert "'#00ffff'" in html
     assert "prefers-reduced-motion" in html
-    # Light Theme Login Network: brighter cyan-teal on light field
-    assert "g: 0.92" in html
-    assert "intensity: 1.65" in html
-    # Dark Theme Login Network: white / full tint
-    assert "r: 1.0, g: 1.0, b: 1.0" in html
 
 
 def test_dev_google_login_works_when_oauth_disabled(tmp_path):
@@ -2328,6 +2346,8 @@ def test_portal_css_font_sizes_sit_on_the_type_scale(tmp_path):
     # ADR 0045 / design-system SKILL.md: type scale 12/14/16/20/24/32, in px.
     client, _, _ = _client(tmp_path)
     css = client.get("/portal/static/portal.css").text
+    # ADR 0048: the login brand panel's product name is display type, above the scale on purpose.
+    css = re.sub(r"\.login-brand-title\s*\{[^}]*\}", "", css)
     off_scale = []
     for value in re.findall(r"font-size:\s*([^;}\n]+)", css):
         size = value.replace("!important", "").strip()

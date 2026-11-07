@@ -153,12 +153,12 @@ The school Portal visual identity aligned with pegasi_router: light surfaces wit
 _Avoid_: school theme, pegasi theme, teal theme
 
 **Brand Logo**:
-The fixed Vans character image mark shown in Portal navigation chrome. It does not change with Theme. Navigation presents it on a Theme-aware light badge plate; the image asset itself stays a transparent character cutout.
+The fixed Vans character image mark shown in Portal navigation chrome and, on the login shell, above the product name in the brand panel. It does not change with Theme. It sits on a Theme-aware light badge plate; the image asset itself stays a transparent character cutout.
 _Avoid_: Icon, favicon, nav icon, school logo
 
 **Login Network**:
-The decorative animated atmosphere on the Portal login hero only. It is not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
-_Avoid_: Neural Grid, particle background, login animation, constellation, Shader Lines
+The decorative animated dithered swirl behind the brand panel of the Portal login shell only. It is not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.
+_Avoid_: Neural Grid, particle background, login animation, constellation, Shader Lines, Swirl
 
 **Class**:
 A teacher-owned classroom grouping that outlives one sitting. Class Sessions belong to a Class; a Classroom Nickname is unique within one Class, not across Classes. Its owning teacher (or an admin) can end it; only an admin can reopen an ended Class.

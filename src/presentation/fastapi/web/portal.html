@@ -20,27 +20,23 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
   <script src="/portal/static/portal_webmcp.js"></script>
-  <link rel="stylesheet" href="/portal/static/portal.css?v=kpi-light-1" />
+  <link rel="stylesheet" href="/portal/static/portal.css?v=login-split-1" />
 </head>
 <body>
   <div id="loginShell">
-    <header class="site-nav">
-      <div class="nav-brand">
-        <div class="nav-logo"><img src="/portal/static/brand-logo.png" alt="" width="32" height="32" /></div>
-        <span class="nav-title">Vans Coding <span class="gradient-text">Router</span></span>
+    <button type="button" class="nav-theme-toggle login-theme-toggle" data-theme-toggle aria-label="切換 Theme" title="切換 Theme">
+      <i class="fas fa-moon theme-icon-light" aria-hidden="true"></i>
+      <i class="fas fa-sun theme-icon-dark" aria-hidden="true"></i>
+    </button>
+    <main class="login-split">
+      <div class="login-brand-panel">
+        <div id="loginNetworkRoot" class="login-network-canvas" aria-hidden="true"></div>
+        <div class="nav-logo login-brand-logo"><img src="/portal/static/brand-logo.png" alt="" width="60" height="60" /></div>
+        <p class="login-brand-title">Vans Coding<br>Router</p>
       </div>
-      <div class="nav-user">
-        <button type="button" class="nav-theme-toggle" data-theme-toggle aria-label="切換 Theme" title="切換 Theme">
-          <i class="fas fa-moon theme-icon-light" aria-hidden="true"></i>
-          <i class="fas fa-sun theme-icon-dark" aria-hidden="true"></i>
-        </button>
-      </div>
-    </header>
-    <main class="login-hero neural-grid">
-      <div class="login-orbs" aria-hidden="true"></div>
-      <div id="loginNetworkRoot" class="login-network-canvas" aria-hidden="true"></div>
-      <section id="login" class="glass-card login-card">
-        <h1>Vans Coding <span class="gradient-text">Router</span></h1>
+      <section id="login" class="login-pane">
+        <div class="login-dither" aria-hidden="true"></div>
+        <h1>歡迎回來</h1>
         <p class="login-subtitle">課堂 LLM 路由與 API Key 管理</p>
         <div id="loginError" class="error hidden"></div>
         <div id="oauthLogin" class="hidden">
@@ -55,6 +51,7 @@
           <button onclick="login()">開發模式登入</button>
           <p class="dev-note">僅在未設定 Google OAuth 時可用，請勿在正式環境使用。</p>
         </div>
+        <p class="login-hint">第一次登入會自動建立帳號</p>
       </section>
     </main>
   </div>
@@ -506,231 +503,161 @@
       stopLoginNetwork();
     }
 
+    /* Login Network: a 4x4-Bayer dithered swirl drawn with plain WebGL in the login brand panel.
+       Same palette on both Themes. Reduced motion draws one still frame. No WebGL: the panel's
+       solid background stays (silent degrade). */
     const loginNetwork = (() => {
-      const THREE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+      const SWIRL_BACK = '#220011';
+      const SWIRL_FRONT = '#00ffff';
+      const PX_SIZE = 4;
+      const SPEED = 0.9;
+      const VERTEX_SHADER = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+      const FRAGMENT_SHADER = `
+        precision highp float;
+        uniform vec2 u_res;
+        uniform float u_time;
+        uniform float u_px;
+        uniform vec3 u_back;
+        uniform vec3 u_front;
+        #define TWO_PI 6.28318530718
+
+        float bayer4(vec2 c) {
+          vec2 m = mod(floor(c), 4.0);
+          int i = int(m.x + m.y * 4.0);
+          float v = 5.0;
+          if (i == 0) v = 0.0;  else if (i == 1) v = 8.0;  else if (i == 2) v = 2.0;  else if (i == 3) v = 10.0;
+          else if (i == 4) v = 12.0; else if (i == 5) v = 4.0;  else if (i == 6) v = 14.0; else if (i == 7) v = 6.0;
+          else if (i == 8) v = 3.0;  else if (i == 9) v = 11.0; else if (i == 10) v = 1.0; else if (i == 11) v = 9.0;
+          else if (i == 12) v = 15.0; else if (i == 13) v = 7.0; else if (i == 14) v = 13.0;
+          return v / 16.0;
+        }
+
+        void main() {
+          vec2 cell = floor(gl_FragCoord.xy / u_px);
+          vec2 uv = ((cell + 0.5) * u_px - 0.5 * u_res) / min(u_res.x, u_res.y) * 1.6;
+          float l = length(uv);
+          float angle = 6.0 * atan(uv.y, uv.x) + 4.0 * u_time;
+          float offset = pow(max(l, 1e-4), -1.2) + angle / TWO_PI;
+          float shape = mix(0.0, fract(offset), smoothstep(0.0, 1.0, pow(l, 1.2)));
+          float lit = step(0.5, shape + bayer4(cell) - 0.5);
+          gl_FragColor = vec4(mix(u_back, u_front, lit), 1.0);
+        }
+      `;
+
+      let reducedMotion = false;
       let container = null;
-      let hero = null;
-      let camera = null;
-      let scene = null;
-      let renderer = null;
+      let canvas = null;
+      let gl = null;
       let uniforms = null;
+      let resizeObserver = null;
       let rafId = 0;
       let running = false;
-      let reducedMotion = false;
-      let loadPromise = null;
-      let startGeneration = 0;
+      let startedAt = 0;
 
-      const vertexShader = `
-        void main() {
-          gl_Position = vec4(position, 1.0);
-        }
-      `;
-
-      const fragmentShader = `
-        #define TWO_PI 6.2831853072
-        #define PI 3.14159265359
-
-        precision highp float;
-        uniform vec2 resolution;
-        uniform float time;
-        uniform vec3 tint;
-        uniform float intensity;
-
-        float random (in float x) {
-            return fract(sin(x)*1e4);
-        }
-        float random (vec2 st) {
-            return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-        }
-
-        void main(void) {
-          vec2 uv = (gl_FragCoord.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);
-
-          vec2 fMosaicScal = vec2(4.0, 2.0);
-          vec2 vScreenSize = vec2(256.0, 256.0);
-          uv.x = floor(uv.x * vScreenSize.x / fMosaicScal.x) / (vScreenSize.x / fMosaicScal.x);
-          uv.y = floor(uv.y * vScreenSize.y / fMosaicScal.y) / (vScreenSize.y / fMosaicScal.y);
-
-          float t = time*0.06+random(uv.x)*0.4;
-          float lineWidth = 0.0008;
-
-          vec3 color = vec3(0.0);
-          for(int j = 0; j < 3; j++){
-            for(int i=0; i < 5; i++){
-              color[j] += lineWidth*float(i*i) / abs(fract(t - 0.01*float(j)+float(i)*0.01)*1.0 - length(uv));
-            }
-          }
-
-          vec3 glow = vec3(color[2], color[1], color[0]) * tint * intensity;
-          /* Additive pass: dark pixels stay transparent so --bg-base / Neural Grid show through. */
-          float alpha = clamp(max(glow.r, max(glow.g, glow.b)), 0.0, 1.0);
-          gl_FragColor = vec4(glow, alpha);
-        }
-      `;
-
-      function themeLook() {
-        if (getPortalTheme() === 'dark') {
-          return { r: 1.0, g: 1.0, b: 1.0, intensity: 1.0 };
-        }
-        /* Brighter cyan-teal so additive lines read on --bg-base. */
-        return { r: 0.12, g: 0.92, b: 0.85, intensity: 1.65 };
+      function rgb(hex) {
+        const n = parseInt(hex.slice(1), 16);
+        return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
       }
 
-      function applyTint() {
-        if (!uniforms) return;
-        const look = themeLook();
-        uniforms.tint.value.set(look.r, look.g, look.b);
-        uniforms.intensity.value = look.intensity;
+      function compile(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
       }
 
-      function ensureThree() {
-        if (window.THREE) return Promise.resolve(window.THREE);
-        if (loadPromise) return loadPromise;
-        loadPromise = new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = THREE_CDN;
-          script.async = true;
-          script.onload = () => {
-            if (window.THREE) resolve(window.THREE);
-            else {
-              loadPromise = null;
-              reject(new Error('THREE missing after load'));
-            }
-          };
-          script.onerror = () => {
-            loadPromise = null;
-            reject(new Error('THREE CDN failed'));
-          };
-          document.head.appendChild(script);
-        });
-        return loadPromise;
+      function mount() {
+        canvas = document.createElement('canvas');
+        gl = canvas.getContext('webgl', { antialias: false });
+        if (!gl) return false;
+        const vertex = compile(gl.VERTEX_SHADER, VERTEX_SHADER);
+        const fragment = compile(gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
+        if (!vertex || !fragment) return false;
+        const program = gl.createProgram();
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, fragment);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return false;
+        gl.useProgram(program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+        const position = gl.getAttribLocation(program, 'p');
+        gl.enableVertexAttribArray(position);
+        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        uniforms = {
+          res: gl.getUniformLocation(program, 'u_res'),
+          time: gl.getUniformLocation(program, 'u_time'),
+          px: gl.getUniformLocation(program, 'u_px'),
+        };
+        gl.uniform3fv(gl.getUniformLocation(program, 'u_back'), rgb(SWIRL_BACK));
+        gl.uniform3fv(gl.getUniformLocation(program, 'u_front'), rgb(SWIRL_FRONT));
+        container.appendChild(canvas);
+        return true;
       }
 
-      function onWindowResize() {
-        if (!renderer || !uniforms || !container) return;
+      function resize() {
+        const ratio = window.devicePixelRatio || 1;
         const rect = container.getBoundingClientRect();
-        const width = Math.max(1, Math.floor(rect.width));
-        const height = Math.max(1, Math.floor(rect.height));
-        renderer.setPixelRatio(window.devicePixelRatio || 1);
-        // updateStyle true: CSS px match logical size; buffer uses devicePixelRatio.
-        renderer.setSize(width, height, true);
-        uniforms.resolution.value.x = renderer.domElement.width;
-        uniforms.resolution.value.y = renderer.domElement.height;
+        canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+        canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(uniforms.res, canvas.width, canvas.height);
+        gl.uniform1f(uniforms.px, PX_SIZE * ratio);
+        if (reducedMotion) draw(0);
       }
 
-      function tick() {
-        if (!running || !renderer || !scene || !camera || !uniforms) return;
-        applyTint();
-        uniforms.time.value += 0.05;
-        renderer.render(scene, camera);
+      function draw(seconds) {
+        gl.uniform1f(uniforms.time, seconds * SPEED * 0.5);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+
+      function tick(now) {
+        if (!running) return;
+        draw((now - startedAt) / 1000);
         rafId = requestAnimationFrame(tick);
       }
 
       function onVisibilityChange() {
-        if (document.hidden) {
-          cancelAnimationFrame(rafId);
-          rafId = 0;
-        } else if (running) {
-          rafId = requestAnimationFrame(tick);
-        }
-      }
-
-      function disposeScene() {
         cancelAnimationFrame(rafId);
         rafId = 0;
-        window.removeEventListener('resize', onWindowResize);
-        document.removeEventListener('visibilitychange', onVisibilityChange);
-        if (renderer) {
-          renderer.dispose();
-          if (renderer.domElement && renderer.domElement.parentNode) {
-            renderer.domElement.parentNode.removeChild(renderer.domElement);
-          }
-        }
-        if (scene) {
-          scene.traverse((obj) => {
-            if (obj.geometry) obj.geometry.dispose();
-            if (obj.material) {
-              if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-              else obj.material.dispose();
-            }
-          });
-        }
-        camera = null;
-        scene = null;
-        renderer = null;
-        uniforms = null;
-        if (container) container.innerHTML = '';
+        if (running && !reducedMotion && !document.hidden) rafId = requestAnimationFrame(tick);
       }
 
-      function mountScene(THREE) {
-        if (!container || !hero) return false;
-        container.innerHTML = '';
-        camera = new THREE.Camera();
-        camera.position.z = 1;
-        scene = new THREE.Scene();
-        uniforms = {
-          time: { value: 1.0 },
-          resolution: { value: new THREE.Vector2() },
-          tint: { value: new THREE.Vector3(1, 1, 1) },
-          intensity: { value: 1.0 },
-        };
-        const material = new THREE.ShaderMaterial({
-          uniforms,
-          vertexShader,
-          fragmentShader,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        });
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
-        scene.add(mesh);
-        try {
-          renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
-        } catch (err) {
-          disposeScene();
-          return false;
-        }
-        if (!renderer.getContext()) {
-          disposeScene();
-          return false;
-        }
-        renderer.setClearColor(0x000000, 0);
-        renderer.setClearAlpha(0);
-        container.appendChild(renderer.domElement);
-        applyTint();
-        onWindowResize();
-        window.addEventListener('resize', onWindowResize, false);
-        document.addEventListener('visibilitychange', onVisibilityChange);
-        return true;
+      function dispose() {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+        if (resizeObserver) resizeObserver.disconnect();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        const lose = gl && gl.getExtension('WEBGL_lose_context');
+        if (lose) lose.loseContext();
+        if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+        resizeObserver = null;
+        canvas = null;
+        gl = null;
+        uniforms = null;
       }
 
       return {
         start() {
-          if (running || reducedMotion) return;
+          if (running) return;
           container = document.getElementById('loginNetworkRoot');
-          hero = document.querySelector('#loginShell .login-hero');
-          if (!container || !hero || !window.requestAnimationFrame) return;
-          const generation = ++startGeneration;
+          if (!container || !window.requestAnimationFrame) return;
+          if (!mount()) {
+            dispose();
+            return;
+          }
           running = true;
-          ensureThree()
-            .then((THREE) => {
-              if (!running || generation !== startGeneration) return;
-              if (!mountScene(THREE)) {
-                running = false;
-                return;
-              }
-              rafId = requestAnimationFrame(tick);
-            })
-            .catch(() => {
-              if (generation === startGeneration) running = false;
-            });
+          startedAt = performance.now();
+          resizeObserver = new ResizeObserver(resize);
+          resizeObserver.observe(container);
+          resize();
+          document.addEventListener('visibilitychange', onVisibilityChange);
+          if (!reducedMotion) rafId = requestAnimationFrame(tick);
         },
         stop() {
-          startGeneration += 1;
           running = false;
-          disposeScene();
+          dispose();
           container = null;
-          hero = null;
         },
         init() {
           reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

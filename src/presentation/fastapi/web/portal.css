@@ -223,26 +223,6 @@
     html[data-theme="dark"] .nav-theme-toggle .theme-icon-light { display: none; }
     html[data-theme="dark"] .nav-theme-toggle .theme-icon-dark { display: inline; }
 
-    #loginShell .site-nav {
-      justify-content: space-between;
-    }
-
-    #loginShell .nav-user {
-      margin-left: auto;
-    }
-
-    #loginShell .login-hero {
-      background-color: var(--bg-base);
-    }
-
-    html[data-theme="light"] #loginShell .login-orbs::before {
-      background: var(--accent-soft-strong);
-    }
-
-    html[data-theme="light"] #loginShell .login-orbs::after {
-      background: var(--accent-soft);
-    }
-
     .nav-title {
       font-size: 16px;
       font-weight: 600;
@@ -257,84 +237,137 @@
       font-size: 14px;
     }
 
-    .login-hero {
-      position: relative;
+    /* Portal login: split page. Brand panel (Login Network + Brand Logo + name) on the left,
+       login pane on the right. No top navigation; the Theme toggle floats top-right. */
+    .login-theme-toggle {
+      position: fixed;
+      top: 16px;
+      right: 24px;
+      z-index: 10;
+    }
+
+    .login-split {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
       min-height: 100vh;
+      background-color: var(--bg-base);
+    }
+
+    .login-brand-panel {
+      position: relative;
+      overflow: hidden;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 96px 16px 48px;
-      overflow: hidden;
-    }
-
-    .login-orbs::before,
-    .login-orbs::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
-    }
-
-    .login-orbs::before {
-      top: 10rem;
-      left: 2.5rem;
-      width: 18rem;
-      height: 18rem;
-      background: var(--accent-soft-strong);
-      filter: blur(120px);
-    }
-
-    .login-orbs::after {
-      bottom: 5rem;
-      right: 2.5rem;
-      width: 24rem;
-      height: 24rem;
-      background: var(--accent-soft);
-      filter: blur(150px);
-    }
-
-    .login-orbs {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
+      gap: 16px;
+      padding: 48px 16px;
+      /* Swirl back colour: also what shows when WebGL is unavailable. */
+      background: #220011;
     }
 
     .login-network-canvas {
       position: absolute;
       inset: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
       pointer-events: none;
-      overflow: hidden;
     }
 
     .login-network-canvas canvas {
       display: block;
-      /* Size comes from Three.js setSize (style + drawing buffer); do not force 100%. */
+      width: 100%;
+      height: 100%;
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .login-network-canvas { display: none; }
-    }
-
-    .login-card {
+    .login-brand-logo {
       position: relative;
-      z-index: 1;
-      width: min(420px, 100%);
-      padding: 32px 24px;
+      width: clamp(44px, 4.5vw, 60px);
+      height: clamp(44px, 4.5vw, 60px);
+      margin-bottom: 4px;
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(34, 0, 17, 0.6);
+    }
+
+    .login-brand-title {
+      position: relative;
+      margin: 0;
+      color: #ffffff;
+      font-size: clamp(38px, 6vw, 84px);
+      font-weight: 600;
+      line-height: 0.95;
+      letter-spacing: -0.05em;
       text-align: center;
+      text-shadow: 0 2px 30px rgba(34, 0, 17, 0.9);
     }
 
-    .login-card h1 {
-      font-size: 24px;
-      margin-bottom: 8px;
+    .login-pane {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      margin: 0;
+      padding: 48px clamp(24px, 6vw, 72px);
     }
 
-    .login-card .login-subtitle {
-      color: var(--text-muted);
+    .login-pane > * {
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .login-dither {
+      max-width: 56px;
+      height: 6px;
       margin-bottom: 24px;
+      background: repeating-conic-gradient(#220011 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+    }
+
+    html[data-theme="dark"] .login-dither {
+      background: repeating-conic-gradient(#00ffff 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+    }
+
+    .login-pane h1 {
+      margin-bottom: 8px;
+      font-size: 32px;
+      letter-spacing: -0.03em;
+    }
+
+    .login-pane .login-subtitle {
+      margin-bottom: 32px;
+      color: var(--text-muted);
       font-size: 14px;
+    }
+
+    .login-pane .oauth-btn {
+      display: flex;
+      width: 100%;
+      height: 48px;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
+
+    .login-pane .oauth-btn:focus-visible {
+      outline: 2px solid #220011;
+      outline-offset: 3px;
+    }
+
+    html[data-theme="dark"] .login-pane .oauth-btn:focus-visible {
+      outline-color: #00ffff;
+    }
+
+    .login-pane #devLogin input,
+    .login-pane #devLogin button {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .login-hint {
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 800px) {
+      .login-split { grid-template-columns: 1fr; }
+      .login-brand-panel { min-height: 40vh; }
+      .login-pane { justify-content: flex-start; padding: 32px 16px 48px; }
     }
 
     .page-main {
