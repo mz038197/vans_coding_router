@@ -1,6 +1,6 @@
 # A service role connects to its own database only
 
-Status: accepted. Amended by ADR 0080 (the key check is the cut before the table move).
+Status: accepted. Amended by ADR 0081 (the key check is the cut before the table move).
 
 On 2026-10-08 the Neon project VCRouter-db had one production branch and one role, `neondb_owner`, owning both `neondb` and `vans_signals`. The router, vans-mcp-server, pokemon-world-mcp's connection to the router, and vans-signals all use that role. The game data is the other Neon project, `pokemon_world_db`.
 

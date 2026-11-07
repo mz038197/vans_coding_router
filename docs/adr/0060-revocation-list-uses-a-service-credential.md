@@ -1,6 +1,6 @@
 # The Revocation List is fetched with one service credential
 
-Status: accepted. Amended by ADR 0075 (each Partner Service has its own Service Credential).
+Status: accepted. Amended by ADR 0076 (each Partner Service has its own Service Credential).
 
 vans-mcp-server and pokemon-world-mcp share one Revocation List Credential to fetch the list at `https://ai.vanscoding.com/internal/revocation-list` and to ask the router to check a legacy Classroom API Key at `POST https://ai.vanscoding.com/internal/legacy-key`. The legacy key is the request body, not the secret. The router answers that check with the same acceptance, expiry notice, or Key Refusal a signed key would get, including the same order when more than one cause applies. A Classroom API Key cannot make either call, and neither can a Personal API Key. The public signing keys stay public. The list does not.
 

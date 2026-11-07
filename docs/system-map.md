@@ -30,9 +30,9 @@ flowchart LR
 
 ## 規格 4 完成後
 
-Partner Service（`vans-mcp-server`、`pokemon-world-mcp`、`road-test`）都不連 `neondb`。各自有一組 Service Credential（ADR 0075）。簽章票在各自的服務驗，並對 router 公布的停用名單；舊格式金鑰和 Personal API Key 送到 router 的 `POST /internal/key-check`（ADR 0076）。`vans-mcp-server` 的工具呼叫紀錄和學生授權改放在 database `vans_mcp_server`，role 是 `vans_mcp_server_app`。`vans-signals` 的 role 是 `vans_signals_app`。router 的 role 是 `vans_coding_router_app`，只能連 `neondb`。`neondb_owner` 只留作管理帳號，不放進執行中的服務。pokemon 的遊戲庫仍是專案 `pokemon_world_db`，那組帳號不動。
+Partner Service（`vans-mcp-server`、`pokemon-world-mcp`、`road-test`）都不連 `neondb`。各自有一組 Service Credential（ADR 0076）。簽章票在各自的服務驗，並對 router 公布的停用名單；舊格式金鑰和 Personal API Key 送到 router 的 `POST /internal/key-check`（ADR 0077）。`vans-mcp-server` 的工具呼叫紀錄和學生授權改放在 database `vans_mcp_server`，role 是 `vans_mcp_server_app`。`vans-signals` 的 role 是 `vans_signals_app`。router 的 role 是 `vans_coding_router_app`，只能連 `neondb`。`neondb_owner` 只留作管理帳號，不放進執行中的服務。pokemon 的遊戲庫仍是專案 `pokemon_world_db`，那組帳號不動。
 
-順序是：先把 `vans-signals` 換成 `vans_signals_app`，並確認它連 `neondb` 被拒。這一步不撤銷 `neondb_owner` 對 `neondb` 的連線。接著 router 上 key-check，兩個 MCP 依序改用它，授權仍在 `neondb`（ADR 0080）。pokemon 在這之前仍用它 Fly secret 裡的 `neondb_owner`；改用 key-check 時拿掉這條連線，不另建暫時 role。`road-test` 在 router 上 key-check 之後隨時可以接上。簽章要等每個 Partner Service 驗得了簽章票之後才開始發。然後複製、短暫停寫、補差額，把 `vans-mcp-server` 切到 `vans_mcp_server_app`。確認新庫已接手、既有授權還能用之後，從 `neondb` 刪掉 `mcp_usage` 和 `mcp_oauth_connections`。最後才把 router 換成 `vans_coding_router_app`，並確認它連 `vans_signals` 和 `vans_mcp_server` 都被拒。每個服務 role 在自己的 database 裡可以在 `public` 建物件、讀和寫，而且不是 superuser。
+順序是：先把 `vans-signals` 換成 `vans_signals_app`，並確認它連 `neondb` 被拒。這一步不撤銷 `neondb_owner` 對 `neondb` 的連線。接著 router 上 key-check，兩個 MCP 依序改用它，授權仍在 `neondb`（ADR 0081）。pokemon 在這之前仍用它 Fly secret 裡的 `neondb_owner`；改用 key-check 時拿掉這條連線，不另建暫時 role。`road-test` 在 router 上 key-check 之後隨時可以接上。簽章要等每個 Partner Service 驗得了簽章票之後才開始發。然後複製、短暫停寫、補差額，把 `vans-mcp-server` 切到 `vans_mcp_server_app`。確認新庫已接手、既有授權還能用之後，從 `neondb` 刪掉 `mcp_usage` 和 `mcp_oauth_connections`。最後才把 router 換成 `vans_coding_router_app`，並確認它連 `vans_signals` 和 `vans_mcp_server` 都被拒。每個服務 role 在自己的 database 裡可以在 `public` 建物件、讀和寫，而且不是 superuser。
 
 ```mermaid
 flowchart LR
