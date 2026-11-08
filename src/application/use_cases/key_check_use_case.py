@@ -47,7 +47,20 @@ class KeyCheckUseCase:
         }
 
     def _personal_answer(self, context: AuthContext) -> dict[str, Any]:
-        # Personal API Key answers (`kind: personal`, `user_id`, `is_admin`, `classes`)
-        # arrive with ticket #94. Until then a Personal API Key is refused rather than
-        # answered with a shape Partner Services do not yet expect.
-        return _refusal("invalid")
+        # `is_admin` comes from the role table, never `users.role` (ADR 0078). An admin
+        # may manage every Class, ended ones included; anyone else the Classes they own
+        # (ADR 0083). Each Class carries only its id and name.
+        is_admin = bool(context.is_admin)
+        user_id = int(context.user_id)
+        rows = self.api_key_repo.list_classes(teacher_id=None if is_admin else user_id)
+        classes = sorted(
+            ({"id": int(row["id"]), "name": str(row["name"])} for row in rows),
+            key=lambda item: item["id"],
+        )
+        return {
+            "accepted": True,
+            "kind": "personal",
+            "user_id": user_id,
+            "is_admin": is_admin,
+            "classes": classes,
+        }

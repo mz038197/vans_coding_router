@@ -76,6 +76,19 @@ def test_postgres_session_key_redeem_verify_and_prompt_log(postgres_repo):
     assert logs[0]["raw_prompt"] == "user: hello"
 
 
+def test_postgres_replaced_personal_api_key_is_invalid_and_a_disabled_users_is_disabled(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    old_key = repo.issue_long_lived_key(teacher["id"])
+    new_key = repo.issue_long_lived_key(teacher["id"])
+
+    assert repo.verify_api_key_with_reason(old_key) == (None, "invalid")
+    assert repo.verify_api_key_with_reason(new_key)[1] is None
+
+    repo.update_user(teacher["id"], status="inactive")
+    assert repo.verify_api_key_with_reason(new_key) == (None, "disabled")
+
+
 def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")

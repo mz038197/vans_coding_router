@@ -838,10 +838,12 @@ class RouterRepositoryBase(ABC):
             ).fetchone()
             if not row:
                 return None, "invalid"
-            if not bool(row["enabled"]):
-                return None, "disabled"
             if row["user_status"] != "active":
                 return None, "disabled"
+            if not bool(row["enabled"]):
+                # A Personal API Key is turned off only when a newer one replaces it
+                # (or its user is disabled, answered above), so it is `invalid` (ADR 0077).
+                return None, "invalid" if row["session_id"] is None else "disabled"
             expires_at = parse_dt(row["expires_at"])
             session_expires_at = parse_dt(row["session_expires_at"])
             class_ends_at = parse_dt(row["class_ends_at"])

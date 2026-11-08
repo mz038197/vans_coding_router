@@ -1,4 +1,4 @@
-"""Key Check over HTTP: a Partner Service asks about one Classroom API Key (ADR 0077, 0082)."""
+"""Key Check over HTTP: a Partner Service asks about one Classroom or Personal API Key (ADR 0077, 0082, 0083)."""
 
 from __future__ import annotations
 
@@ -320,3 +320,111 @@ def test_no_log_line_carries_the_whole_key(tmp_path, caplog):
     for record in caplog.records:
         assert api_key not in record.getMessage()
         assert unknown not in record.getMessage()
+
+
+# --- Personal API Key (ticket #94, ADR 0077, 0083) ---
+
+
+def _teacher_with_classes(repo, email="teacher@school.edu", names=("Mon AM", "Wed PM")):
+    teacher = repo.upsert_google_user(email, "Teacher")
+    classes = [repo.create_class(teacher["id"], name, None, 2) for name in names]
+    return teacher, classes
+
+
+def test_accepted_personal_api_key_names_user_and_the_classes_they_own(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, classes = _teacher_with_classes(repo)
+    _teacher_with_classes(repo, email="other@school.edu", names=("Someone else's",))
+    personal_key = repo.issue_long_lived_key(teacher["id"])
+
+    response = _key_check(client, {"api_key": personal_key})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "accepted": True,
+        "kind": "personal",
+        "user_id": teacher["id"],
+        "is_admin": False,
+        "classes": [
+            {"id": classes[0]["id"], "name": "Mon AM"},
+            {"id": classes[1]["id"], "name": "Wed PM"},
+        ],
+    }
+
+
+def test_admin_personal_api_key_lists_every_class_including_ended_ones(tmp_path):
+    client, repo = _client(tmp_path)
+    _, teacher_classes = _teacher_with_classes(repo)
+    repo.set_class_status(teacher_classes[0]["id"], "ended")
+    admin = repo.upsert_google_user("admin@school.edu", "Admin")
+    personal_key = repo.issue_long_lived_key(admin["id"])
+
+    answer = _key_check(client, {"api_key": personal_key}).json()
+
+    assert answer["kind"] == "personal"
+    assert answer["user_id"] == admin["id"]
+    assert answer["is_admin"] is True
+    assert answer["classes"] == [
+        {"id": teacher_classes[0]["id"], "name": "Mon AM"},
+        {"id": teacher_classes[1]["id"], "name": "Wed PM"},
+    ]
+
+
+def test_personal_api_key_of_someone_who_owns_no_class_is_accepted_with_no_classes(tmp_path):
+    client, repo = _client(tmp_path)
+    _teacher_with_classes(repo)
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    personal_key = repo.issue_long_lived_key(student["id"])
+
+    assert _key_check(client, {"api_key": personal_key}).json() == {
+        "accepted": True,
+        "kind": "personal",
+        "user_id": student["id"],
+        "is_admin": False,
+        "classes": [],
+    }
+
+
+def test_is_admin_reads_the_role_table_not_the_legacy_role_column(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, _ = _teacher_with_classes(repo)
+    with repo._connect() as conn:  # a legacy users.role that disagrees with user_roles
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (teacher["id"],))
+    personal_key = repo.issue_long_lived_key(teacher["id"])
+
+    assert _key_check(client, {"api_key": personal_key}).json()["is_admin"] is False
+
+
+def test_personal_api_key_replaced_by_a_newer_one_is_refused_as_invalid(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, _ = _teacher_with_classes(repo)
+    old_key = repo.issue_long_lived_key(teacher["id"])
+    new_key = repo.issue_long_lived_key(teacher["id"])
+
+    assert _key_check(client, {"api_key": old_key}).json() == INVALID
+    assert _key_check(client, {"api_key": new_key}).json()["accepted"] is True
+
+
+def test_personal_api_key_of_a_disabled_user_is_refused(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, _ = _teacher_with_classes(repo)
+    personal_key = repo.issue_long_lived_key(teacher["id"])
+    repo.update_user(teacher["id"], status="inactive")
+
+    assert _key_check(client, {"api_key": personal_key}).json() == DISABLED
+
+
+def test_accepted_personal_answer_matches_the_contract_example(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, _ = _teacher_with_classes(repo)
+    personal_key = repo.issue_long_lived_key(teacher["id"])
+    example = _example("personal-accepted.json")
+
+    answer = _key_check(client, {"api_key": personal_key}).json()
+
+    assert _shape({k: v for k, v in answer.items() if k != "classes"}) == _shape(
+        {k: v for k, v in example.items() if k != "classes"}
+    )
+    assert [_shape(item) for item in answer["classes"]] == [_shape(example["classes"][0])] * len(answer["classes"])
+    assert answer["kind"] == example["kind"] == "personal"
+    assert answer["accepted"] is example["accepted"] is True

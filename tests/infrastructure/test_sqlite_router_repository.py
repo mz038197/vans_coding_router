@@ -546,6 +546,25 @@ def test_classroom_api_key_is_not_started_before_session_at(tmp_path):
     assert repo.verify_api_key_context(key) is None
 
 
+def test_personal_api_key_replaced_by_a_newer_one_is_invalid(tmp_path):
+    repo, _ = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    teacher = repo.get_user_by_email("teacher@example.com")
+    old_key = repo.issue_long_lived_key(teacher["id"])
+    new_key = repo.issue_long_lived_key(teacher["id"])
+
+    assert repo.verify_api_key_with_reason(old_key) == (None, "invalid")
+    assert repo.verify_api_key_with_reason(new_key)[1] is None
+
+
+def test_personal_api_key_of_a_disabled_user_is_disabled(tmp_path):
+    repo, _ = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    teacher = repo.get_user_by_email("teacher@example.com")
+    key = repo.issue_long_lived_key(teacher["id"])
+    repo.update_user(teacher["id"], status="inactive")
+
+    assert repo.verify_api_key_with_reason(key) == (None, "disabled")
+
+
 def test_invite_cannot_be_redeemed_before_session_at(tmp_path):
     repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) + timedelta(hours=1))
     student = repo.upsert_google_user("student@example.com", "Student")
