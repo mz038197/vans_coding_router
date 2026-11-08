@@ -2,6 +2,10 @@
        and docs/adr/0045-monochrome-design-tokens.md. Brand teal lives only in the logo. */
     :root {
       --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      /* The VCRouter wordmark (ADR 0085): a Latin face first, as opencodex does. system-ui can
+         resolve to a CJK face (Microsoft JhengHei UI on zh-TW Windows) whose Latin has no
+         semibold, so the word looked thin at any weight. */
+      --font-wordmark: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: "Fira Code", ui-monospace, "SF Mono", Consolas, monospace;
       --radius: 6px;
       --nav-height: 64px;
@@ -177,9 +181,7 @@
     .nav-wordmark {
       color: #000000;
       font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
-      /* A Latin face first, as opencodex does: system-ui can resolve to a CJK face (Microsoft
-         JhengHei UI on zh-TW Windows) whose Latin has no semibold, so the word looked thin. */
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: var(--font-wordmark);
       font-weight: 600;
       white-space: nowrap;
     }
@@ -293,6 +295,7 @@
     .login-brand-title {
       position: relative;
       margin: 0;
+      font-family: var(--font-wordmark);
       color: #ffffff;
       font-size: clamp(32px, 4.5vw, 64px);
       font-weight: 600;
