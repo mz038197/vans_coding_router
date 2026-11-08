@@ -812,13 +812,25 @@ class RouterRepositoryBase(ABC):
         context = self.verify_api_key_context(api_key)
         return (context is not None, context.teacher_name if context else None)
 
-    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+    def verify_api_key_with_reason(
+        self,
+        api_key: str,
+        *,
+        now: datetime | None = None,
+        last_used_write_interval: timedelta | None = None,
+    ) -> tuple[AuthContext | None, str | None]:
+        """Check one key. A pass writes `last_used_at`.
+
+        `/v1/*` leaves `last_used_write_interval` unset and writes on every pass. The
+        Key Check passes a minute, so a key's `last_used_at` is written at most once
+        in that interval (ADR 0077). `now` is the moment the check is made.
+        """
         from src.infrastructure.auth.client_api_key import normalize_api_key
 
         api_key = normalize_api_key(api_key)
         if not api_key:
             return None, "missing"
-        now = utc_now()
+        now = now or utc_now()
         with self._connect() as conn:
             row = conn.execute(
                 self._sql(
@@ -859,10 +871,16 @@ class RouterRepositoryBase(ABC):
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
             ):
                 return None, "expired"
-            conn.execute(
-                self._sql("UPDATE api_keys SET last_used_at = ? WHERE id = ?"),
-                (dt(now), row["id"]),
-            )
+            last_used_at = parse_dt(row["last_used_at"])
+            if (
+                last_used_write_interval is None
+                or last_used_at is None
+                or now - last_used_at >= last_used_write_interval
+            ):
+                conn.execute(
+                    self._sql("UPDATE api_keys SET last_used_at = ? WHERE id = ?"),
+                    (dt(now), row["id"]),
+                )
             roles = self._roles_for_user(conn, int(row["user_id"]))
             return (
                 AuthContext(

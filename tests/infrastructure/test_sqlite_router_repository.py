@@ -932,3 +932,37 @@ def test_token_usage_is_recorded_queried_and_deleted_per_user(tmp_path):
     assert repo.delete_prompt_logs_for_users([student["id"]])["deleted_token_usage"] == 3
     row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
     assert (row["total_tokens"], row["request_count"]) == (0, 0)
+
+
+def _stored_last_used_at(repo, api_key_id: int) -> str | None:
+    with repo._connect() as conn:
+        row = conn.execute("SELECT last_used_at FROM api_keys WHERE id = ?", (api_key_id,)).fetchone()
+    return row["last_used_at"]
+
+
+def test_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_minute(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")["api_key"]
+    minute = timedelta(seconds=60)
+    key_check_at = datetime.now(UTC) + timedelta(seconds=1)
+
+    context, _ = repo.verify_api_key_with_reason(api_key, now=key_check_at, last_used_write_interval=minute)
+    assert _stored_last_used_at(repo, context.api_key_id) == key_check_at.isoformat()
+    repo.verify_api_key_with_reason(
+        api_key, now=key_check_at + timedelta(seconds=10), last_used_write_interval=minute
+    )
+    assert _stored_last_used_at(repo, context.api_key_id) == key_check_at.isoformat()
+
+    # `/v1/*` checks the same key a moment later, then again: each pass writes.
+    for _ in range(2):
+        written_a_second_ago = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        with repo._connect() as conn:
+            conn.execute(
+                "UPDATE api_keys SET last_used_at = ? WHERE id = ?", (written_a_second_ago, context.api_key_id)
+            )
+        assert repo.verify_api_key_context(api_key) is not None
+        assert _stored_last_used_at(repo, context.api_key_id) != written_a_second_ago

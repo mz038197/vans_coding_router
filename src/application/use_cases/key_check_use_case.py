@@ -6,6 +6,8 @@ verdict on the router and on every Partner Service.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.domain.entities.auth import AuthContext
@@ -22,16 +24,33 @@ REFUSAL_NOTICES: dict[str, str] = {
 }
 
 
+# A Key Check writes a key's `last_used_at` at most once in this interval (ADR 0077).
+LAST_USED_WRITE_INTERVAL = timedelta(seconds=60)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _refusal(reason: str) -> dict[str, Any]:
     return {"accepted": False, "reason": reason, "message": REFUSAL_NOTICES[reason]}
 
 
 class KeyCheckUseCase:
-    def __init__(self, api_key_repo: RouterRepositoryPort):
+    def __init__(
+        self,
+        api_key_repo: RouterRepositoryPort,
+        clock: Callable[[], datetime] = _utc_now,
+    ):
         self.api_key_repo = api_key_repo
+        self.clock = clock
 
     def check(self, api_key: str) -> dict[str, Any]:
-        context, failure = self.api_key_repo.verify_api_key_with_reason(api_key)
+        context, failure = self.api_key_repo.verify_api_key_with_reason(
+            api_key,
+            now=self.clock(),
+            last_used_write_interval=LAST_USED_WRITE_INTERVAL,
+        )
         if context is None:
             # `missing` (empty or whitespace key) and any cause without its own code
             # are answered as `invalid` (ADR 0083).
