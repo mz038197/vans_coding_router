@@ -1,5 +1,6 @@
 import os
 
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
@@ -74,4 +75,5 @@ def build_container(
         router_settings=effective_settings,
         key_check_use_case=KeyCheckUseCase(api_key_repo),
         service_tokens=service_tokens,
+        key_check_rate_limiter=PerMinuteRateLimiter(settings.key_check.calls_per_minute_per_service),
     )

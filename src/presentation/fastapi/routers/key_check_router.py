@@ -7,13 +7,18 @@ input, and the input is the key.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.infrastructure.auth.service_credentials import service_named_by_token
+from src.infrastructure.config import KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE
+
+logger = logging.getLogger(__name__)
 
 UNAUTHORIZED_BODY = {
     "error": {
@@ -26,6 +31,13 @@ BAD_REQUEST_BODY = {
     "error": {
         "code": "invalid_key_check_body",
         "message": 'The body must be a JSON object with a string "api_key".',
+    }
+}
+
+RATE_LIMITED_BODY = {
+    "error": {
+        "code": "key_check_rate_limited",
+        "message": "This Partner Service has made too many Key Check calls this minute.",
     }
 }
 
@@ -54,13 +66,29 @@ async def _api_key_from_body(request: Request) -> str | None:
 def create_key_check_router(
     key_check: KeyCheckUseCase,
     service_tokens: Mapping[str, str],
+    rate_limiter: PerMinuteRateLimiter | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    limiter = rate_limiter or PerMinuteRateLimiter(KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE)
+    # Services refused since their last allowed call: one overrun sends one ERROR Signal,
+    # so a leaked credential hammering the endpoint does not flood vans-signals.
+    over_limit: set[str] = set()
 
     @router.post("/internal/key-check")
     async def key_check_endpoint(request: Request) -> JSONResponse:
-        if _partner_service(request, service_tokens) is None:
+        service = _partner_service(request, service_tokens)
+        if service is None:
             return JSONResponse(UNAUTHORIZED_BODY, status_code=401)
+        if not limiter.allow(service):
+            if service not in over_limit:
+                over_limit.add(service)
+                logger.error(
+                    "Key Check rate limit: Partner Service %s went over %d calls a minute",
+                    service,
+                    limiter.limit,
+                )
+            return JSONResponse(RATE_LIMITED_BODY, status_code=429)
+        over_limit.discard(service)
         api_key = await _api_key_from_body(request)
         if api_key is None:
             return JSONResponse(BAD_REQUEST_BODY, status_code=400)
