@@ -2,6 +2,9 @@
        and docs/adr/0045-monochrome-design-tokens.md. Brand teal lives only in the logo. */
     :root {
       --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      /* The VCRouter wordmark (ADR 0085). Not system-ui: on zh-TW Windows that is Microsoft
+         JhengHei UI, which has only regular and bold, and its bold Latin still reads thin. */
+      --font-wordmark: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
       --font-mono: "Fira Code", ui-monospace, "SF Mono", Consolas, monospace;
       --radius: 6px;
       --nav-height: 64px;
@@ -177,6 +180,7 @@
     .nav-wordmark {
       color: #000000;
       font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
+      font-family: var(--font-wordmark);
       font-weight: 700;
       white-space: nowrap;
     }
@@ -186,8 +190,8 @@
     }
 
     .nav-brand-v {
-      width: calc(0.78em * 12 / 14); /* the glyph's 12x14 grid */
-      height: 0.78em; /* the top of the C, measured on Segoe UI bold */
+      width: calc(0.72em * 12 / 14); /* the glyph's 12x14 grid */
+      height: 0.72em; /* the top of the C, measured on Segoe UI bold */
       margin-right: -1px;
       vertical-align: baseline;
     }
@@ -292,6 +296,7 @@
       margin: 0;
       color: #ffffff;
       font-size: clamp(32px, 4.5vw, 64px);
+      font-family: var(--font-wordmark);
       font-weight: 700;
       line-height: 0.95;
       letter-spacing: -0.05em;
@@ -302,8 +307,8 @@
     /* The route V as the V of VCRouter (ADR 0084): as tall as the capitals, on the
        baseline, drawn in the words' white. The runner rests under reduced motion. */
     .login-brand-v {
-      width: calc(0.78em * 12 / 14); /* the glyph's 12x14 grid */
-      height: 0.78em; /* the top of the C, measured on Segoe UI bold */
+      width: calc(0.72em * 12 / 14); /* the glyph's 12x14 grid */
+      height: 0.72em; /* the top of the C, measured on Segoe UI bold */
       margin-right: -1px;
       vertical-align: baseline;
       filter: drop-shadow(0 2px 12px rgba(34, 0, 17, 0.9));
