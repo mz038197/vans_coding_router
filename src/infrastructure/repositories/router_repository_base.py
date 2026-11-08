@@ -651,12 +651,19 @@ class RouterRepositoryBase(ABC):
                 return role
         return "student"
 
-    def _roles_for_user(self, conn: Any, user_id: int) -> tuple[str, ...]:
+    def _role_table_roles(self, conn: Any, user_id: int) -> tuple[str, ...]:
         rows = conn.execute(
             self._sql("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role"),
             (user_id,),
         ).fetchall()
-        roles = tuple(row["role"] for row in rows)
+        return tuple(row["role"] for row in rows)
+
+    def role_table_roles(self, user_id: int) -> tuple[str, ...]:
+        with self._connect() as conn:
+            return self._role_table_roles(conn, user_id)
+
+    def _roles_for_user(self, conn: Any, user_id: int) -> tuple[str, ...]:
+        roles = self._role_table_roles(conn, user_id)
         if roles:
             return roles
         row = conn.execute(self._sql("SELECT role FROM users WHERE id = ?"), (user_id,)).fetchone()
@@ -812,13 +819,25 @@ class RouterRepositoryBase(ABC):
         context = self.verify_api_key_context(api_key)
         return (context is not None, context.teacher_name if context else None)
 
-    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+    def verify_api_key_with_reason(
+        self,
+        api_key: str,
+        *,
+        now: datetime | None = None,
+        last_used_write_interval: timedelta | None = None,
+    ) -> tuple[AuthContext | None, str | None]:
+        """Check one key. A pass writes `last_used_at`.
+
+        `/v1/*` leaves `last_used_write_interval` unset and writes on every pass. The
+        Key Check passes a minute, so a key's `last_used_at` is written at most once
+        in that interval (ADR 0077). `now` is the moment the check is made.
+        """
         from src.infrastructure.auth.client_api_key import normalize_api_key
 
         api_key = normalize_api_key(api_key)
         if not api_key:
             return None, "missing"
-        now = utc_now()
+        now = now or utc_now()
         with self._connect() as conn:
             row = conn.execute(
                 self._sql(
@@ -838,10 +857,12 @@ class RouterRepositoryBase(ABC):
             ).fetchone()
             if not row:
                 return None, "invalid"
-            if not bool(row["enabled"]):
-                return None, "disabled"
             if row["user_status"] != "active":
                 return None, "disabled"
+            if not bool(row["enabled"]):
+                # A Personal API Key is turned off only when a newer one replaces it
+                # (or its user is disabled, answered above), so it is `invalid` (ADR 0077).
+                return None, "invalid" if row["session_id"] is None else "disabled"
             expires_at = parse_dt(row["expires_at"])
             session_expires_at = parse_dt(row["session_expires_at"])
             class_ends_at = parse_dt(row["class_ends_at"])
@@ -857,10 +878,16 @@ class RouterRepositoryBase(ABC):
                 row["class_status"] != "active" or (class_ends_at and now >= class_ends_at)
             ):
                 return None, "expired"
-            conn.execute(
-                self._sql("UPDATE api_keys SET last_used_at = ? WHERE id = ?"),
-                (dt(now), row["id"]),
-            )
+            last_used_at = parse_dt(row["last_used_at"])
+            if (
+                last_used_write_interval is None
+                or last_used_at is None
+                or now - last_used_at >= last_used_write_interval
+            ):
+                conn.execute(
+                    self._sql("UPDATE api_keys SET last_used_at = ? WHERE id = ?"),
+                    (dt(now), row["id"]),
+                )
             roles = self._roles_for_user(conn, int(row["user_id"]))
             return (
                 AuthContext(

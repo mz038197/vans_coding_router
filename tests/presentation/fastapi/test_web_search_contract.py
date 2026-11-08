@@ -12,7 +12,8 @@ from fakes import FakeLLMGateway, FakeRequestLogger, FakeWebSearch
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
-from src.application.web_search_rate_limit import WebSearchRateLimiter
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
+from src.application.web_search_rate_limit import WEB_SEARCH_LIMIT_PER_MINUTE
 from src.domain.errors import ServiceUnavailableError, UpstreamServiceError
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
@@ -58,7 +59,7 @@ def _app_client(tmp_path, web_search=None, clock=None):
         api_key_repo=repo,
         logger=FakeRequestLogger(),
         web_search_backend=search,
-        web_search_limiter=WebSearchRateLimiter(clock=clock or FakeClock()),
+        web_search_limiter=PerMinuteRateLimiter(WEB_SEARCH_LIMIT_PER_MINUTE, clock=clock or FakeClock()),
     )
     app = FastAPI()
     register_error_handlers(app)

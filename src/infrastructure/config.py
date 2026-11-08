@@ -45,6 +45,26 @@ def resolve_web_search_api_key(web_search: WebSearchSettings) -> str:
     return os.getenv(web_search.api_key_env) or ""
 
 
+KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE = 600
+
+
+@dataclass(frozen=True)
+class KeyCheckSettings:
+    """Each Partner Service may call Key Check this many times a minute (ADR 0076)."""
+
+    calls_per_minute_per_service: int = KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE
+
+
+def _parse_key_check_settings(raw: dict[str, Any] | None) -> KeyCheckSettings:
+    data = raw or {}
+    if "calls_per_minute_per_service" not in data:
+        return KeyCheckSettings()
+    value = data["calls_per_minute_per_service"]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("key_check.calls_per_minute_per_service must be a positive whole number")
+    return KeyCheckSettings(calls_per_minute_per_service=value)
+
+
 CAPABILITY_AUDIO_SPEECH = "audio_speech"
 CAPABILITY_AUDIO_TRANSCRIPTION = "audio_transcription"
 
@@ -143,6 +163,7 @@ class RouterSettings:
     providers: dict[str, ProviderSettings] = field(default_factory=dict)
     routing: RoutingSettings = field(default_factory=RoutingSettings)
     web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
+    key_check: KeyCheckSettings = field(default_factory=KeyCheckSettings)
 
 
 def is_loopback_url(url: str) -> bool:
@@ -217,6 +238,7 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
         web_search=WebSearchSettings(
             api_key_env=str(web_search.get("api_key_env", "")),
         ),
+        key_check=_parse_key_check_settings(data.get("key_check")),
     ))
 
 
@@ -283,6 +305,7 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
         providers=settings.providers,
         routing=settings.routing,
         web_search=settings.web_search,
+        key_check=settings.key_check,
     )
 
 
@@ -317,6 +340,7 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         providers=base.providers,
         routing=base.routing,
         web_search=base.web_search,
+        key_check=base.key_check,
     )
 
 

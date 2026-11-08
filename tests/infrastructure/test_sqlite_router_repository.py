@@ -546,6 +546,25 @@ def test_classroom_api_key_is_not_started_before_session_at(tmp_path):
     assert repo.verify_api_key_context(key) is None
 
 
+def test_personal_api_key_replaced_by_a_newer_one_is_invalid(tmp_path):
+    repo, _ = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    teacher = repo.get_user_by_email("teacher@example.com")
+    old_key = repo.issue_long_lived_key(teacher["id"])
+    new_key = repo.issue_long_lived_key(teacher["id"])
+
+    assert repo.verify_api_key_with_reason(old_key) == (None, "invalid")
+    assert repo.verify_api_key_with_reason(new_key)[1] is None
+
+
+def test_personal_api_key_of_a_disabled_user_is_disabled(tmp_path):
+    repo, _ = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    teacher = repo.get_user_by_email("teacher@example.com")
+    key = repo.issue_long_lived_key(teacher["id"])
+    repo.update_user(teacher["id"], status="inactive")
+
+    assert repo.verify_api_key_with_reason(key) == (None, "disabled")
+
+
 def test_invite_cannot_be_redeemed_before_session_at(tmp_path):
     repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) + timedelta(hours=1))
     student = repo.upsert_google_user("student@example.com", "Student")
@@ -913,3 +932,37 @@ def test_token_usage_is_recorded_queried_and_deleted_per_user(tmp_path):
     assert repo.delete_prompt_logs_for_users([student["id"]])["deleted_token_usage"] == 3
     row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
     assert (row["total_tokens"], row["request_count"]) == (0, 0)
+
+
+def _stored_last_used_at(repo, api_key_id: int) -> str | None:
+    with repo._connect() as conn:
+        row = conn.execute("SELECT last_used_at FROM api_keys WHERE id = ?", (api_key_id,)).fetchone()
+    return row["last_used_at"]
+
+
+def test_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_minute(tmp_path):
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
+    api_key = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")["api_key"]
+    minute = timedelta(seconds=60)
+    key_check_at = datetime.now(UTC) + timedelta(seconds=1)
+
+    context, _ = repo.verify_api_key_with_reason(api_key, now=key_check_at, last_used_write_interval=minute)
+    assert _stored_last_used_at(repo, context.api_key_id) == key_check_at.isoformat()
+    repo.verify_api_key_with_reason(
+        api_key, now=key_check_at + timedelta(seconds=10), last_used_write_interval=minute
+    )
+    assert _stored_last_used_at(repo, context.api_key_id) == key_check_at.isoformat()
+
+    # `/v1/*` checks the same key a moment later, then again: each pass writes.
+    for _ in range(2):
+        written_a_second_ago = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        with repo._connect() as conn:
+            conn.execute(
+                "UPDATE api_keys SET last_used_at = ? WHERE id = ?", (written_a_second_ago, context.api_key_id)
+            )
+        assert repo.verify_api_key_context(api_key) is not None
+        assert _stored_last_used_at(repo, context.api_key_id) != written_a_second_ago

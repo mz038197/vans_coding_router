@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from src.domain.auto_tier import TierSelection
@@ -22,7 +22,17 @@ class RouterRepositoryPort(Protocol):
     def verify_api_key_context(self, api_key: str) -> AuthContext | None:
         ...
 
-    def verify_api_key_with_reason(self, api_key: str) -> tuple[AuthContext | None, str | None]:
+    def verify_api_key_with_reason(
+        self,
+        api_key: str,
+        *,
+        now: datetime | None = None,
+        last_used_write_interval: timedelta | None = None,
+    ) -> tuple[AuthContext | None, str | None]:
+        ...
+
+    def role_table_roles(self, user_id: int) -> tuple[str, ...]:
+        """A user's roles from the role table only, with no `users.role` fallback (ADR 0078)."""
         ...
 
     def upsert_google_user(self, email: str, name: str, google_sub: str | None = None) -> dict[str, Any]:

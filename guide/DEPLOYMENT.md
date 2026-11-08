@@ -69,6 +69,7 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 | `OPENROUTER_API_KEY_2` | 選填（帳號 B；與 A 為不同帳號時可內部分流） |
 | `OPENAI_API_KEY` | 選填 |
 | `TAVILY_API_KEY` | 選填（Web Search；未設定時 `POST /v1/search` 回 503 `web_search_unavailable`） |
+| `VCR_SERVICE_TOKENS` | 必要（正式環境沒設定或格式錯誤時 router 拒絕啟動）。每個 Partner Service 的 Service Credential，JSON 物件 `{"<credential 的 SHA-256 小寫 hex>": "<Partner Service 名稱>"}`，格式跟 vans-signals 的 `SIGNALS_TOKENS` 相同。產生和輪換見下方〈Service Credential〉 |
 | `VANS_SIGNALS_URL` / `VANS_SIGNALS_TOKEN` | 正式環境才設。把 `src` 的 ERROR 日誌送到 vans-signals。網址是服務根位址（例如 `https://vans-signals.fly.dev`），權杖是該服務發給 `vans-coding-router` 的 bearer。少一項就完全不送，本機與 staging 維持空白 |
 
 `ollama_cloud` 在 [`config/router.prod.yaml`](../config/router.prod.yaml) 使用 `api_key_envs` 掛兩把 key：學生仍用同一把 `vcr_sk_` 與 `ollama_cloud@...`，router 以 least-in-flight 分流，並以 `max_concurrent_per_key`（預設 3）在打上游前排隊，降低 Ollama Cloud rate limit。只設第一把 key 時行為與單帳號相同。
@@ -82,6 +83,47 @@ notepad "$HOME\.vans_coding_router\fly.secrets.env"
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\deploy-fly.ps1 -SecretsOnly
 ```
+
+### Service Credential（Key Check）
+
+Partner Service（vans-mcp-server、pokemon-world-mcp、road-test）用自己的 Service Credential 呼叫 `POST https://ai.vanscoding.com/internal/key-check`（ADR 0076、0077）。每個服務一組，互不共用。router 只存 credential 的 SHA-256，不存原文。
+
+**產生一組新的 credential**（Git Bash）：
+
+```bash
+CRED=$(openssl rand -hex 32)                          # 1. 產生
+fly secrets set VCR_SERVICE_CREDENTIAL="$CRED" --app road-test   # 2. 存成該 Partner Service 的 secret
+printf '%s' "$CRED" | sha256sum | cut -d' ' -f1       # 3. 算 SHA-256（不要多一個換行）
+```
+
+把第 3 步的雜湊加進 router 的 `VCR_SERVICE_TOKENS`，三個服務放在同一個 JSON 物件裡，每次設定都要寫出完整的物件：
+
+```bash
+fly secrets set --app vans-coding-router VCR_SERVICE_TOKENS='{"<mcp 的雜湊>":"vans-mcp-server","<pokemon 的雜湊>":"pokemon-world-mcp","<road-test 的雜湊>":"road-test"}'
+```
+
+JSON 帶雙引號，請用 Git Bash 的 `fly secrets set` 直接設，不要放進 `fly.secrets.env` 經 `deploy-fly.ps1` 傳（PowerShell 傳給原生程式時會吃掉雙引號）。新設定在 router 重新部署或重啟後生效。
+
+**輪換**（不中斷服務）：
+
+1. 照上面產生新 credential，**先**把新雜湊加進 `VCR_SERVICE_TOKENS`（同一個服務名稱暫時對應新舊兩個雜湊），部署 router。
+2. 換掉該 Partner Service 的 `VCR_SERVICE_CREDENTIAL`，部署那個服務。確認它的 Key Check 正常。
+3. 最後從 `VCR_SERVICE_TOKENS` 刪掉舊雜湊，部署 router。
+
+某個服務的 credential 外洩時，只換那一組；其他服務的雜湊不動。
+
+**沒設定時**：正式環境（有 `FLY_APP_NAME`）沒設 `VCR_SERVICE_TOKENS` 會拒絕啟動，所以第一次上線 Key Check 前要先設好。本機沒設定時照常啟動，Key Check 一律回 401。
+
+**限流**：每個 Partner Service 每分鐘最多呼叫 Key Check 600 次（各自計算，互不影響），超過的呼叫回 429。一個服務超過時送一筆 ERROR Signal，只寫服務名稱；同一次超量期間不重複送，等它再有呼叫被放行後又超過才再送。要調整時在 `router.yaml` 加：
+
+```yaml
+key_check:
+  calls_per_minute_per_service: 600
+```
+
+數字必須是正整數，否則 router 拒絕啟動。計數在記憶體裡，重啟歸零。
+
+**回應合約**：通過、拒絕和 400 的範例在 [`docs/contracts/key-check/`](../docs/contracts/key-check/)，router 的測試會斷言真實回應符合這些範例；Partner Service 的測試直接讀這些檔案（或複製一份並註明來源 commit）。
 
 ---
 

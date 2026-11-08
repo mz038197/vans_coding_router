@@ -4,7 +4,9 @@ Status: accepted. Amends ADR 0060. Amended by ADR 0082.
 
 A Partner Service is a separately deployed service registered with this router that accepts `vcr_sk_` keys from its own callers. Today they are vans-mcp-server, pokemon-world-mcp, and road-test. Each one has its own Service Credential. That credential replaces the single Revocation List Credential of ADR 0060. It fetches the Revocation List and calls the key check of ADR 0077. It is not a Classroom API Key or a Personal API Key, and it grants no `/v1/*` call.
 
-The router reads the credentials from one Fly secret, `VCR_SERVICE_TOKENS`. It is a JSON object that maps the SHA-256 hex of each credential to the Partner Service it names, the same shape as vans-signals' `SIGNALS_TOKENS`. A missing or invalid value refuses to start. During a rotation one Partner Service may be named by two hashes. Each Partner Service is limited to 600 calls a minute, and the limit is a setting. A call over the limit gets 429 and sends one ERROR Signal.
+The router reads the credentials from one Fly secret, `VCR_SERVICE_TOKENS`. It is a JSON object that maps the SHA-256 hex of each credential to the Partner Service it names, the same shape as vans-signals' `SIGNALS_TOKENS`. A missing or invalid value refuses to start. During a rotation one Partner Service may be named by two hashes. Each Partner Service is limited to 600 calls a minute, and the limit is a setting. A call over the limit gets 429, and every refused call sends its own ERROR Signal.
+
+Amendment: "missing refuses to start" holds on Fly only (`FLY_APP_NAME` set). Run locally with no `VCR_SERVICE_TOKENS`, the router starts with an empty map and answers every Key Check call 401, so local development needs no Partner Service. A value that is set but invalid refuses to start everywhere.
 
 Where ADRs 0055 to 0062, 0065, and 0069 say vans-mcp-server and pokemon-world-mcp, the rule applies to every Partner Service. A new service that needs router identity, such as hex-island's city server, becomes a Partner Service with its own credential and calls the key check itself (ADR 0082).
 

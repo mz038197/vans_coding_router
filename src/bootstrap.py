@@ -1,5 +1,9 @@
+import os
+
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
+from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.infrastructure.config import (
@@ -8,6 +12,7 @@ from src.infrastructure.config import (
     resolve_web_search_api_key,
     validate_portal_auth_settings,
 )
+from src.infrastructure.auth.service_credentials import SERVICE_TOKENS_ENV, service_tokens_from_environment
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.lobby.paths import resolve_lobby_workspace
@@ -24,6 +29,10 @@ def build_container(
 ) -> AppContainer:
     settings = load_router_settings(config_path)
     validate_portal_auth_settings(settings)
+    service_tokens = service_tokens_from_environment(
+        os.getenv(SERVICE_TOKENS_ENV),
+        production=bool(os.getenv("FLY_APP_NAME")),
+    )
     api_key_repo = build_router_repository(settings)
     effective_settings = apply_runtime_settings(settings, api_key_repo.get_runtime_settings())
     api_key_repo.settings = effective_settings
@@ -64,4 +73,7 @@ def build_container(
         prompt_log_archive_after_days=effective_settings.prompt_logs.archive_after_days,
         prompt_log_delete_after_days=effective_settings.prompt_logs.delete_after_days,
         router_settings=effective_settings,
+        key_check_use_case=KeyCheckUseCase(api_key_repo),
+        service_tokens=service_tokens,
+        key_check_rate_limiter=PerMinuteRateLimiter(settings.key_check.calls_per_minute_per_service),
     )
