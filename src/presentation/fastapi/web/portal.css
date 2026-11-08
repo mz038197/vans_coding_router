@@ -177,6 +177,7 @@
     .nav-wordmark {
       color: #000000;
       font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
+      font-weight: 700;
       white-space: nowrap;
     }
 
