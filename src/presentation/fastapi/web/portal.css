@@ -177,7 +177,10 @@
     .nav-wordmark {
       color: #000000;
       font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
-      font-weight: 700;
+      /* A Latin face first, as opencodex does: system-ui can resolve to a CJK face (Microsoft
+         JhengHei UI on zh-TW Windows) whose Latin has no semibold, so the word looked thin. */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 600;
       white-space: nowrap;
     }
 

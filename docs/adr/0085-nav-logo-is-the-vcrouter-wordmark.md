@@ -6,7 +6,7 @@ The top-left of the app nav shows the same wordmark as the login brand panel: th
 
 - **One wordmark.** Portal, the Agent Lobby host and the session layout prototype all use it. The Lobby keeps its page name after the wordmark, behind a hairline: "(V)CRouter | Agent Lobby". A hidden "V" before the glyph makes screen readers read "VCRouter".
 - **Black or white, one colour.** The V and "CRouter" are black `#000000` on the light Theme and white `#ffffff` on the dark one. The route node stays magenta `#ff3d9a` on both. The old gradient on "Router" is dropped.
-- **Size and weight.** 20px, one step above the nav text, so the 12x14 V and its node stay legible; bold (700) so "CRouter" holds its own beside the pixel V.
+- **Size and weight.** 20px, one step above the nav text, so the 12x14 V and its node stay legible. The word is semibold (600) in a Latin face first (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto`), as opencodex does: `system-ui` can resolve to a CJK face on zh-TW Windows whose Latin has no semibold, and the word looked thin.
 - **Static.** The nav V has no runner; only the login panel's V animates.
 - **Brand Icon.** Still the favicon. It no longer appears in the nav.
 

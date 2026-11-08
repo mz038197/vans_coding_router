@@ -451,7 +451,9 @@ def test_portal_nav_logo_is_the_login_wordmark_static_black_or_white_by_theme(tm
     css = client.get("/portal/static/portal.css").text
     light = css[css.index(".nav-wordmark {"):]
     assert "color: #000000" in light[:light.index("}")]
-    assert "font-weight: 700" in light[:light.index("}")]  # bolder than the nav text
+    # Latin first, as opencodex does: system-ui can resolve to a CJK face whose Latin has no semibold.
+    assert 'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI"' in light[:light.index("}")]
+    assert "font-weight: 600" in light[:light.index("}")]
     dark = css[css.index('html[data-theme="dark"] .nav-wordmark {'):]
     assert "color: #ffffff" in dark[:dark.index("}")]
 
