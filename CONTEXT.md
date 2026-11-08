@@ -152,9 +152,13 @@ _Avoid_: vans theme, indigo theme
 The school Portal visual identity aligned with pegasi_router: light surfaces with teal accent.
 _Avoid_: school theme, pegasi theme, teal theme
 
-**Brand Logo**:
-The fixed Vans character image mark shown in Portal navigation chrome and, on the login shell, above the product name in the brand panel. It does not change with Theme. It sits on a Theme-aware light badge plate; the image asset itself stays a transparent character cutout.
-_Avoid_: Icon, favicon, nav icon, school logo
+**VCRouter**:
+The short name the Portal shows for Vans Coding Router (tentative, ADR 0084). Vans Coding Router stays the full name.
+_Avoid_: VCR, Vans Router
+
+**Brand Icon**:
+The route V that marks VCRouter: two destination blocks, arms meeting at a magenta route node. It is the favicon and the Portal nav icon, on its own white tile, and on the login shell it stands in for the V of VCRouter in the brand panel. It does not change with Theme. It replaces the Vans character Brand Logo.
+_Avoid_: Brand Logo, logo, character, school logo
 
 **Login Network**:
 The decorative animated dithered swirl behind the brand panel of the Portal login shell only. Its edge dissolves into the login pane, and it calms behind the brand words. It is not navigation or content. It does not appear on the signed-in Portal or lobby host. Neural Grid (static background dots) is a separate surface treatment.

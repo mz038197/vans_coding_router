@@ -37,7 +37,7 @@ PORTAL_CSS_PATH = WEB_DIR / "portal.css"
 PORTAL_WEBMCP_PATH = WEB_DIR / "portal_webmcp.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_JS = WEB_DIR / "session_layout_prototype.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML = WEB_DIR / "session_layout_prototype.html"
-PORTAL_BRAND_LOGO_PATH = WEB_DIR / "brand-logo.png"
+PORTAL_BRAND_ICON_PATH = WEB_DIR / "brand-icon.svg"
 # Upstream logos (from @lobehub/icons-static-svg, MIT), drawn in the text colour via CSS mask.
 PORTAL_UPSTREAM_LOGO_PATHS = {name: WEB_DIR / f"provider-{name}.svg" for name in ("ollama", "openrouter")}
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
@@ -307,13 +307,13 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             media_type="text/javascript",
         )
 
-    @router.get("/portal/static/brand-logo.png")
-    async def portal_brand_logo():
-        if not PORTAL_BRAND_LOGO_PATH.is_file():
-            raise HTTPException(status_code=404, detail="brand-logo.png not found")
+    @router.get("/portal/static/brand-icon.svg")
+    async def portal_brand_icon():
+        if not PORTAL_BRAND_ICON_PATH.is_file():
+            raise HTTPException(status_code=404, detail="brand-icon.svg not found")
         return Response(
-            content=PORTAL_BRAND_LOGO_PATH.read_bytes(),
-            media_type="image/png",
+            content=PORTAL_BRAND_ICON_PATH.read_text(encoding="utf-8"),
+            media_type="image/svg+xml",
         )
 
     @router.get("/portal/static/provider-{name}.svg")

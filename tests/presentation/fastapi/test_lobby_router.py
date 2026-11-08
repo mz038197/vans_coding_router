@@ -61,7 +61,8 @@ def test_lobby_page_requires_teacher(tmp_path):
     response = client.get("/lobby", cookies=_teacher_cookie(client, repo))
     assert response.status_code == 200
     assert "Agent Lobby" in response.text or "Agent" in response.text
-    assert 'src="/portal/static/brand-logo.png"' in response.text
+    assert 'src="/portal/static/brand-icon.svg"' in response.text
+    assert '<link rel="icon" href="/portal/static/brand-icon.svg"' in response.text
     assert "fa-route" not in response.text
     assert 'class="nav-theme-toggle"' in response.text
     assert "portal-theme" in response.text

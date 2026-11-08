@@ -129,19 +129,23 @@ def test_auth_config_reports_closed_registration(tmp_path):
     assert client.get("/auth/config").json()["open_registration"] is False
 
 
-def test_portal_brand_logo_served(tmp_path):
+def test_portal_brand_icon_served_and_character_logo_gone(tmp_path):
     client, _, _ = _client(tmp_path)
-    response = client.get("/portal/static/brand-logo.png")
+    response = client.get("/portal/static/brand-icon.svg")
     assert response.status_code == 200
-    assert "image/png" in response.headers.get("content-type", "")
-    assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert "image/svg+xml" in response.headers.get("content-type", "")
+    assert "<svg" in response.text
+    # The route V's magenta node (ADR 0084).
+    assert "#ff3d9a" in response.text
+    assert client.get("/portal/static/brand-logo.png").status_code == 404
 
 
-def test_portal_page_uses_brand_logo_in_login_panel_and_app_nav(tmp_path):
+def test_portal_page_uses_brand_icon_as_favicon_and_in_app_nav(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
-    assert html.count('src="/portal/static/brand-logo.png"') == 2
-    assert 'class="nav-logo"' in html
+    assert '<link rel="icon" href="/portal/static/brand-icon.svg"' in html
+    assert 'class="nav-logo"><img src="/portal/static/brand-icon.svg"' in html
+    assert "brand-logo.png" not in html
     assert "fa-route" not in html
 
 
@@ -410,14 +414,36 @@ def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
     assert "data-theme-toggle" in shell
     panel = shell[shell.index('class="login-brand-panel"'):shell.index('id="login"')]
     assert 'id="loginNetworkRoot"' in panel
-    assert "/portal/static/brand-logo.png" in panel
-    assert "Vans Coding<br>Router" in panel
+    # The route V stands in for the V of VCRouter; no separate mark above the words (ADR 0084).
+    assert 'class="login-brand-v"' in panel
+    assert "CRouter</p>" in panel
+    assert "<img" not in panel
     pane = shell[shell.index('id="login"'):]
     assert "<h1>歡迎回來</h1>" in pane
-    assert "Vans Coding" not in pane
+    assert "Router" not in pane
     assert "/auth/google/login" in pane
     # Only shown when /auth/config says registration is open.
     assert 'id="loginHint" class="login-hint hidden"' in pane
+
+
+def test_portal_shows_the_product_as_vcrouter(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    assert "<title>VCRouter Portal</title>" in html
+    assert 'class="nav-title">VC<span class="gradient-text">Router</span>' in html
+    assert "Vans Coding" not in html
+
+
+def test_portal_login_brand_v_routes_with_a_runner_that_rests_under_reduced_motion(tmp_path):
+    client, _, _ = _client(tmp_path)
+    shell = _login_shell(client.get("/portal").text)
+    glyph = shell[shell.index('class="login-brand-v"'):shell.index("CRouter</p>")]
+    assert "#ff3d9a" in glyph  # the route node
+    assert 'class="route-runner"' in glyph
+    assert "<animate " in glyph
+    css = client.get("/portal/static/portal.css").text
+    reduced = css[css.index("@media (prefers-reduced-motion: reduce)"):]
+    assert ".route-runner" in reduced
 
 
 def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
@@ -426,9 +452,11 @@ def test_portal_login_network_is_a_dithered_swirl_without_three_js(tmp_path):
     assert "three.min.js" not in html
     assert "getContext('webgl'" in html
     assert "bayer4" in html
-    # Same swirl palette on both Themes.
+    # Same swirl palette on both Themes: deep purple and gold (ADR 0084).
     assert "'#220011'" in html
-    assert "'#00ffff'" in html
+    assert "'#ffc53d'" in html
+    assert "#00ffff" not in html
+    assert "#00ffff" not in client.get("/portal/static/portal.css").text
     assert "prefers-reduced-motion" in html
 
 
