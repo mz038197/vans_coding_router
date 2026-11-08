@@ -186,8 +186,8 @@
     }
 
     .nav-brand-v {
-      width: calc(0.7em * 12 / 14); /* the glyph's 12x14 grid */
-      height: 0.7em; /* Segoe UI's cap height: as tall as the C */
+      width: calc(0.78em * 12 / 14); /* the glyph's 12x14 grid */
+      height: 0.78em; /* the top of the C, measured on Segoe UI bold */
       margin-right: -1px;
       vertical-align: baseline;
     }
@@ -302,8 +302,8 @@
     /* The route V as the V of VCRouter (ADR 0084): as tall as the capitals, on the
        baseline, drawn in the words' white. The runner rests under reduced motion. */
     .login-brand-v {
-      width: calc(0.7em * 12 / 14); /* the glyph's 12x14 grid */
-      height: 0.7em; /* Segoe UI's cap height: as tall as the C */
+      width: calc(0.78em * 12 / 14); /* the glyph's 12x14 grid */
+      height: 0.78em; /* the top of the C, measured on Segoe UI bold */
       margin-right: -1px;
       vertical-align: baseline;
       filter: drop-shadow(0 2px 12px rgba(34, 0, 17, 0.9));

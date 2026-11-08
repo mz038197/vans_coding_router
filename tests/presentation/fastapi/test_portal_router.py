@@ -456,7 +456,7 @@ def test_portal_nav_logo_is_the_login_wordmark_static_black_or_white_by_theme(tm
     assert "font-weight: 700" in login[:login.index("}")]  # same word on the login page
     for glyph in (".nav-brand-v {", ".login-brand-v {"):
         rule = css[css.index(glyph):]
-        assert "height: 0.7em" in rule[:rule.index("}")]  # as tall as the C
+        assert "height: 0.78em" in rule[:rule.index("}")]  # as tall as the C
     dark = css[css.index('html[data-theme="dark"] .nav-wordmark {'):]
     assert "color: #ffffff" in dark[:dark.index("}")]
 
