@@ -209,7 +209,7 @@ The secret one Partner Service presents to fetch the Revocation List and to call
 _Avoid_: Revocation List Credential, one secret shared by every Partner Service, a student bearer, a public read, a database connection string
 
 **Key Check**:
-A Partner Service's question to this router about one legacy Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, and Class Session. An accepted Personal API Key answers with its holder, whether that holder is an admin, and the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
+A Partner Service's question to this router about one legacy Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, and Class Session. An accepted Personal API Key answers with its holder, whether that holder is an admin, and the Classes that holder may manage, by id and name: every Class for an admin, otherwise the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
 _Avoid_: legacy-key check as the name once Personal API Keys use it, auth API, 驗證中心, an answer with an email, a name, or the key id
 
 **Personal API Key** (Portal: 個人 API Key):
