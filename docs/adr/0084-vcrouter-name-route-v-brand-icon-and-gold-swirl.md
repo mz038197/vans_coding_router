@@ -1,6 +1,6 @@
 # VCRouter: short name, route V Brand Icon, gold swirl
 
-Status: accepted (the short name is tentative). Amends ADR 0045, ADR 0048 and ADR 0049.
+Status: accepted (the short name is tentative); the app nav changed by ADR 0085. Amends ADR 0045, ADR 0048 and ADR 0049.
 
 The Portal now presents the product as **VCRouter**, marks it with the **Brand Icon**, a route V, and draws the Login Network in gold.
 
