@@ -3,6 +3,7 @@ from typing import Any
 
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
@@ -27,3 +28,4 @@ class AppContainer:
     key_check_use_case: KeyCheckUseCase | None = None
     # SHA-256 hex of each Partner Service's Service Credential -> service name (ADR 0076).
     service_tokens: dict[str, str] = field(default_factory=dict)
+    key_check_rate_limiter: PerMinuteRateLimiter | None = None

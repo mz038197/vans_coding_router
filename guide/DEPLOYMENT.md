@@ -114,6 +114,15 @@ JSON 帶雙引號，請用 Git Bash 的 `fly secrets set` 直接設，不要放�
 
 **沒設定時**：正式環境（有 `FLY_APP_NAME`）沒設 `VCR_SERVICE_TOKENS` 會拒絕啟動，所以第一次上線 Key Check 前要先設好。本機沒設定時照常啟動，Key Check 一律回 401。
 
+**限流**：每個 Partner Service 每分鐘最多呼叫 Key Check 600 次（各自計算，互不影響），超過的呼叫回 429。一個服務超過時送一筆 ERROR Signal，只寫服務名稱；同一次超量期間不重複送，等它再有呼叫被放行後又超過才再送。要調整時在 `router.yaml` 加：
+
+```yaml
+key_check:
+  calls_per_minute_per_service: 600
+```
+
+數字必須是正整數，否則 router 拒絕啟動。計數在記憶體裡，重啟歸零。
+
 **回應合約**：通過、拒絕和 400 的範例在 [`docs/contracts/key-check/`](../docs/contracts/key-check/)，router 的測試會斷言真實回應符合這些範例；Partner Service 的測試直接讀這些檔案（或複製一份並註明來源 commit）。
 
 ---
