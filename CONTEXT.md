@@ -153,11 +153,11 @@ The school Portal visual identity aligned with pegasi_router: light surfaces wit
 _Avoid_: school theme, pegasi theme, teal theme
 
 **VCRouter**:
-The short name the Portal shows for Vans Coding Router (tentative, ADR 0084). Vans Coding Router stays the full name.
+The short name the Portal shows for Vans Coding Router. Vans Coding Router stays the full name.
 _Avoid_: VCR, Vans Router
 
 **Brand Icon**:
-The route V that marks VCRouter: two destination blocks, arms meeting at a magenta route node. It is the favicon and the Portal nav icon, on its own white tile, and on the login shell it stands in for the V of VCRouter in the brand panel. It does not change with Theme. It replaces the Vans character Brand Logo.
+The route V that marks VCRouter: two destination blocks, arms meeting at a magenta route node. It is the favicon and the Portal nav icon, on its own white tile, and on the login shell it stands in for the V of VCRouter in the brand panel. It does not change with Theme.
 _Avoid_: Brand Logo, logo, character, school logo
 
 **Login Network**:

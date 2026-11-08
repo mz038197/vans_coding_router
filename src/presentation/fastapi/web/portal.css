@@ -182,9 +182,8 @@
       width: 32px;
       height: 32px;
       padding: 0;
-      /* The Brand Icon brings its own white tile and edge (ADR 0084): no badge plate. */
-      border-radius: var(--radius);
-      overflow: hidden;
+      /* The Brand Icon brings its own white tile, edge and corners (ADR 0084): no badge plate,
+         no clipping. */
     }
 
     .nav-logo img {
@@ -296,7 +295,7 @@
     /* The route V as the V of VCRouter (ADR 0084): a touch taller than the capitals, on the
        baseline, drawn in the words' white. The runner rests under reduced motion. */
     .login-brand-v {
-      width: calc(0.86em * 12 / 14);
+      width: calc(0.86em * 12 / 14); /* the glyph's 12x14 grid */
       height: 0.86em;
       margin-right: -1px;
       vertical-align: baseline;
@@ -305,6 +304,19 @@
 
     @media (prefers-reduced-motion: reduce) {
       .login-brand-v .route-runner { display: none; }
+    }
+
+    /* Read by screen readers, not shown: the hidden "V" joins "CRouter" so the name reads VCRouter. */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .login-pane {

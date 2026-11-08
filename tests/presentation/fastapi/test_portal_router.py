@@ -417,10 +417,11 @@ def test_portal_login_is_a_split_page_with_brand_panel_and_no_top_nav(tmp_path):
     # The route V stands in for the V of VCRouter; no separate mark above the words (ADR 0084).
     assert 'class="login-brand-v"' in panel
     assert "CRouter</p>" in panel
+    assert '<span class="sr-only">V</span>' in panel  # read as VCRouter
     assert "<img" not in panel
     pane = shell[shell.index('id="login"'):]
     assert "<h1>歡迎回來</h1>" in pane
-    assert "Router" not in pane
+    assert "VCRouter" not in pane and "CRouter" not in pane
     assert "/auth/google/login" in pane
     # Only shown when /auth/config says registration is open.
     assert 'id="loginHint" class="login-hint hidden"' in pane

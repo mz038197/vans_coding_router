@@ -1,6 +1,6 @@
 # Portal uses monochrome design tokens
 
-Status: accepted.
+Status: accepted. Amended by ADR 0084 (the logo badge plate is gone; the Brand Icon brings its own tile).
 
 Every page that loads `portal.css` (Portal, Agent Lobby, the login page) now draws from the shadcn style in `.agents/skills/design-system/SKILL.md`: black, white and grays, with colour reserved for status. The token names stay the same, so pages did not change their markup; only the values changed.
 
