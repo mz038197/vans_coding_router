@@ -1,6 +1,6 @@
 # vans-auth keeps an accepted key check for 60 seconds and refuses when the router cannot answer
 
-Status: accepted. Amends ADR 0062.
+Status: accepted. Amends ADR 0062. Amended by ADR 0082: there is no `vans-auth` package; these rules bind each Partner Service's own key check client.
 
 `vans-auth` also holds the key check client. It keeps an accepted answer for 60 seconds, keyed by the hash of the key, never the key. When the answer is older, it asks the router again. If the router cannot answer and no fresh answer is kept, the call is refused with 驗證服務暫時無法使用，請稍後再試, and each failed key check sends one ERROR Signal. A kept answer is not extended while the router is down. That is the same stance as ADR 0056.
 

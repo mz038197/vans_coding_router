@@ -1,6 +1,6 @@
 # Shared verification lives in vans-auth
 
-Status: accepted. Amended by ADR 0079 (vans-auth also holds the key check client).
+Status: superseded by ADR 0082 (no shared package; each Partner Service calls the key check itself). Previously amended by ADR 0079.
 
 Signature checks, public-key fetch, Revocation List refresh, and the 600-second copy bound live in one Python package, `vans-auth`, in its own repository. vans-mcp-server and pokemon-world-mcp install it. The router does not. It signs keys, publishes the public keys, and builds the Revocation List itself. The router keeps the example responses for the public keys and the Revocation List. A format change updates those examples and bumps the package version together.
 

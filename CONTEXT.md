@@ -201,15 +201,15 @@ The notice a student sees when a Classroom API Key is refused before its expiry.
 _Avoid_: 無效的 API 金鑰 for every cause, a notice that names another student, a nickname or email on the Revocation List, 已在其他電腦兌換 while the student, the Class, or the sitting already blocks a new redeem, 課堂已關閉 for a sitting whose expiry has passed, expired invite, invalid invite, showing the key to the teacher, a second roster column, one roster row per key
 
 **Partner Service**:
-A separately deployed service registered with this router that accepts `vcr_sk_` keys from its own callers. Today: vans-mcp-server, pokemon-world-mcp, and road-test. It accepts a signed Classroom API Key from its signature and the Revocation List, and asks the Key Check for any other key. It never opens this router's database. It is not Remote MCP.
-_Avoid_: shared DB auth, downstream app, both MCP services as the name of the set, calling vans-mcp-server Remote MCP
+A separately deployed service registered with this router that accepts `vcr_sk_` keys from its own callers. Today: vans-mcp-server, pokemon-world-mcp, and road-test. It asks the Key Check about every key it receives, through a client in its own repository. It never opens this router's database. It is not Remote MCP.
+_Avoid_: shared DB auth, a shared auth package, downstream app, both MCP services as the name of the set, calling vans-mcp-server Remote MCP
 
 **Service Credential**:
 The secret one Partner Service presents to fetch the Revocation List and to call the Key Check. Each Partner Service has its own. It is not a Classroom API Key or a Personal API Key and grants no `/v1` call.
 _Avoid_: Revocation List Credential, one secret shared by every Partner Service, a student bearer, a public read, a database connection string
 
 **Key Check**:
-A Partner Service's question to this router about one legacy Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, and Class Session. An accepted Personal API Key answers with its holder, whether that holder is an admin, and the Classes that holder owns. A refusal answers with its cause only.
+A Partner Service's question to this router about one legacy Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, and Class Session. An accepted Personal API Key answers with its holder, whether that holder is an admin, and the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
 _Avoid_: legacy-key check as the name once Personal API Keys use it, auth API, 驗證中心, an answer with an email, a name, or the key id
 
 **Personal API Key** (Portal: 個人 API Key):
