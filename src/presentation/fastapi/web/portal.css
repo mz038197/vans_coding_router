@@ -146,9 +146,6 @@
       box-shadow: var(--card-shadow);
     }
 
-    /* Monochrome: the old gradient title is plain text now. */
-    .gradient-text { color: inherit; }
-
     .site-nav {
       position: fixed;
       top: 0;
@@ -175,22 +172,27 @@
       color: inherit;
     }
 
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      padding: 0;
-      /* The Brand Icon brings its own white tile, edge and corners (ADR 0084): no badge plate,
-         no clipping. */
+    /* The nav logo is the login wordmark (ADR 0085): the route V as the V of VCRouter, static,
+       the whole word in fixed gold on both Themes. */
+    .nav-wordmark {
+      color: #ffc53d;
+      font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
+      white-space: nowrap;
     }
 
-    .nav-logo img {
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
+    .nav-brand-v {
+      width: calc(0.86em * 12 / 14); /* the glyph's 12x14 grid */
+      height: 0.86em;
+      margin-right: -1px;
+      vertical-align: baseline;
+    }
+
+    /* A page that is not the Portal names itself after the wordmark. */
+    .nav-page-name {
+      margin-left: 8px;
+      padding-left: 8px;
+      border-left: 1px solid var(--border-strong);
+      color: var(--text-primary);
     }
 
     .nav-theme-toggle {

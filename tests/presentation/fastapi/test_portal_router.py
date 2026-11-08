@@ -140,11 +140,10 @@ def test_portal_brand_icon_served_and_character_logo_gone(tmp_path):
     assert client.get("/portal/static/brand-logo.png").status_code == 404
 
 
-def test_portal_page_uses_brand_icon_as_favicon_and_in_app_nav(tmp_path):
+def test_portal_page_uses_brand_icon_as_favicon(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     assert '<link rel="icon" href="/portal/static/brand-icon.svg"' in html
-    assert 'class="nav-logo"><img src="/portal/static/brand-icon.svg"' in html
     assert "brand-logo.png" not in html
     assert "fa-route" not in html
 
@@ -431,8 +430,27 @@ def test_portal_shows_the_product_as_vcrouter(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     assert "<title>VCRouter Portal</title>" in html
-    assert 'class="nav-title">VC<span class="gradient-text">Router</span>' in html
     assert "Vans Coding" not in html
+
+
+def _nav_wordmark(html: str) -> str:
+    start = html.index('class="nav-wordmark"')
+    return html[start:html.index("CRouter</span>", start)]
+
+
+def test_portal_nav_logo_is_the_login_wordmark_static_and_gold(tmp_path):
+    client, _, _ = _client(tmp_path)
+    html = client.get("/portal").text
+    nav = html[html.index('<header class="site-nav"'):]
+    assert "<img" not in nav[:nav.index("</header>")]
+    mark = _nav_wordmark(nav)
+    assert '<span class="sr-only">V</span>' in mark  # reads VCRouter
+    assert 'class="nav-brand-v"' in mark
+    assert "#ff3d9a" in mark  # the route node
+    assert "<animate" not in mark
+    css = client.get("/portal/static/portal.css").text
+    rule = css[css.index(".nav-wordmark {"):]
+    assert "color: #ffc53d" in rule[:rule.index("}")]
 
 
 def test_portal_login_brand_v_routes_with_a_runner_that_rests_under_reduced_motion(tmp_path):
