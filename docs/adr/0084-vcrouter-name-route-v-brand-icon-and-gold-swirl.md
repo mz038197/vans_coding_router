@@ -11,7 +11,7 @@ The Portal now presents the product as **VCRouter**, marks it with the **Brand I
 - **Gold.** The swirl's front colour changes from `#00ffff` to gold `#ffc53d`, on both Themes. The dither accent above 歡迎回來 and the sign-in button's focus ring on the dark Theme follow it. The back colour `#220011` and the dissolve rim `#5c1a3d` stay.
 - **Brand words.** One line instead of two, so they shrink to `clamp(32px, 4.5vw, 64px)`. They remain the one size exempt from ADR 0045's type scale.
 
-Chosen from prototype variants at commit `cf03ce8` on the local branch `prototype/brand-icon`: variant R3 with `?swirl=gold` (`/portal?variant=R3&swirl=gold`). Earlier variants are in that branch's history up to `0a71700`.
+Chosen from prototype variants at commit `cf03ce8` (the deleted local branch `prototype/brand-icon`; recover with `git branch prototype/brand-icon cf03ce8`): variant R3 with `?swirl=gold` (`/portal?variant=R3&swirl=gold`). Earlier variants are in its history up to `0a71700`.
 
 ## Considered Options
 
