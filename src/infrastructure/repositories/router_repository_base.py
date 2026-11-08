@@ -651,12 +651,19 @@ class RouterRepositoryBase(ABC):
                 return role
         return "student"
 
-    def _roles_for_user(self, conn: Any, user_id: int) -> tuple[str, ...]:
+    def _role_table_roles(self, conn: Any, user_id: int) -> tuple[str, ...]:
         rows = conn.execute(
             self._sql("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role"),
             (user_id,),
         ).fetchall()
-        roles = tuple(row["role"] for row in rows)
+        return tuple(row["role"] for row in rows)
+
+    def role_table_roles(self, user_id: int) -> tuple[str, ...]:
+        with self._connect() as conn:
+            return self._role_table_roles(conn, user_id)
+
+    def _roles_for_user(self, conn: Any, user_id: int) -> tuple[str, ...]:
+        roles = self._role_table_roles(conn, user_id)
         if roles:
             return roles
         row = conn.execute(self._sql("SELECT role FROM users WHERE id = ?"), (user_id,)).fetchone()

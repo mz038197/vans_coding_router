@@ -54,11 +54,8 @@ def test_the_configured_limit_survives_runtime_settings(tmp_path):
     assert overridden.key_check.calls_per_minute_per_service == 1200
 
 
-def test_the_started_app_limits_key_check_to_the_configured_number(tmp_path):
-    container = build_container(
-        request_timeout=1.0,
-        config_path=_config(tmp_path, "key_check:", "  calls_per_minute_per_service: 2"),
-    )
+def _started_app_caller(config_path: str):
+    container = build_container(request_timeout=1.0, config_path=config_path)
     app = FastAPI()
     app.include_router(
         create_key_check_router(
@@ -74,9 +71,26 @@ def test_the_started_app_limits_key_check_to_the_configured_number(tmp_path):
             "/internal/key-check",
             json={"api_key": "vcr_sk_unknown"},
             headers={"Authorization": f"Bearer {CREDENTIAL}"},
-        ).status_code
+        )
 
-    assert [call(), call(), call()] == [200, 200, 429]
+    return call
+
+
+def test_the_started_app_limits_key_check_to_the_configured_number(tmp_path):
+    call = _started_app_caller(_config(tmp_path, "key_check:", "  calls_per_minute_per_service: 2"))
+
+    assert [call().status_code for _ in range(3)] == [200, 200, 429]
+
+
+def test_the_started_app_with_no_setting_answers_the_601st_call_in_a_minute_with_429(tmp_path):
+    call = _started_app_caller(_config(tmp_path))
+
+    answers = [call().status_code for _ in range(600)]
+    over = call()
+
+    assert answers == [200] * 600
+    assert over.status_code == 429
+    assert "vcr_sk_unknown" not in over.text
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "many", "1.5"])

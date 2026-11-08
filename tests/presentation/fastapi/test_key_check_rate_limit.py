@@ -31,7 +31,7 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _client(tmp_path, rate_limiter=None):
+def _client(tmp_path, rate_limiter):
     settings = RouterSettings(
         path=str(tmp_path / "router.yaml"),
         public_url="http://testserver",
@@ -63,17 +63,6 @@ def _limited(tmp_path, limit=3):
 
 def _error_records(caplog):
     return [record for record in caplog.records if record.levelno >= logging.ERROR]
-
-
-def test_the_601st_call_in_a_minute_gets_429_by_default(tmp_path):
-    client = _client(tmp_path)
-
-    answers = [_key_check(client).status_code for _ in range(600)]
-    over = _key_check(client)
-
-    assert answers == [200] * 600
-    assert over.status_code == 429
-    assert UNKNOWN_KEY not in over.text
 
 
 def test_one_partner_service_over_its_limit_leaves_the_others_their_own(tmp_path):

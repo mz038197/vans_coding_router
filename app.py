@@ -82,7 +82,7 @@ app.add_middleware(ApiKeyMiddleware, auth_use_case=container.auth_use_case)
 
 # Routers
 app.include_router(create_api_router(container.api_use_case))
-if container.key_check_use_case is not None:
+if container.key_check_use_case is not None and container.key_check_rate_limiter is not None:
     app.include_router(
         create_key_check_router(
             container.key_check_use_case,

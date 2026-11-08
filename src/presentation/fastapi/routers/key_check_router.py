@@ -16,7 +16,6 @@ from fastapi.responses import JSONResponse
 from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.infrastructure.auth.service_credentials import service_named_by_token
-from src.infrastructure.config import KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +65,10 @@ async def _api_key_from_body(request: Request) -> str | None:
 def create_key_check_router(
     key_check: KeyCheckUseCase,
     service_tokens: Mapping[str, str],
-    rate_limiter: PerMinuteRateLimiter | None = None,
+    rate_limiter: PerMinuteRateLimiter,
 ) -> APIRouter:
+    """`rate_limiter` counts calls per Partner Service; bootstrap builds it from the config."""
     router = APIRouter()
-    limiter = rate_limiter or PerMinuteRateLimiter(KEY_CHECK_CALLS_PER_MINUTE_PER_SERVICE)
     # Services refused since their last allowed call: one overrun sends one ERROR Signal,
     # so a leaked credential hammering the endpoint does not flood vans-signals.
     over_limit: set[str] = set()
@@ -79,13 +78,13 @@ def create_key_check_router(
         service = _partner_service(request, service_tokens)
         if service is None:
             return JSONResponse(UNAUTHORIZED_BODY, status_code=401)
-        if not limiter.allow(service):
+        if not rate_limiter.allow(service):
             if service not in over_limit:
                 over_limit.add(service)
                 logger.error(
                     "Key Check rate limit: Partner Service %s went over %d calls a minute",
                     service,
-                    limiter.limit,
+                    rate_limiter.limit,
                 )
             return JSONResponse(RATE_LIMITED_BODY, status_code=429)
         over_limit.discard(service)

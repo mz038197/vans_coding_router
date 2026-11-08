@@ -333,3 +333,15 @@ def test_postgres_v1_check_writes_last_used_at_on_every_pass_while_the_key_check
             )
         assert repo.verify_api_key_context(api_key) is not None
         assert _postgres_last_used_at(repo, context.api_key_id) != written_a_second_ago
+
+
+def test_postgres_role_table_roles_ignore_the_legacy_role_column(postgres_repo):
+    repo = postgres_repo
+    admin = repo.upsert_google_user("admin@school.edu", "Admin")
+    legacy = repo.upsert_google_user("legacy@gmail.com", "Legacy")
+    with repo._connect() as conn:
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = %s", (legacy["id"],))
+        conn.execute("DELETE FROM user_roles WHERE user_id = %s", (legacy["id"],))
+
+    assert repo.role_table_roles(admin["id"]) == ("admin", "student", "teacher")
+    assert repo.role_table_roles(legacy["id"]) == ()

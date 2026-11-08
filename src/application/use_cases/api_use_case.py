@@ -59,7 +59,8 @@ from src.domain.errors import (
     WebSearchRateLimitedError,
     WebSearchUnavailableError,
 )
-from src.application.web_search_rate_limit import WebSearchRateLimiter
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
+from src.application.web_search_rate_limit import WEB_SEARCH_LIMIT_PER_MINUTE
 from src.infrastructure.gateways.realtime_proxy import RealtimeUpstreamTarget
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.domain.ports.api_key_repository import ApiKeyRepositoryPort
@@ -75,7 +76,7 @@ class ApiUseCase:
         api_key_repo: ApiKeyRepositoryPort,
         logger: RequestLogPort,
         web_search_backend: WebSearchPort | None = None,
-        web_search_limiter: WebSearchRateLimiter | None = None,
+        web_search_limiter: PerMinuteRateLimiter | None = None,
         vcr_auto_selector: VcrAutoSelector | None = None,
         vcr_auto_selection_memory: VcrAutoSelectionMemory | None = None,
     ):
@@ -85,7 +86,7 @@ class ApiUseCase:
         self.api_key_repo = api_key_repo
         self.logger = logger
         self.web_search_backend = web_search_backend
-        self.web_search_limiter = web_search_limiter or WebSearchRateLimiter()
+        self.web_search_limiter = web_search_limiter or PerMinuteRateLimiter(WEB_SEARCH_LIMIT_PER_MINUTE)
 
     async def health(self) -> dict[str, Any]:
         return await self.gateway.health()

@@ -66,11 +66,12 @@ class KeyCheckUseCase:
         }
 
     def _personal_answer(self, context: AuthContext) -> dict[str, Any]:
-        # `is_admin` comes from the role table, never `users.role` (ADR 0078). An admin
-        # may manage every Class, ended ones included; anyone else the Classes they own
+        # `is_admin` comes from the role table, never `users.role` (ADR 0078): a user
+        # with no role rows is not an admin, whatever `users.role` says. An admin may
+        # manage every Class, ended ones included; anyone else the Classes they own
         # (ADR 0083). Each Class carries only its id and name.
-        is_admin = bool(context.is_admin)
         user_id = int(context.user_id)
+        is_admin = "admin" in self.api_key_repo.role_table_roles(user_id)
         rows = self.api_key_repo.list_classes(teacher_id=None if is_admin else user_id)
         classes = sorted(
             ({"id": int(row["id"]), "name": str(row["name"])} for row in rows),

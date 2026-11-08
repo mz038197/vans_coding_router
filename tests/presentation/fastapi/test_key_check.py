@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.infrastructure.auth.service_credentials import load_service_tokens
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
@@ -49,7 +50,7 @@ def _client(tmp_path, service_tokens=None, clock=None):
         }
     app = FastAPI()
     key_check = KeyCheckUseCase(repo) if clock is None else KeyCheckUseCase(repo, clock=clock)
-    app.include_router(create_key_check_router(key_check, service_tokens))
+    app.include_router(create_key_check_router(key_check, service_tokens, PerMinuteRateLimiter(1000)))
     return TestClient(app), repo
 
 
@@ -394,6 +395,20 @@ def test_is_admin_reads_the_role_table_not_the_legacy_role_column(tmp_path):
     personal_key = repo.issue_long_lived_key(teacher["id"])
 
     assert _key_check(client, {"api_key": personal_key}).json()["is_admin"] is False
+
+
+def test_is_admin_is_false_for_a_legacy_admin_with_no_role_rows(tmp_path):
+    client, repo = _client(tmp_path)
+    teacher, _ = _teacher_with_classes(repo)
+    personal_key = repo.issue_long_lived_key(teacher["id"])
+    with repo._connect() as conn:  # a legacy users.role and no user_roles rows at all
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (teacher["id"],))
+        conn.execute("DELETE FROM user_roles WHERE user_id = ?", (teacher["id"],))
+
+    answer = _key_check(client, {"api_key": personal_key}).json()
+
+    assert answer["is_admin"] is False
+    assert [item["name"] for item in answer["classes"]] == ["Mon AM", "Wed PM"]
 
 
 def test_personal_api_key_replaced_by_a_newer_one_is_refused_as_invalid(tmp_path):
