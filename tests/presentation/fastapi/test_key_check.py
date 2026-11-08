@@ -39,7 +39,7 @@ def _settings(tmp_path) -> RouterSettings:
     )
 
 
-def _client(tmp_path, service_tokens=None):
+def _client(tmp_path, service_tokens=None, clock=None):
     settings = _settings(tmp_path)
     repo = SqliteRouterRepository(settings.database.path, settings)
     if service_tokens is None:
@@ -48,7 +48,8 @@ def _client(tmp_path, service_tokens=None):
             _sha256(ROAD_TEST_CREDENTIAL): "road-test",
         }
     app = FastAPI()
-    app.include_router(create_key_check_router(KeyCheckUseCase(repo), service_tokens))
+    key_check = KeyCheckUseCase(repo) if clock is None else KeyCheckUseCase(repo, clock=clock)
+    app.include_router(create_key_check_router(key_check, service_tokens))
     return TestClient(app), repo
 
 
@@ -320,3 +321,50 @@ def test_no_log_line_carries_the_whole_key(tmp_path, caplog):
     for record in caplog.records:
         assert api_key not in record.getMessage()
         assert unknown not in record.getMessage()
+
+
+class _Clock:
+    """A settable time source, so no test waits for real seconds to pass."""
+
+    def __init__(self, start: datetime):
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def _last_used_at(repo, api_key: str) -> str | None:
+    with repo._connect() as conn:
+        row = conn.execute(
+            "SELECT last_used_at FROM api_keys WHERE key_hash = ?", (_sha256(api_key),)
+        ).fetchone()
+    return row["last_used_at"]
+
+
+def test_a_second_pass_within_60_seconds_does_not_write_last_used_at(tmp_path):
+    clock = _Clock(datetime.now(UTC))
+    client, repo = _client(tmp_path, clock=clock)
+    api_key, _, _, _ = _redeemed_key(repo)
+    start = clock.now = datetime.now(UTC) + timedelta(seconds=1)
+
+    assert _key_check(client, {"api_key": api_key}).json()["accepted"] is True
+    assert _last_used_at(repo, api_key) == start.isoformat()
+
+    clock.now = start + timedelta(seconds=59)
+    assert _key_check(client, {"api_key": api_key}).json()["accepted"] is True
+    assert _last_used_at(repo, api_key) == start.isoformat()
+
+
+def test_a_pass_60_seconds_after_the_last_write_writes_last_used_at(tmp_path):
+    clock = _Clock(datetime.now(UTC))
+    client, repo = _client(tmp_path, clock=clock)
+    api_key, _, _, _ = _redeemed_key(repo)
+    start = clock.now = datetime.now(UTC) + timedelta(seconds=1)
+    _key_check(client, {"api_key": api_key})
+
+    clock.now = start + timedelta(seconds=30)
+    _key_check(client, {"api_key": api_key})
+    clock.now = start + timedelta(seconds=61)
+    assert _key_check(client, {"api_key": api_key}).json()["accepted"] is True
+
+    assert _last_used_at(repo, api_key) == (start + timedelta(seconds=61)).isoformat()
