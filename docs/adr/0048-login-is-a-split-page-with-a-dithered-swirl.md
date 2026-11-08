@@ -1,6 +1,6 @@
 # Portal login is a split page with a dithered swirl brand panel
 
-Status: accepted. Amended by ADR 0049 (the brand panel dissolves into the login pane).
+Status: accepted. Amended by ADR 0049 (the brand panel dissolves into the login pane) and ADR 0084 (VCRouter, the route V Brand Icon, gold swirl).
 
 Supersedes ADR 0002 and amends ADR 0045. The Portal login shell is a split page with no top navigation. The left brand panel holds the Login Network, the Brand Logo on its light badge plate, and the words "Vans Coding Router". The right login pane holds 歡迎回來, the tagline, the sign-in button and a one-line hint. The product name appears once, in the brand panel. The Theme toggle floats top-right. On narrow screens the brand panel stacks on top at 40% of the viewport height.
 

@@ -1,6 +1,6 @@
 # Login brand panel dissolves into the login pane
 
-Status: accepted.
+Status: accepted. Amended by ADR 0084 (gold swirl, the brand words become VCRouter with the route V).
 
 Amends ADR 0048. The hard edge between the login brand panel and the login pane read as two pictures side by side. The Login Network now dissolves into the pane, and the brand words get a calm area behind them.
 
