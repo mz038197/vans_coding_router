@@ -1,8 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
+from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.domain.ports.llm_gateway import LLMGatewayPort
@@ -23,3 +24,6 @@ class AppContainer:
     prompt_log_archive_after_days: int = 15
     prompt_log_delete_after_days: int = 30
     router_settings: Any | None = None
+    key_check_use_case: KeyCheckUseCase | None = None
+    # SHA-256 hex of each Partner Service's Service Credential -> service name (ADR 0076).
+    service_tokens: dict[str, str] = field(default_factory=dict)

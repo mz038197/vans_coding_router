@@ -32,6 +32,7 @@ Settings load from YAML first, then environment variables override matching fiel
 | Local dev login | `auth.dev_auth_enabled` | `DEV_AUTH_ENABLED` | Disabled by default; loopback only |
 | Session secret | optional | `SESSION_SECRET` | Environment |
 | API keys | use `api_key_env` / `api_key_envs` | `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`（第二把 `_2` 選填） | Environment |
+| Partner Service credentials (Key Check) | — | `VCR_SERVICE_TOKENS` | Environment. Local dev leaves it unset: the router starts and `POST /internal/key-check` answers 401. Production (`FLY_APP_NAME` set) refuses to start without it. See [`guide/DEPLOYMENT.md`](guide/DEPLOYMENT.md) |
 | Routing, admin emails, providers | primary source | — | YAML |
 
 After Google login, users land on `{PUBLIC_URL}/portal`. Session cookies are not shared across different hostnames.
