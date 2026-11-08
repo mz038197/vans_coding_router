@@ -438,7 +438,7 @@ def _nav_wordmark(html: str) -> str:
     return html[start:html.index("CRouter</span>", start)]
 
 
-def test_portal_nav_logo_is_the_login_wordmark_static_and_gold(tmp_path):
+def test_portal_nav_logo_is_the_login_wordmark_static_black_or_white_by_theme(tmp_path):
     client, _, _ = _client(tmp_path)
     html = client.get("/portal").text
     nav = html[html.index('<header class="site-nav"'):]
@@ -449,8 +449,10 @@ def test_portal_nav_logo_is_the_login_wordmark_static_and_gold(tmp_path):
     assert "#ff3d9a" in mark  # the route node
     assert "<animate" not in mark
     css = client.get("/portal/static/portal.css").text
-    rule = css[css.index(".nav-wordmark {"):]
-    assert "color: #ffc53d" in rule[:rule.index("}")]
+    light = css[css.index(".nav-wordmark {"):]
+    assert "color: #000000" in light[:light.index("}")]
+    dark = css[css.index('html[data-theme="dark"] .nav-wordmark {'):]
+    assert "color: #ffffff" in dark[:dark.index("}")]
 
 
 def test_portal_login_brand_v_routes_with_a_runner_that_rests_under_reduced_motion(tmp_path):

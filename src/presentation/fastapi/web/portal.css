@@ -173,11 +173,15 @@
     }
 
     /* The nav logo is the login wordmark (ADR 0085): the route V as the V of VCRouter, static,
-       the whole word in fixed gold on both Themes. */
+       the whole word black on the light Theme and white on the dark one. */
     .nav-wordmark {
-      color: #ffc53d;
+      color: #000000;
       font-size: 20px; /* larger than the nav text so the 12x14 V and its node stay legible */
       white-space: nowrap;
+    }
+
+    html[data-theme="dark"] .nav-wordmark {
+      color: #ffffff;
     }
 
     .nav-brand-v {

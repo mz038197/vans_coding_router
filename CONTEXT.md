@@ -157,7 +157,7 @@ The short name the Portal shows for Vans Coding Router. Vans Coding Router stays
 _Avoid_: VCR, Vans Router
 
 **Brand Icon**:
-The route V that marks VCRouter: two destination blocks, arms meeting at a magenta route node. On its own white tile it is the favicon. Inline it stands in for the V of VCRouter: animated in the login brand panel, static and gold in the app nav wordmark. It does not change with Theme.
+The route V that marks VCRouter: two destination blocks, arms meeting at a magenta route node. On its own white tile it is the favicon. Inline it stands in for the V of VCRouter: animated in the login brand panel, static in the app nav wordmark, black on the light Theme and white on the dark. The favicon tile does not change with Theme.
 _Avoid_: Brand Logo, logo, character, school logo
 
 **Login Network**:
