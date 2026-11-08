@@ -107,17 +107,17 @@ def test_going_over_the_limit_sends_one_error_naming_only_the_service(tmp_path, 
     assert records[0].exc_info is None
 
 
-def test_further_refused_calls_in_the_same_overrun_send_no_more_errors(tmp_path, caplog):
+def test_every_refused_call_sends_its_own_error(tmp_path, caplog):
     client, clock = _limited(tmp_path, limit=3)
     with caplog.at_level(logging.ERROR, logger="src"):
         for _ in range(3):
             _key_check(client)
         for _ in range(5):
-            _key_check(client)
-        assert len(_error_records(caplog)) == 1
+            assert _key_check(client).status_code == 429
+        assert len(_error_records(caplog)) == 5
 
         clock.now += 60
         for _ in range(4):
             _key_check(client)
 
-    assert len(_error_records(caplog)) == 2
+    assert len(_error_records(caplog)) == 6

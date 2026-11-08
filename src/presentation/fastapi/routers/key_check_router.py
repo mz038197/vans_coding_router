@@ -69,9 +69,6 @@ def create_key_check_router(
 ) -> APIRouter:
     """`rate_limiter` counts calls per Partner Service; bootstrap builds it from the config."""
     router = APIRouter()
-    # Services refused since their last allowed call: one overrun sends one ERROR Signal,
-    # so a leaked credential hammering the endpoint does not flood vans-signals.
-    over_limit: set[str] = set()
 
     @router.post("/internal/key-check")
     async def key_check_endpoint(request: Request) -> JSONResponse:
@@ -79,15 +76,13 @@ def create_key_check_router(
         if service is None:
             return JSONResponse(UNAUTHORIZED_BODY, status_code=401)
         if not rate_limiter.allow(service):
-            if service not in over_limit:
-                over_limit.add(service)
-                logger.error(
-                    "Key Check rate limit: Partner Service %s went over %d calls a minute",
-                    service,
-                    rate_limiter.limit,
-                )
+            # Every refused call sends its own ERROR Signal (ADR 0076).
+            logger.error(
+                "Key Check rate limit: Partner Service %s went over %d calls a minute",
+                service,
+                rate_limiter.limit,
+            )
             return JSONResponse(RATE_LIMITED_BODY, status_code=429)
-        over_limit.discard(service)
         api_key = await _api_key_from_body(request)
         if api_key is None:
             return JSONResponse(BAD_REQUEST_BODY, status_code=400)
