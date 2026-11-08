@@ -448,6 +448,7 @@ def test_portal_nav_logo_is_the_login_wordmark_static_black_or_white_by_theme(tm
     assert 'class="nav-brand-v"' in mark
     assert "#ff3d9a" in mark  # the route node
     assert "<animate" not in mark
+    assert mark.count('width="3" height="1" fill="currentColor"') == 12  # arms 3 wide, to match the bold word
     css = client.get("/portal/static/portal.css").text
     light = css[css.index(".nav-wordmark {"):]
     assert "color: #000000" in light[:light.index("}")]
@@ -470,6 +471,8 @@ def test_portal_login_brand_v_routes_with_a_runner_that_rests_under_reduced_moti
     glyph = shell[shell.index('class="login-brand-v"'):shell.index("CRouter</p>")]
     assert "#ff3d9a" in glyph  # the route node
     assert 'class="route-runner"' in glyph
+    assert glyph.count('width="3" height="1" fill="currentColor"') == 12  # arms 3 wide
+    assert '<rect width="3" height="1" fill="#ff3d9a">' in glyph  # the runner fills the arm
     assert "<animate " in glyph
     css = client.get("/portal/static/portal.css").text
     reduced = css[css.index("@media (prefers-reduced-motion: reduce)"):]
