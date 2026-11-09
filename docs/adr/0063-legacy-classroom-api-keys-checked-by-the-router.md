@@ -1,6 +1,6 @@
 # Legacy Classroom API Keys are checked by the router
 
-Status: accepted. Amended by ADR 0077 (the key check at /internal/key-check).
+Status: accepted. Amended by ADR 0077 (the key check at /internal/key-check). Legacy Personal API Keys end on an operator date (ADR 0087).
 
 During the transition the services accept both a signed Classroom API Key and a legacy key. Both are presented with the `vcr_sk_` prefix. A legacy key is the current HMAC of the sitting and the student, `vcr_sk_` plus 64 hex characters, stored as a hash. A signed key is `vcr_sk_` plus the Ed25519 token. Each service verifies a signed key itself. A legacy key is sent to the router with the Revocation List Credential, and the key itself is the request body. The router does the hash check it already does. When it accepts the key, it returns that student's integer id and does not return an email, a name, or the key id. When it refuses, it returns only the notice. The MCP services do not read the router's tables for it. A new redeem issues a signed key. The legacy check is removed when the last legacy key that has not reached its own expiry has expired. There is no separate cutover date.
 

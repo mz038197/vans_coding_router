@@ -1,6 +1,6 @@
 # The key check answers legacy Classroom API Keys and Personal API Keys
 
-Status: accepted. Amends ADR 0063. Amended by ADRs 0082 and 0083 (Personal API Key answers with `classes`).
+Status: accepted. Amends ADR 0063. Amended by ADRs 0082 and 0083 (Personal API Key answers with `classes`). Amended by ADR 0087 (signed Personal API Keys).
 
 The legacy check of ADR 0063 becomes the key check at `POST https://ai.vanscoding.com/internal/key-check`. A Partner Service calls it with its Service Credential in `Authorization`. The key to check is the request body. It answers a legacy Classroom API Key and a Personal API Key. A signed Classroom API Key is still checked by the Partner Service itself. While signed issuance stays off (ADR 0074), every Classroom API Key is a legacy key, so every Partner Service call goes through the key check until then.
 
