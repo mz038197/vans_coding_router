@@ -1,6 +1,6 @@
 # No shared vans-auth package: each Partner Service calls the key check itself
 
-Status: accepted. Supersedes ADR 0062. Amends ADRs 0076, 0077, 0079, and 0080. Amended by ADR 0086 (Partner Services check signed keys themselves).
+Status: accepted. Supersedes ADR 0062. Amends ADRs 0076, 0077, 0079, and 0080.
 
 There is no `vans-auth` package. The contract between the router and a Partner Service is the key check itself (ADR 0077). Each Partner Service keeps its own small key check client in its own repository, in its own language.
 

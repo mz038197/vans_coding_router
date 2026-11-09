@@ -1,6 +1,6 @@
 # Classroom API Key is a signed ticket
 
-Status: accepted. Amended by ADR 0078 (Partner Services accept a Personal API Key through the key check). Partly superseded by ADR 0087 (a Personal API Key is signed).
+Status: accepted. Amended by ADR 0078 (Partner Services accept a Personal API Key through the key check).
 
 A Classroom API Key is a ticket the router signs for one student and one Class Session. vans-mcp-server and pokemon-world-mcp check that issuance themselves, and they do not read the router's key table to decide it is genuine. A Personal API Key stays an opaque secret: only the router verifies its hash, and those two MCP services reject it.
 
