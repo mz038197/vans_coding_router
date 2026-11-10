@@ -40,4 +40,14 @@ sudo -u postgres psql -c "CREATE DATABASE vans_coding_router OWNER vcr;"
 
 `pg_ctlcluster` starts cluster `16/main` on port 5432. Set `TEST_DATABASE_URL=postgresql://vcr:vcr@127.0.0.1:5432/vans_coding_router` before `uv run pytest -q`.
 
+## Startup migrations
+
+Schema migrations run on every start and are not version-tracked. Keep them few:
+
+- Write each migration so it is safe to run on every start: check before you change anything.
+- Put a one-line comment on each migration naming its source (commit or ADR) and when it can be deleted.
+- A migration can be deleted once production and the owner's local SQLite database have both run it. Move its result into `CREATE TABLE` for SQLite and Postgres, then delete it.
+- When you change database code, delete every migration that meets that condition.
+- A push to master deploys to production and runs the migrations there. Tell the owner about a schema change before you push it.
+
 Portal login, classes, and class sessions do not need upstream API keys. Forwarding chat, image, or speech calls needs `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`, and/or `OPENAI_API_KEY`.

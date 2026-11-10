@@ -38,9 +38,6 @@ class SqliteRouterRepository(RouterRepositoryBase):
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
-            token_usage_is_new = not conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='token_usage'"
-            ).fetchone()
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -77,7 +74,21 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
                     session_at TEXT,
-                    name TEXT
+                    name TEXT,
+                    image_generation_enabled INTEGER NOT NULL DEFAULT 1,
+                    tts_enabled INTEGER NOT NULL DEFAULT 1,
+                    speech_transcription_enabled INTEGER NOT NULL DEFAULT 0,
+                    decision_enabled INTEGER NOT NULL DEFAULT 0,
+                    decision_model_allowlist_json TEXT,
+                    decision_model TEXT NOT NULL DEFAULT '',
+                    prompt_logging_enabled INTEGER NOT NULL DEFAULT 1,
+                    web_search_enabled INTEGER NOT NULL DEFAULT 0,
+                    course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []
+',
+                    seat_limit INTEGER NOT NULL DEFAULT 60,
+                    model_allowlist_json TEXT,
+                    session_chat_language_models_json TEXT,
+                    classroom_model_choice TEXT
                 );
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +117,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     classroom_nickname TEXT,
                     PRIMARY KEY(class_id, user_id)
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
+                ON class_members(class_id, classroom_nickname)
+                WHERE classroom_nickname IS NOT NULL;
                 CREATE TABLE IF NOT EXISTS prompt_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER REFERENCES users(id),
@@ -121,7 +135,11 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     client_ip TEXT,
                     created_at TEXT NOT NULL,
                     message_preview TEXT,
-                    messages_json TEXT
+                    messages_json TEXT,
+                    api_endpoint TEXT,
+                    response_preview TEXT,
+                    tier_name TEXT,
+                    tier_confidence REAL
                 );
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,183 +210,11 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 );
                 """
             )
-            self._ensure_agent_action_audit_target_nullable(conn)
-            self._ensure_column(conn, "prompt_logs", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "prompt_logs", "message_preview", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "messages_json", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "api_endpoint", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "response_preview", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "tier_name", "TEXT")
-            self._ensure_column(conn, "prompt_logs", "tier_confidence", "REAL")
-            self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
-            self._migrate_to_session_windows(conn)
-            if "api_key_ttl_hours" in {row[1] for row in conn.execute("PRAGMA table_info(classes)").fetchall()}:
-                conn.execute("ALTER TABLE classes DROP COLUMN api_key_ttl_hours")
-            self._ensure_column(conn, "class_sessions", "name", "TEXT")
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "image_generation_enabled",
-                "INTEGER NOT NULL DEFAULT 1",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "tts_enabled",
-                "INTEGER NOT NULL DEFAULT 1",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "speech_transcription_enabled",
-                "INTEGER NOT NULL DEFAULT 0",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "decision_enabled",
-                "INTEGER NOT NULL DEFAULT 0",
-            )
-            self._ensure_column(conn, "class_sessions", "decision_model_allowlist_json", "TEXT")
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "decision_model",
-                "TEXT NOT NULL DEFAULT ''",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "prompt_logging_enabled",
-                "INTEGER NOT NULL DEFAULT 1",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "web_search_enabled",
-                "INTEGER NOT NULL DEFAULT 0",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "course_catalog_yaml",
-                "TEXT NOT NULL DEFAULT 'actions: []\n'",
-            )
-            self._ensure_column(
-                conn,
-                "class_sessions",
-                "seat_limit",
-                "INTEGER NOT NULL DEFAULT 60",
-            )
-            self._ensure_column(conn, "class_sessions", "model_allowlist_json", "TEXT")
-            self._ensure_column(conn, "class_sessions", "session_chat_language_models_json", "TEXT")
-            self._ensure_column(conn, "class_sessions", "classroom_model_choice", "TEXT")
-            self._ensure_column(conn, "class_members", "classroom_nickname", "TEXT")
-            conn.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
-                ON class_members(class_id, classroom_nickname)
-                WHERE classroom_nickname IS NOT NULL
-                """
-            )
-            self._backfill_user_roles(conn)
-            self._backfill_ended_session_expires(conn)
-            self._backfill_session_chat_language_models(conn)
-            self._backfill_router_model_templates(conn)
-            if token_usage_is_new:
-                self._backfill_token_usage_from_prompt_logs(conn)
-                self._backfill_token_usage_from_archive(conn)
-
-    def _backfill_token_usage_from_archive(self, conn: sqlite3.Connection) -> None:
-        """Copy successful archived Prompt Logs into token_usage.
-
-        Archive files written before token columns existed there give a request with zero tokens.
-        A row still present in the live table (an interrupted archive run) was already copied.
-        """
-        archive_dir = Path(self.settings.database.archive_dir).expanduser()
-        if not archive_dir.exists():
-            return
-        live_ids = {row[0] for row in conn.execute("SELECT id FROM prompt_logs").fetchall()}
-        for archive_path in sorted(archive_dir.glob("archive_*.db")):
-            with sqlite3.connect(archive_path) as archive:
-                columns = {row[1] for row in archive.execute("PRAGMA table_info(prompt_logs_archive)").fetchall()}
-                if not columns:
-                    continue
-
-                def column(name: str, fallback: str) -> str:
-                    return f"COALESCE({name}, {fallback})" if name in columns else fallback
-
-                rows = archive.execute(
-                    f"""
-                    SELECT id, user_id, class_id, session_id, model, {column('api_endpoint', "''")},
-                           {column('prompt_tokens', '0')}, {column('completion_tokens', '0')},
-                           {column('total_tokens', '0')}, created_at
-                    FROM prompt_logs_archive
-                    WHERE status = 'ok' AND user_id IS NOT NULL
-                    ORDER BY created_at, id
-                    """
-                ).fetchall()
-            conn.executemany(
-                f"{self.TOKEN_USAGE_INSERT} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [tuple(row[1:]) for row in rows if row[0] not in live_ids],
-            )
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-    def _ensure_agent_action_audit_target_nullable(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            row["name"]: bool(row["notnull"])
-            for row in conn.execute("PRAGMA table_info(agent_action_audits)").fetchall()
-        }
-        if not columns or not (columns.get("class_id") or columns.get("session_id")):
-            return
-
-        conn.execute("DROP INDEX IF EXISTS agent_action_audits_actor_user_id")
-        conn.execute("DROP INDEX IF EXISTS agent_action_audits_target")
-        conn.execute("ALTER TABLE agent_action_audits RENAME TO agent_action_audits_legacy")
-        conn.execute(
-            """
-            CREATE TABLE agent_action_audits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                actor_user_id INTEGER NOT NULL REFERENCES users(id),
-                action TEXT NOT NULL,
-                class_id INTEGER REFERENCES classes(id),
-                session_id INTEGER REFERENCES class_sessions(id),
-                arguments_json TEXT NOT NULL,
-                invocation_channel TEXT NOT NULL,
-                occurred_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO agent_action_audits(
-                id, actor_user_id, action, class_id, session_id, arguments_json,
-                invocation_channel, occurred_at
-            )
-            SELECT id, actor_user_id, action, class_id, session_id, arguments_json,
-                   invocation_channel, occurred_at
-            FROM agent_action_audits_legacy
-            """
-        )
-        conn.execute("DROP TABLE agent_action_audits_legacy")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS agent_action_audits_actor_user_id
-            ON agent_action_audits(actor_user_id)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS agent_action_audits_target
-            ON agent_action_audits(class_id, session_id)
-            """
-        )
 
     def _archive_row(self, row: dict[str, Any], archived_at: datetime) -> None:
         from src.infrastructure.repositories.router_repository_helpers import parse_dt
@@ -393,23 +239,36 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     archived_at TEXT NOT NULL,
                     message_preview TEXT,
-                    messages_json TEXT
+                    messages_json TEXT,
+                    api_endpoint TEXT,
+                    response_preview TEXT,
+                    tier_name TEXT,
+                    tier_confidence REAL,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # Upgrades yearly archive files written by older versions: prompt_logs columns added
+            # since the archive began, and the token counts from #121. Keep indefinitely: old
+            # archive files stay on disk and are never migrated in bulk.
             self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "api_endpoint", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "response_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "tier_name", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "tier_confidence", "REAL")
+            for token_column in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                self._ensure_column(conn, "prompt_logs_archive", token_column, "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """
                 INSERT INTO prompt_logs_archive(
                     id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                     client_ip, created_at, archived_at, message_preview, messages_json,
-                    api_endpoint, response_preview, tier_name, tier_confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    api_endpoint, response_preview, tier_name, tier_confidence,
+                    prompt_tokens, completion_tokens, total_tokens
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -429,6 +288,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     row.get("response_preview") or "",
                     row.get("tier_name"),
                     row.get("tier_confidence"),
+                    row.get("prompt_tokens") or 0,
+                    row.get("completion_tokens") or 0,
+                    row.get("total_tokens") or 0,
                 ),
             )
             conn.commit()

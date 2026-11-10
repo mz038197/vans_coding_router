@@ -7,10 +7,10 @@ Before this, usage was a sum over `prompt_logs` rows with `status='ok'`. That ha
 ## Considered Options
 
 - **Write a Prompt Log with empty content when logging is off.** Rejected. Empty rows show up in the teacher's Prompt Log list and the Prompt 監控 page, and every list, search and count would need a filter for them. They are also still archived at Archive Age, so usage still shrinks. It also blurs the rule that a Prompt Log exists only when the sitting stores content.
-- **Keep summing Prompt Logs and add the archive into the sum.** Rejected. It does not help sittings with logging off, the SQLite archive lives in separate yearly files and does not store token counts, and archived rows are purged at Delete Age.
+- **Keep summing Prompt Logs and add the archive into the sum.** Rejected. It does not help sittings with logging off, the SQLite archive lives in separate yearly files, and archived rows are purged at Delete Age.
 
 ## Consequences
 
-The upgrade backfills `token_usage` once, when the table is first created, from `status='ok'` rows in `prompt_logs` and in the archive (the Postgres `prompt_logs_archive` table, or the SQLite `archive_*.db` files). An archived row still present in the live table is not copied twice. On SQLite, archived history backfills with request counts but 0 tokens: the `archive_*.db` files never stored token counts, so each archived successful request becomes one Token Usage row with 0 prompt, completion and total tokens. Postgres archived history keeps its token counts. Sittings that had prompt logging off have no history to recover.
+When the table was introduced, a one-time backfill filled `token_usage` from `status='ok'` rows in `prompt_logs` and in the archive. That backfill has run on every database and is gone (#120); a new database starts with an empty `token_usage`. Both archives now store each row's prompt, completion and total tokens (#121); SQLite rows archived before that read 0. Sittings that had prompt logging off have no history to recover.
 
 Token Usage is kept for good, so it grows with traffic; it is a narrow row with no content. Removing a user's data now means removing their Token Usage too, which the existing admin delete does.

@@ -8,6 +8,7 @@ from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from tests.infrastructure.fresh_schema_snapshot import SHARED_TABLE_COLUMNS
 
 
 def _settings(tmp_path) -> RouterSettings:
@@ -315,6 +316,63 @@ def test_archive_keeps_the_tier_name_and_confidence_in_an_older_archive_file(tmp
     assert rows == [("tiered", "進階", 0.92), ("untiered", None, None)]
 
 
+def _archive_two_logs_with_token_counts(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Active", None)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    repo.log_prompt(context, "counted", "counted", "fake-model", "ok", None, 12, 30, 42)
+    repo.log_prompt(context, "uncounted", "uncounted", "fake-model", "error", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ?", ("2025-01-01T00:00:00+00:00",))
+
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 2
+
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        return conn.execute(
+            "SELECT raw_prompt, prompt_tokens, completion_tokens, total_tokens"
+            " FROM prompt_logs_archive ORDER BY raw_prompt"
+        ).fetchall()
+
+
+def test_archive_keeps_prompt_log_token_counts(tmp_path):
+    assert _archive_two_logs_with_token_counts(tmp_path) == [("counted", 12, 30, 42), ("uncounted", 0, 0, 0)]
+
+
+def test_archive_adds_token_columns_to_an_older_archive_file(tmp_path):
+    (tmp_path / "archive").mkdir()
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        conn.execute(
+            """
+            CREATE TABLE prompt_logs_archive (
+                id INTEGER, user_id INTEGER, class_id INTEGER, session_id INTEGER,
+                raw_prompt TEXT NOT NULL, final_prompt TEXT NOT NULL, model TEXT NOT NULL,
+                status TEXT NOT NULL, client_ip TEXT, created_at TEXT NOT NULL,
+                archived_at TEXT NOT NULL, message_preview TEXT, messages_json TEXT,
+                api_endpoint TEXT, response_preview TEXT, tier_name TEXT, tier_confidence REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO prompt_logs_archive(id, raw_prompt, final_prompt, model, status, created_at, archived_at)"
+            " VALUES (999, 'already archived', 'already archived', 'fake-model', 'ok',"
+            " '2025-01-01T00:00:00+00:00', '2025-02-01T00:00:00+00:00')"
+        )
+
+    assert _archive_two_logs_with_token_counts(tmp_path) == [
+        ("already archived", 0, 0, 0),
+        ("counted", 12, 30, 42),
+        ("uncounted", 0, 0, 0),
+    ]
+
+
 def test_archive_prompt_logs_finishes_a_backlog_larger_than_one_batch(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
@@ -564,26 +622,6 @@ def test_issued_classroom_api_key_follows_the_edited_session_window(tmp_path):
     assert repo.verify_api_key_with_reason(key) == (None, "not_started")
 
 
-def test_opening_a_legacy_database_gives_every_session_a_start_and_drops_the_class_length(tmp_path):
-    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
-    with repo._connect() as conn:
-        conn.execute("ALTER TABLE classes ADD COLUMN api_key_ttl_hours INTEGER NOT NULL DEFAULT 2")
-        conn.execute("UPDATE class_sessions SET session_at = NULL WHERE id = ?", (session["id"],))
-        conn.execute(
-            "INSERT INTO runtime_settings(key, value, updated_at) VALUES ('student_default_ttl_hours', '3', ?)",
-            (datetime.now(UTC).isoformat(),),
-        )
-
-    reopened = SqliteRouterRepository(repo.db_path, repo.settings)
-
-    listed = reopened.list_class_sessions(session["class_id"])[0]
-    assert listed["session_at"] == listed["created_at"]
-    assert "api_key_ttl_hours" not in reopened.get_class(session["class_id"])
-    assert "student_default_ttl_hours" not in reopened.get_runtime_settings()
-    teacher = reopened.get_user_by_email("teacher@example.com")
-    assert reopened.create_class(teacher["id"], "新班", None)["name"] == "新班"
-
-
 def test_personal_api_key_replaced_by_a_newer_one_is_invalid(tmp_path):
     repo, _ = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
     teacher = repo.get_user_by_email("teacher@example.com")
@@ -767,94 +805,11 @@ def test_end_session_invalidates_key_and_blocks_redeem(tmp_path):
     assert repo.verify_api_key_context(redeemed["api_key"]) is not None
 
 
-def test_backfill_aligns_ended_session_future_expires(tmp_path):
-    settings = RouterSettings(
-        auth=AuthSettings(session_secret="test-secret"),
-        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
-    )
-    db_path = str(tmp_path / "router.db")
-    repo = SqliteRouterRepository(db_path, settings)
-    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
-    repo.update_user(teacher["id"], role="teacher")
-    student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None)
-    session = repo.create_class_session(klass["id"], teacher["id"], "Legacy Ended")
-    redeemed = repo.redeem_invite(session["invite_code"], student["id"])
-    future = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "UPDATE class_sessions SET status = 'ended', expires_at = ? WHERE id = ?",
-            (future, session["id"]),
-        )
-        conn.execute(
-            "UPDATE api_keys SET expires_at = ? WHERE session_id = ?",
-            (future, session["id"]),
-        )
-        conn.commit()
-
-    repo2 = SqliteRouterRepository(db_path, settings)
-    rows = repo2.list_class_sessions(klass["id"])
-    assert len(rows) == 1
-    assert rows[0]["status"] == "ended"
-    assert parse_dt_iso(rows[0]["expires_at"]) <= datetime.now(UTC)
-    assert repo2.verify_api_key_context(redeemed["api_key"]) is None
-
-
-def test_agent_action_audit_migrates_to_nullable_non_session_targets(tmp_path):
-    settings = _settings(tmp_path)
-    db_path = str(tmp_path / "router.db")
-    repo = SqliteRouterRepository(db_path, settings)
+def test_agent_action_audit_accepts_a_target_outside_any_class_session(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None)
-    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+
     repo.record_agent_action_audit(
-        actor_user_id=teacher["id"],
-        action="update_session_capabilities",
-        class_id=klass["id"],
-        session_id=session["id"],
-        arguments={"tts_enabled": False},
-        invocation_channel="webmcp",
-    )
-
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("ALTER TABLE agent_action_audits RENAME TO agent_action_audits_old")
-        conn.execute(
-            """
-            CREATE TABLE agent_action_audits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                actor_user_id INTEGER NOT NULL REFERENCES users(id),
-                action TEXT NOT NULL,
-                class_id INTEGER NOT NULL REFERENCES classes(id),
-                session_id INTEGER NOT NULL REFERENCES class_sessions(id),
-                arguments_json TEXT NOT NULL,
-                invocation_channel TEXT NOT NULL,
-                occurred_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO agent_action_audits(
-                id, actor_user_id, action, class_id, session_id, arguments_json,
-                invocation_channel, occurred_at
-            )
-            SELECT id, actor_user_id, action, class_id, session_id, arguments_json,
-                   invocation_channel, occurred_at
-            FROM agent_action_audits_old
-            """
-        )
-        conn.execute("DROP TABLE agent_action_audits_old")
-        conn.execute(
-            "CREATE INDEX agent_action_audits_actor_user_id ON agent_action_audits(actor_user_id)"
-        )
-        conn.execute(
-            "CREATE INDEX agent_action_audits_target ON agent_action_audits(class_id, session_id)"
-        )
-        conn.commit()
-
-    migrated = SqliteRouterRepository(db_path, settings)
-    migrated.record_agent_action_audit(
         actor_user_id=teacher["id"],
         action="release_key_quarantine",
         class_id=None,
@@ -862,8 +817,9 @@ def test_agent_action_audit_migrates_to_nullable_non_session_targets(tmp_path):
         arguments={"provider": "ollama_cloud", "key_index": 0},
         invocation_channel="webmcp",
     )
-    audits = migrated.list_agent_action_audits()
-    assert len(audits) == 2
+
+    audits = repo.list_agent_action_audits()
+    assert len(audits) == 1
     assert audits[0]["class_id"] is None
     assert audits[0]["session_id"] is None
 
@@ -905,21 +861,12 @@ def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
     owner = repo.upsert_google_user("owner@gmail.com", "Owner")
     klass = repo.create_class(owner["id"], "No template", None)
-    created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
-    backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
-    with repo._connect() as conn:
-        conn.execute(
-            "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = ?",
-            (backfilled["id"],),
-        )
-    reopened = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    repo.create_class_session(klass["id"], owner["id"], "Week 1")
 
-    sittings = {s["id"]: s for s in reopened.list_class_sessions(klass["id"])}
+    document = repo.list_class_sessions(klass["id"])[0]["session_chat_language_models"]
 
-    for session_id in (created["id"], backfilled["id"]):
-        document = sittings[session_id]["session_chat_language_models"]
-        assert template_model_ids(document) == template_model_ids(load_vans_template())
-        assert not _carries_auto_tiers(document)
+    assert template_model_ids(document) == template_model_ids(load_vans_template())
+    assert not _carries_auto_tiers(document)
 
 
 def _usage_world(repo):
@@ -931,29 +878,6 @@ def _usage_world(repo):
     context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
     assert context is not None
     return teacher, student, klass, context
-
-
-def test_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(tmp_path):
-    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
-    teacher, student, klass, context = _usage_world(repo)
-    repo.log_prompt(context, "archived ok", "archived ok", "m", "ok", None, 4, 4, 8)
-    repo.log_prompt(context, "live ok", "live ok", "m", "ok", None, 1, 2, 3)
-    repo.log_prompt(context, "live rejected", "live rejected", "m", "rejected", None, 5, 5, 10)
-    with repo._connect() as conn:
-        conn.execute("UPDATE prompt_logs SET created_at = ? WHERE raw_prompt = ?", ("2026-05-01T00:00:00+00:00", "archived ok"))
-    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 1
-    # A database from before Token Usage existed.
-    with repo._connect() as conn:
-        conn.execute("DROP TABLE token_usage")
-
-    upgraded = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
-    SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))  # a later restart
-
-    row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
-    # The SQLite archive never stored token counts, so an archived log adds a request but no tokens.
-    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (1, 2, 3)
-    assert row["request_count"] == 2
-    assert row["sessions"][0]["request_count"] == 2
 
 
 def test_token_usage_is_recorded_queried_and_deleted_per_user(tmp_path):
@@ -1004,3 +928,23 @@ def test_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_
             )
         assert repo.verify_api_key_context(api_key) is not None
         assert _stored_last_used_at(repo, context.api_key_id) != written_a_second_ago
+
+
+def test_a_fresh_database_has_exactly_the_snapshot_columns(tmp_path):
+    settings = _settings(tmp_path)
+    SqliteRouterRepository(settings.database.path, settings)
+
+    with sqlite3.connect(settings.database.path) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        columns = {
+            table: frozenset(row[1] for row in conn.execute(f"PRAGMA table_info({table})"))
+            for table in tables
+        }
+
+    # SQLite archives Prompt Logs in yearly files, so prompt_logs_archive is Postgres only.
+    assert columns == SHARED_TABLE_COLUMNS
