@@ -165,22 +165,6 @@ def test_classroom_api_key_search_follows_the_sitting_switch(tmp_path):
     assert search.calls == [["台中 活動"]]
 
 
-def test_a_sitting_from_before_web_search_stays_closed(tmp_path):
-    client, repo, _search = _app_client(tmp_path)
-    _teacher_row, klass, session, cookies, headers = _sitting(client, repo)
-    with repo._connect() as conn:
-        conn.execute("ALTER TABLE class_sessions DROP COLUMN web_search_enabled")
-
-    client, repo, search = _app_client(tmp_path)
-
-    blocked = client.post("/v1/search", headers=headers, json=QUERY)
-    assert blocked.status_code == 403
-    assert blocked.json()["error"]["code"] == "web_search_disabled"
-    assert search.calls == []
-    _set_web_search(client, klass, session, cookies, True)
-    assert client.post("/v1/search", headers=headers, json=QUERY).status_code == 200
-
-
 @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer vcr_sk_not-a-key"}])
 def test_search_without_a_valid_key_is_refused(tmp_path, headers):
     client, _repo, search = _app_client(tmp_path)

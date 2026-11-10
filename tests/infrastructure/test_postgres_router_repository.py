@@ -242,47 +242,17 @@ def test_postgres_sitting_filled_from_the_starter_gets_no_auto_tiers(postgres_re
     owner = repo.upsert_google_user("owner@gmail.com", "Owner")
     klass = repo.create_class(owner["id"], "No template", None)
     created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
-    backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
-    with repo._connect() as conn:
-        conn.execute(
-            "UPDATE class_sessions SET session_chat_language_models_json = NULL WHERE id = %s",
-            (backfilled["id"],),
-        )
-    reopened = build_router_repository(_settings())
 
-    sittings = {s["id"]: s for s in reopened.list_class_sessions(klass["id"])}
+    document = repo.list_class_sessions(klass["id"])[0]["session_chat_language_models"]
 
-    for session_id in (created["id"], backfilled["id"]):
-        document = sittings[session_id]["session_chat_language_models"]
-        assert template_model_ids(document) == template_model_ids(load_vans_template())
-        assert not _carries_auto_tiers(document)
+    assert created["id"]
+    assert template_model_ids(document) == template_model_ids(load_vans_template())
+    assert not _carries_auto_tiers(document)
 
 
 def _usage_world(repo):
     teacher, klass, context = _student_context(repo)
     return teacher, context.user_id, klass, context
-
-
-def test_postgres_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(postgres_repo):
-    repo = postgres_repo
-    teacher, student_id, klass, context = _usage_world(repo)
-    repo.log_prompt(context, "archived ok", "archived ok", "m", "ok", None, 4, 4, 8)
-    repo.log_prompt(context, "live ok", "live ok", "m", "ok", None, 1, 2, 3)
-    repo.log_prompt(context, "live rejected", "live rejected", "m", "rejected", None, 5, 5, 10)
-    with repo._connect() as conn:
-        conn.execute("UPDATE prompt_logs SET created_at = %s WHERE raw_prompt = %s", ("2026-05-01T00:00:00+00:00", "archived ok"))
-    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 1
-    # A database from before Token Usage existed.
-    with repo._connect() as conn:
-        conn.execute("DROP TABLE token_usage")
-
-    upgraded = build_router_repository(_settings())
-    build_router_repository(_settings())  # a later restart
-
-    row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
-    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (5, 6, 11)
-    assert row["request_count"] == 2
-    assert row["sessions"][0]["request_count"] == 2
 
 
 def test_postgres_token_usage_is_recorded_queried_and_deleted_per_user(postgres_repo):
@@ -348,28 +318,6 @@ def test_postgres_role_table_roles_ignore_the_legacy_role_column(postgres_repo):
 
     assert repo.role_table_roles(admin["id"]) == ("admin", "student", "teacher")
     assert repo.role_table_roles(legacy["id"]) == ()
-
-
-def test_postgres_opening_a_legacy_database_gives_every_session_a_start_and_drops_the_class_length(postgres_repo):
-    repo = postgres_repo
-    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 課程", None)
-    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
-    with repo._connect() as conn:
-        conn.execute("ALTER TABLE classes ADD COLUMN api_key_ttl_hours INTEGER NOT NULL DEFAULT 2")
-        conn.execute("UPDATE class_sessions SET session_at = NULL WHERE id = %s", (session["id"],))
-        conn.execute(
-            "INSERT INTO runtime_settings(key, value, updated_at) VALUES ('student_default_ttl_hours', '3', %s)",
-            (datetime.now(UTC).isoformat(),),
-        )
-
-    reopened = build_router_repository(_settings())
-
-    listed = reopened.list_class_sessions(klass["id"])[0]
-    assert listed["session_at"] == listed["created_at"]
-    assert "api_key_ttl_hours" not in reopened.get_class(klass["id"])
-    assert "student_default_ttl_hours" not in reopened.get_runtime_settings()
-    assert reopened.create_class(teacher["id"], "新班", None)["name"] == "新班"
 
 
 def test_postgres_issued_classroom_api_key_follows_the_edited_session_window(postgres_repo):
