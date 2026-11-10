@@ -124,3 +124,68 @@ test("in progress means started, not expired, and the course not ended", () => {
   assert.equal(sessionInProgressAt(live, "ended", NOW), false);
   assert.equal(sessionInProgressAt({ id: 1, session_at: null, expires_at: null }, "active", NOW), true);
 });
+
+// The card summary row: its status tag and how a click on it decides whether to toggle.
+function loadSummaryRow() {
+  const names = [
+    "isSessionExpired",
+    "isSessionUpcoming",
+    "isSessionActive",
+    "sessionStatusCell",
+    "onCourseCardSummaryClick",
+  ];
+  const toggled = [];
+  const context = { toggled, toggleCourseCard: (classId, sessionId) => toggled.push([classId, sessionId]) };
+  vm.createContext(context);
+  vm.runInContext(names.map((name) => extractNamedFunction(portalHtml, name)).join("\n"), context);
+  return context;
+}
+
+const HOUR = 3600 * 1000;
+const isoFromNow = (ms) => new Date(Date.now() + ms).toISOString();
+const running = { id: 21, session_at: isoFromNow(-HOUR), expires_at: isoFromNow(HOUR) };
+const notStarted = { id: 22, session_at: isoFromNow(HOUR), expires_at: isoFromNow(2 * HOUR) };
+const finished = { id: 23, session_at: isoFromNow(-3 * HOUR), expires_at: isoFromNow(-HOUR) };
+
+test("the status tag of a running or upcoming sitting ends it; an ended one reopens it", () => {
+  const { sessionStatusCell } = loadSummaryRow();
+  const runningTag = sessionStatusCell(7, running, "active");
+  assert.match(runningTag, /進行中/);
+  assert.match(runningTag, /endSessionNow\(7, 21\)/);
+  assert.match(runningTag, /data-session-status="21"/);
+  const notStartedTag = sessionStatusCell(7, notStarted, "active");
+  assert.match(notStartedTag, /未開始/);
+  assert.match(notStartedTag, /endSessionNow\(7, 22\)/);
+  const finishedTag = sessionStatusCell(7, finished, "active");
+  assert.match(finishedTag, /已結束/);
+  assert.match(finishedTag, /beginEditSessionExpires\(7, 23\)/);
+});
+
+test("once the course has ended, the status tag is plain text", () => {
+  const { sessionStatusCell } = loadSummaryRow();
+  const tag = sessionStatusCell(7, running, "ended");
+  assert.match(tag, /^<span class="tag tag-ended"/);
+  assert.doesNotMatch(tag, /onclick/);
+});
+
+function summaryClick({ onControl = false, renaming = false } = {}) {
+  const context = loadSummaryRow();
+  const event = {
+    target: { closest: () => (onControl ? {} : null) },
+    currentTarget: { querySelector: () => (renaming ? {} : null) },
+  };
+  context.onCourseCardSummaryClick(event, 7, 21);
+  return context.toggled;
+}
+
+test("a click on empty summary-row space toggles the card", () => {
+  assert.deepEqual(summaryClick(), [[7, 21]]);
+});
+
+test("a click on the pencil, the status tag or the rename input does not toggle the card", () => {
+  assert.deepEqual(summaryClick({ onControl: true }), []);
+});
+
+test("while a rename is open, a click on the summary row does not toggle the card", () => {
+  assert.deepEqual(summaryClick({ renaming: true }), []);
+});

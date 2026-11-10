@@ -2709,26 +2709,42 @@
       background: var(--surface-1);
     }
     .course-card + .course-card { margin-top: 8px; }
-    button.course-card-summary {
+    .course-card-summary {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
-      width: 100%;
-      margin: 0;
       padding: 12px 16px;
-      border: 0;
       border-radius: var(--radius);
-      box-shadow: none;
-      background: transparent;
       color: var(--text-primary);
       font-weight: 500;
+      cursor: pointer;
+    }
+    /* The row highlights as a toggle, but not while the pointer is on the pencil, tag or input. */
+    .course-card-summary:hover:not(:has(.icon-btn:hover, .tag:hover, .inline-edit:hover)) { background: var(--surface-2); }
+    .course-card.is-open .course-card-summary { border-radius: var(--radius) var(--radius) 0 0; }
+    .course-card-summary > .cell-with-action { flex: 1 1 160px; align-items: center; }
+    .course-card-summary .session-name-label { font-weight: 700; }
+    /* Renaming in the summary row: the input takes the row's free width, so long names fit. */
+    .course-card-summary .cell-main:has(.inline-edit) { flex: 1 1 auto; }
+    .course-card-summary .inline-edit { max-width: 480px; }
+    .course-card-summary .session-name-sub { display: inline; margin: 0; }
+    /* Lays out its own spans like the row; only the global button chrome is reset here. */
+    button.course-card-toggle {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: inherit;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      box-shadow: none;
+      background: transparent;
+      color: inherit;
+      font-weight: inherit;
       text-align: left;
     }
-    button.course-card-summary:hover { background: var(--surface-2); color: var(--text-primary); }
-    .course-card.is-open button.course-card-summary { border-radius: var(--radius) var(--radius) 0 0; }
-    button.course-card-summary .sl-name { flex: 1 1 160px; font-weight: 700; }
-    button.course-card-summary .session-name-sub { display: inline; margin: 0; }
+    button.course-card-toggle:hover { background: transparent; color: inherit; }
     .sl-tokens { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--accent-text); font-weight: 700; }
     .course-card-body {
       display: grid;

@@ -259,7 +259,16 @@ def test_portal_my_courses_shows_one_card_per_class_session(tmp_path):
     assert "renderCourseCards(" in loader
     assert "renderSessionTable(" not in loader
     card = html[html.index("function courseCardHtml("):html.index("function renderCourseCards(")]
-    assert "sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })" in card
+    assert "sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true, showHead: false })" in card
+    # The rename pencil and status tag come before the toggle button opens, so they sit beside it.
+    summary = card[card.index('class="course-card-summary"'):card.index("${body}")]
+    toggle_at = summary.index('class="course-card-toggle"')
+    assert summary.index("sessionNameCell(classId, session, true, { withTime: false })") < toggle_at
+    assert summary.index("sessionStatusCell(classId, session, courseStatus)") < toggle_at
+    assert summary.index("${escapeHtml(when)}") > toggle_at
+    # The admin list's inspector keeps its name and status head row.
+    admin = html[html.index("function renderSessionTable("):html.index("function sessionInProgressAt(")]
+    assert "showHead" not in admin
     assert "學生用量" in card
     assert "最新紀錄" in card
     assert "此課堂未記錄 Prompt 內容" in html

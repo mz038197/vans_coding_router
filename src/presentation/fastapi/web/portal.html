@@ -806,18 +806,21 @@
       return `<button type="button" class="icon-btn" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" onclick="${onclick}"><i class="${iconClass}"></i></button>`;
     }
 
+    // A Class Session's status tag, which is also its end / reopen control. The admin list's
+    // inspector and the 我的課程 card summary both render it, so they always agree.
     function sessionStatusCell(classId, session, courseStatus) {
       const active = isSessionActive(session, courseStatus);
       const upcoming = active && isSessionUpcoming(session.session_at);
       const label = upcoming ? '未開始' : active ? '進行中' : '已結束';
       const cls = upcoming ? 'tag-upcoming' : active ? 'tag-active' : 'tag-ended';
+      const marker = `data-session-status="${session.id}"`;
       if (courseStatus === 'ended') {
-        return `<span class="tag ${cls}">${label}</span>`;
+        return `<span class="tag ${cls}" ${marker}>${label}</span>`;
       }
       if (active) {
-        return `<button type="button" class="tag tag-clickable ${cls}" title="結束課堂" onclick="endSessionNow(${classId}, ${session.id})">${label}</button>`;
+        return `<button type="button" class="tag tag-clickable ${cls}" ${marker} title="結束課堂" onclick="endSessionNow(${classId}, ${session.id})">${label}</button>`;
       }
-      return `<button type="button" class="tag tag-clickable ${cls}" title="設定結束時間以重新開啟" onclick="beginEditSessionExpires(${classId}, ${session.id})">${label}</button>`;
+      return `<button type="button" class="tag tag-clickable ${cls}" ${marker} title="設定結束時間以重新開啟" onclick="beginEditSessionExpires(${classId}, ${session.id})">${label}</button>`;
     }
 
     function keyStatusTag(key) {
@@ -827,11 +830,12 @@
       return renderStatusTag('key', 'active');
     }
 
-    function sessionNameCell(classId, session, allowOwnerActions) {
+    // The 我的課程 card summary passes withTime: false, since it shows the time elsewhere in the row.
+    function sessionNameCell(classId, session, allowOwnerActions, { withTime = true } = {}) {
       const rawName = (session.name || '').trim();
       const label = escapeHtml(sessionDisplayName(session));
       const when = session.session_at || session.created_at;
-      const sub = when
+      const sub = withTime && when
         ? `<span class="session-name-sub">${escapeHtml(formatLocalDateTime(when))}</span>`
         : '';
       const edit = allowOwnerActions
@@ -852,10 +856,14 @@
     }
 
     // ADR 0091: a Class Session is a start-to-end window; both ends stay editable.
+    function sessionWindowStart(session) {
+      return session.session_at || session.created_at || '';
+    }
+
     function sessionWindowCell(classId, session) {
-      const start = session.session_at || session.created_at || '';
+      const start = sessionWindowStart(session);
       const display = `${escapeHtml(formatLocalDateTime(start))} ~ ${escapeHtml(formatLocalDateTime(session.expires_at))}`;
-      return `<div class="cell-with-action" id="expires-cell-${session.id}" data-start="${escapeHtml(start)}" data-expires="${escapeHtml(session.expires_at || '')}" data-redemptions="${sessionRedemptionCount(session)}">
+      return `<div class="cell-with-action">
         <span class="expires-label">${display}</span>
         ${iconBtn('fas fa-pen', '編輯課堂時段', `beginEditSessionExpires(${classId}, ${session.id})`)}
       </div>`;
@@ -2262,12 +2270,16 @@
     }
 
     // The full Class Session settings: the admin list's inspector and the left half of a 我的課程 card.
-    function sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions, showRedemptions }) {
+    // A 我的課程 card passes showHead: false, since its summary row already shows the name and status.
+    function sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions, showRedemptions, showHead = true }) {
       const redemptionBox = showRedemptions
         ? `<div id="redemption-row-${classId}-${session.id}" class="session-field session-field-wide session-redemptions hidden"><div id="redemption-body-${classId}-${session.id}"></div></div>`
         : '';
+      const head = showHead
+        ? `<div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>`
+        : '';
       return `
-        <div class="session-layout-head">${sessionNameCell(classId, session, allowOwnerActions)}${sessionStatusCell(classId, session, courseStatus)}</div>
+        ${head}
         <div class="session-fields">
           <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
           <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}</div>
@@ -2433,13 +2445,24 @@
       return String(n);
     }
 
-    function courseCardStatusTag(session, courseStatus) {
-      const now = Date.now();
-      const label = sessionInProgressAt(session, courseStatus, now)
-        ? '進行中'
-        : (courseStatus !== 'ended' && isSessionActive(session, courseStatus) ? '未開始' : '已結束');
-      const cls = label === '進行中' ? 'tag-active' : label === '未開始' ? 'tag-upcoming' : 'tag-ended';
-      return `<span class="tag ${cls}">${label}</span>`;
+    // A click on the summary row toggles the card, except on its own buttons and the rename
+    // input. While a rename is open the row does not toggle, so the edit is never torn down.
+    function onCourseCardSummaryClick(event, classId, sessionId) {
+      if (event.target.closest('button, input')) return;
+      if (event.currentTarget.querySelector('input.inline-edit')) return;
+      toggleCourseCard(classId, sessionId);
+    }
+
+    // The timer only reloads activity, so a sitting that starts or ends on its own would keep a
+    // stale tag; swap in the current one when its label changes.
+    function refreshCourseCardStatusTags(classId, courseStatus) {
+      (courseCardSessions[classId] || []).forEach((session) => {
+        const tag = document.querySelector(`#course-card-${session.id} [data-session-status="${session.id}"]`);
+        if (!tag) return;
+        const html = sessionStatusCell(classId, session, courseStatus);
+        const label = html.replace(/<[^>]*>/g, '');
+        if (tag.textContent !== label) tag.outerHTML = html;
+      });
     }
 
     // This sitting's rows from the course usage payload: students with requests, most tokens first.
@@ -2460,7 +2483,7 @@
       const body = open ? `<div class="course-card-body">
           <div class="course-card-settings">
             <h4>設定</h4>
-            ${sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true })}
+            ${sessionFieldsHtml(classId, session, { courseStatus, allowOwnerActions: true, showRedemptions: true, showHead: false })}
           </div>
           <div class="course-card-activity">
             <h4>學生用量</h4>
@@ -2469,15 +2492,20 @@
             <div id="course-card-logs-${session.id}" class="course-card-logs"><p class="hint">載入中…</p></div>
           </div>
         </div>` : '';
+      // The summary is a row, not one button: the rename pencil and the status tag are
+      // buttons of their own beside the toggle, and a click elsewhere on the row toggles.
       return `<section class="course-card${open ? ' is-open' : ''}" id="course-card-${session.id}">
-        <button type="button" class="course-card-summary" aria-expanded="${open ? 'true' : 'false'}" onclick="toggleCourseCard(${classId}, ${session.id})">
-          <span class="sl-name">${escapeHtml(sessionDisplayName(session))}</span>
-          ${courseCardStatusTag(session, courseStatus)}
-          <span class="session-name-sub">${escapeHtml(when)}</span>
-          <span class="sl-seats">${sessionRedemptionCount(session)} / ${sessionSeatLimit(session)}</span>
-          <span class="sl-tokens" id="course-card-tokens-${session.id}"></span>
-          <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
-        </button>
+        <div class="course-card-summary" onclick="onCourseCardSummaryClick(event, ${classId}, ${session.id})">
+          ${sessionNameCell(classId, session, true, { withTime: false })}
+          ${sessionStatusCell(classId, session, courseStatus)}
+          <button type="button" class="course-card-toggle" aria-expanded="${open ? 'true' : 'false'}" onclick="toggleCourseCard(${classId}, ${session.id})">
+            <span class="sr-only">${escapeHtml(sessionDisplayName(session))}</span>
+            <span class="session-name-sub">${escapeHtml(when)}</span>
+            <span class="sl-seats">${sessionRedemptionCount(session)} / ${sessionSeatLimit(session)}</span>
+            <span class="sl-tokens" id="course-card-tokens-${session.id}"></span>
+            <i class="fas fa-chevron-${open ? 'up' : 'down'}" aria-hidden="true"></i>
+          </button>
+        </div>
         ${body}
       </section>`;
     }
@@ -2677,6 +2705,7 @@
       const open = courseCardOpen[course.id] || new Set();
       const now = Date.now();
       const focusedTag = document.activeElement?.tagName || null;
+      refreshCourseCardStatusTags(course.id, course.status);
       const due = (courseCardSessions[course.id] || []).filter((session) => shouldAutoRefreshCourseCard({
         open: open.has(session.id),
         inProgress: sessionInProgressAt(session, course.status, now),
@@ -5244,10 +5273,11 @@ snippets:
     let editExpiresContext = null;
 
     function beginEditSessionExpires(classId, sessionId) {
-      const cell = document.getElementById(`expires-cell-${sessionId}`);
-      const prevStart = (cell && cell.dataset.start) || '';
-      const prevIso = (cell && cell.dataset.expires) || '';
-      const redemptions = Number((cell && cell.dataset.redemptions) || 0);
+      // Read the loaded session, not the window cell: a collapsed 我的課程 card has no cell.
+      const session = (window.__sessionById || {})[sessionId] || {};
+      const prevStart = sessionWindowStart(session);
+      const prevIso = session.expires_at || '';
+      const redemptions = sessionRedemptionCount(session);
       const startInput = document.getElementById('editStartInput');
       const input = document.getElementById('editExpiresInput');
       const modal = document.getElementById('editExpiresModal');
