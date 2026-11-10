@@ -2634,7 +2634,7 @@
     .session-fields {
       display: flex;
       flex-wrap: wrap;
-      align-items: flex-start;
+      align-items: stretch;
       gap: 8px;
       margin-top: 12px;
     }

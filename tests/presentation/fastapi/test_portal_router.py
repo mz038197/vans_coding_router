@@ -303,7 +303,8 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert 'class="session-field session-field-wide session-redemptions hidden"' in html
     assert 'class="roster-nowrap"' in html
     css = client.get("/portal/static/portal.css").text
-    assert "align-items: flex-start" in css
+    fields_css = css[css.index(".session-fields {"):css.index(".session-field {")]
+    assert "align-items: stretch;" in fields_css
     assert ".session-field.session-redemptions { margin-top: 0; min-width: 0; overflow: hidden; }" in css
     assert ".session-redemptions .roster-nowrap { white-space: nowrap; }" in css
 
