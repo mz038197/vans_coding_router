@@ -258,11 +258,17 @@ test("create Class Session resolves its Class and sends the existing teacher HTT
   });
   await result.registration;
 
+  assert.deepEqual(
+    [...registered.get("create_class_session").inputSchema.required],
+    ["name", "session_at", "expires_at"],
+  );
+  assert.equal(registered.get("create_class_session").inputSchema.properties.ttl_hours, undefined);
+
   const output = await registered.get("create_class_session").execute({
     class_id: 9,
     name: "第二堂",
     session_at: "2026-09-10T01:00:00Z",
-    ttl_hours: 3,
+    expires_at: "2026-09-10T04:00:00Z",
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [[
@@ -276,7 +282,7 @@ test("create Class Session resolves its Class and sends the existing teacher HTT
       body: JSON.stringify({
         name: "第二堂",
         session_at: "2026-09-10T01:00:00Z",
-        ttl_hours: 3,
+        expires_at: "2026-09-10T04:00:00Z",
       }),
     },
   ]]);

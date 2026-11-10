@@ -258,7 +258,6 @@
           <h3>系統設定</h3>
           <input id="settingArchiveAfter" type="number" placeholder="歸檔天數（移到 archive）" />
           <input id="settingDeleteAfter" type="number" placeholder="刪除天數（從 archive 刪除）" />
-          <input id="settingTtl" type="number" placeholder="學生預設 TTL 小時" />
           <select id="settingRegistration">
             <option value="true">開放註冊</option>
             <option value="false">關閉開放註冊</option>
@@ -292,10 +291,13 @@
 
   <div class="modal" id="editExpiresModal" onclick="onEditExpiresBackdropClick(event)">
     <div class="modal-content modal-content-sm" onclick="event.stopPropagation()">
-      <div class="modal-header">編輯到期時間</div>
+      <div class="modal-header">編輯課堂時段</div>
       <div class="modal-body">
-        <label class="modal-field-label" for="editExpiresInput">key 到期</label>
+        <label class="modal-field-label" for="editStartInput">開始時間</label>
+        <input id="editStartInput" type="datetime-local" class="modal-datetime-input" />
+        <label class="modal-field-label" for="editExpiresInput">結束時間</label>
         <input id="editExpiresInput" type="datetime-local" class="modal-datetime-input" />
+        <p class="hint">已領取的金鑰會跟著新的時段生效，學生不用重新兌換。</p>
       </div>
       <div class="modal-footer">
         <div class="modal-footer-actions">
@@ -815,7 +817,7 @@
       if (active) {
         return `<button type="button" class="tag tag-clickable ${cls}" title="結束課堂" onclick="endSessionNow(${classId}, ${session.id})">${label}</button>`;
       }
-      return `<button type="button" class="tag tag-clickable ${cls}" title="設定到期時間以重新開啟" onclick="beginEditSessionExpires(${classId}, ${session.id}, '${escapeHtml(session.expires_at || '')}')">${label}</button>`;
+      return `<button type="button" class="tag tag-clickable ${cls}" title="設定結束時間以重新開啟" onclick="beginEditSessionExpires(${classId}, ${session.id})">${label}</button>`;
     }
 
     function keyStatusTag(key) {
@@ -849,12 +851,13 @@
       return `<div class="cell-with-action"><code>${code}</code>${copy}</div>`;
     }
 
-    function sessionExpiresCell(classId, session) {
-      const display = escapeHtml(formatLocalDateTime(session.expires_at));
-      const iso = escapeHtml(session.expires_at || '');
-      return `<div class="cell-with-action" id="expires-cell-${session.id}" data-expires="${iso}">
+    // ADR 0091: a Class Session is a start-to-end window; both ends stay editable.
+    function sessionWindowCell(classId, session) {
+      const start = session.session_at || session.created_at || '';
+      const display = `${escapeHtml(formatLocalDateTime(start))} ~ ${escapeHtml(formatLocalDateTime(session.expires_at))}`;
+      return `<div class="cell-with-action" id="expires-cell-${session.id}" data-start="${escapeHtml(start)}" data-expires="${escapeHtml(session.expires_at || '')}" data-redemptions="${sessionRedemptionCount(session)}">
         <span class="expires-label">${display}</span>
-        ${iconBtn('fas fa-pen', '編輯到期時間', `beginEditSessionExpires(${classId}, ${session.id}, '${iso}')`)}
+        ${iconBtn('fas fa-pen', '編輯課堂時段', `beginEditSessionExpires(${classId}, ${session.id})`)}
       </div>`;
     }
 
@@ -1174,6 +1177,23 @@
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return null;
       return date.toISOString();
+    }
+
+    const DEFAULT_SESSION_LENGTH_MS = 2 * 60 * 60 * 1000;
+
+    function defaultSessionEndValue(startLocal) {
+      const start = new Date(startLocal);
+      if (Number.isNaN(start.getTime())) return '';
+      return isoToDatetimeLocalValue(new Date(start.getTime() + DEFAULT_SESSION_LENGTH_MS).toISOString());
+    }
+
+    // Until the teacher edits the end, it stays two hours after the start.
+    function shiftNewSessionEnd() {
+      const startInput = document.getElementById('sessionAt');
+      const endInput = document.getElementById('sessionEnd');
+      if (!startInput || !endInput || endInput.dataset.touched) return;
+      const end = defaultSessionEndValue(startInput.value);
+      if (end) endInput.value = end;
     }
 
     function defaultDatetimeLocalValue() {
@@ -1860,9 +1880,9 @@
         ${ended ? '<p class="hint">此課程已結束，無法新增課堂。</p>' : `
           <div class="session-form session-form-compact">
             <input type="text" id="sessionName" class="session-name-input" placeholder="新課堂名稱" aria-label="課堂名稱" />
-            <input type="datetime-local" id="sessionAt" aria-label="課堂時間" value="${defaultDatetimeLocalValue()}" />
-            <input type="number" id="sessionTtl" value="2" min="1" class="input-narrow" aria-label="TTL 小時" title="課堂時數，key 在這個時間後到期" />
-            <span class="hint hint-inline">小時</span>
+            <input type="datetime-local" id="sessionAt" aria-label="開始時間" title="開始時間" required value="${defaultDatetimeLocalValue()}" oninput="shiftNewSessionEnd()" />
+            <span class="hint hint-inline">~</span>
+            <input type="datetime-local" id="sessionEnd" aria-label="結束時間" title="結束時間" required value="${defaultSessionEndValue(defaultDatetimeLocalValue())}" oninput="this.dataset.touched = '1'" />
             <button onclick="createSession(${course.id})">新增課堂</button>
           </div>`}
         <div id="sessions-panel"><p class="hint">載入中…</p></div>
@@ -2251,7 +2271,7 @@
         <div class="session-fields">
           <div class="session-field"><span class="session-kicker">邀請碼</span>${sessionInviteCell(session, allowOwnerActions)}</div>
           <div class="session-field"><span class="session-kicker">座位</span>${sessionSeatLimitCell(classId, session)}</div>
-          <div class="session-field"><span class="session-kicker">Key 到期</span>${sessionExpiresCell(classId, session)}</div>
+          <div class="session-field"><span class="session-kicker">課堂時段</span>${sessionWindowCell(classId, session)}</div>
           ${redemptionBox}
           ${allowOwnerActions ? `<div class="session-field"><span class="session-kicker">安裝清單</span>${sessionCatalogCell(classId, session)}</div>` : ''}
           <div class="session-field session-field-wide">${sessionModelAllowlistCell(classId, session)}</div>
@@ -3454,10 +3474,12 @@ snippets:
       const name = nameInput ? nameInput.value.trim() : '';
       if (!name) throw new Error('請輸入課堂名稱');
       const sessionAt = datetimeLocalToUtcIso(document.getElementById('sessionAt').value);
-      const ttlHours = Number(document.getElementById('sessionTtl').value) || 2;
+      const expiresAt = datetimeLocalToUtcIso(document.getElementById('sessionEnd').value);
+      if (!sessionAt || !expiresAt) throw new Error('請設定課堂開始與結束時間');
+      if (Date.parse(expiresAt) <= Date.parse(sessionAt)) throw new Error('結束時間必須晚於開始時間');
       const created = await api(`/teacher/classes/${classId}/sessions`, {
         method: 'POST',
-        body: JSON.stringify({name, session_at: sessionAt, ttl_hours: ttlHours}),
+        body: JSON.stringify({name, session_at: sessionAt, expires_at: expiresAt}),
       });
       if (nameInput) nameInput.value = '';
       await loadClassSessions(classId, { createdId: created?.id ?? null });
@@ -5221,17 +5243,22 @@ snippets:
 
     let editExpiresContext = null;
 
-    function beginEditSessionExpires(classId, sessionId, currentIso) {
+    function beginEditSessionExpires(classId, sessionId) {
       const cell = document.getElementById(`expires-cell-${sessionId}`);
-      const prevIso = currentIso || (cell && cell.dataset.expires) || '';
+      const prevStart = (cell && cell.dataset.start) || '';
+      const prevIso = (cell && cell.dataset.expires) || '';
+      const redemptions = Number((cell && cell.dataset.redemptions) || 0);
+      const startInput = document.getElementById('editStartInput');
       const input = document.getElementById('editExpiresInput');
       const modal = document.getElementById('editExpiresModal');
-      if (!input || !modal) return;
-      editExpiresContext = { classId, sessionId, prevIso };
+      if (!input || !startInput || !modal) return;
+      editExpiresContext = { classId, sessionId, prevStart, prevIso, redemptions };
+      startInput.value = isoToDatetimeLocalValue(prevStart);
       input.value = isoToDatetimeLocalValue(prevIso);
+      startInput.disabled = false;
       input.disabled = false;
       modal.classList.add('show');
-      setTimeout(() => input.focus(), 0);
+      setTimeout(() => startInput.focus(), 0);
     }
 
     function closeEditExpiresModal() {
@@ -5248,28 +5275,49 @@ snippets:
 
     async function saveEditExpiresModal() {
       if (!editExpiresContext) return;
+      const startInput = document.getElementById('editStartInput');
       const input = document.getElementById('editExpiresInput');
-      if (!input || input.disabled) return;
+      if (!input || !startInput || input.disabled) return;
+      const sessionAt = datetimeLocalToUtcIso((startInput.value || '').trim());
       const expiresAt = datetimeLocalToUtcIso((input.value || '').trim());
-      if (!expiresAt) {
-        alert('到期時間格式無效');
+      if (!sessionAt || !expiresAt) {
+        alert('請設定有效的開始與結束時間');
+        (sessionAt ? input : startInput).focus();
+        return;
+      }
+      if (Date.parse(expiresAt) <= Date.parse(sessionAt)) {
+        alert('結束時間必須晚於開始時間');
         input.focus();
         return;
       }
-      const { classId, sessionId, prevIso } = editExpiresContext;
-      if (isoToDatetimeLocalValue(prevIso) === input.value) {
+      const { classId, sessionId, prevStart, prevIso, redemptions } = editExpiresContext;
+      const changes = {};
+      if (isoToDatetimeLocalValue(prevStart) !== startInput.value) changes.session_at = sessionAt;
+      if (isoToDatetimeLocalValue(prevIso) !== input.value) changes.expires_at = expiresAt;
+      if (!Object.keys(changes).length) {
         closeEditExpiresModal();
         return;
       }
+      // Moving the start of a running sitting into the future pauses keys already issued (ADR 0091).
+      const now = Date.now();
+      const pausesIssuedKeys = changes.session_at
+        && Date.parse(sessionAt) > now
+        && Date.parse(prevStart) <= now
+        && redemptions > 0;
+      if (pausesIssuedKeys && !window.confirm('已領取金鑰的學生會暫停使用，直到新的開始時間。確定要更改嗎？')) {
+        return;
+      }
+      startInput.disabled = true;
       input.disabled = true;
       try {
         await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ expires_at: expiresAt }),
+          body: JSON.stringify(changes),
         });
         closeEditExpiresModal();
         await reloadSessionViews(classId);
       } catch (err) {
+        startInput.disabled = false;
         input.disabled = false;
         alert(err.message || String(err));
         input.focus();
@@ -5290,7 +5338,7 @@ snippets:
 
     async function endSessionNow(classId, sessionId) {
       const ok = window.confirm(
-        '確定要結束此課堂嗎？\n\n結束後該堂已領取的 API Key 會立刻失效，也無法再領取邀請碼。之後可把到期時間設到未來以重新開啟。'
+        '確定要結束此課堂嗎？\n\n結束後該堂已領取的 API Key 會立刻失效，也無法再領取邀請碼。之後可把結束時間設到未來以重新開啟。'
       );
       if (!ok) return;
       await api(`/teacher/classes/${classId}/sessions/${sessionId}`, {
@@ -5600,8 +5648,8 @@ snippets:
         </div>
         <div class="admin-block">
           <h4>系統設定</h4>
-          <table><tr><th>歸檔天數</th><th>刪除天數</th><th>學生預設 TTL</th><th>開放註冊</th></tr>
-          <tr><td>${settings.prompt_logs?.archive_after_days ?? '-'}</td><td>${settings.prompt_logs?.delete_after_days ?? '-'}</td><td>${settings.student_default_ttl_hours ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
+          <table><tr><th>歸檔天數</th><th>刪除天數</th><th>開放註冊</th></tr>
+          <tr><td>${settings.prompt_logs?.archive_after_days ?? '-'}</td><td>${settings.prompt_logs?.delete_after_days ?? '-'}</td><td>${settings.auth?.open_registration ? '是' : '否'}</td></tr></table>
         </div>`;
     }
 
@@ -5609,7 +5657,6 @@ snippets:
       if (!settings) return;
       document.getElementById('settingArchiveAfter').value = settings.prompt_logs?.archive_after_days ?? '';
       document.getElementById('settingDeleteAfter').value = settings.prompt_logs?.delete_after_days ?? '';
-      document.getElementById('settingTtl').value = settings.student_default_ttl_hours ?? '';
       document.getElementById('settingRegistration').value = settings.auth?.open_registration ? 'true' : 'false';
     }
 
@@ -5647,7 +5694,6 @@ snippets:
       const body = {
         archive_after_days: Number(document.getElementById('settingArchiveAfter').value) || null,
         delete_after_days: Number(document.getElementById('settingDeleteAfter').value) || null,
-        student_default_ttl_hours: Number(document.getElementById('settingTtl').value) || null,
         open_registration: document.getElementById('settingRegistration').value === 'true',
       };
       try {

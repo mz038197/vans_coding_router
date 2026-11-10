@@ -51,7 +51,7 @@ def _portal_cookie(repo, user_id: int) -> dict[str, str]:
 def _classroom_key(client, repo) -> tuple[str, dict, dict, dict]:
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     repo.update_class_session(
         klass["id"],
@@ -184,7 +184,7 @@ def test_classroom_image_list_is_refused_when_the_image_shelf_is_empty(tmp_path)
     client, repo = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     login = client.post(
         "/auth/google",

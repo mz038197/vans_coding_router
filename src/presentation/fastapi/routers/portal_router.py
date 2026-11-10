@@ -118,7 +118,6 @@ class ModelDocumentUploadRequest(BaseModel):
 class ClassRequest(BaseModel):
     name: str
     ends_at: str | None = None
-    api_key_ttl_hours: int | None = None
 
 
 class RedeemRequest(BaseModel):
@@ -128,10 +127,11 @@ class RedeemRequest(BaseModel):
 class SessionRequest(BaseModel):
     name: str
     session_at: str | None = None
-    ttl_hours: int | None = None
+    expires_at: str | None = None
 
 
 class SessionPatchRequest(BaseModel):
+    session_at: str | None = None
     expires_at: str | None = None
     name: str | None = None
     image_generation_enabled: bool | None = None
@@ -167,7 +167,6 @@ class ClassPatchRequest(BaseModel):
 class SettingsPatchRequest(BaseModel):
     archive_after_days: int | None = None
     delete_after_days: int | None = None
-    student_default_ttl_hours: int | None = None
     open_registration: bool | None = None
 
 
@@ -566,7 +565,6 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 data.name.strip(),
                 data.ends_at,
-                data.api_key_ttl_hours,
             )
         )
 
@@ -618,8 +616,8 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 class_id,
                 data.name if data else "",
-                ttl_hours=data.ttl_hours if data else None,
                 session_at=data.session_at if data else None,
+                expires_at=data.expires_at if data else None,
                 invocation_channel=_webmcp_invocation_channel(request),
                 invocation_arguments=invocation_arguments,
             )
@@ -677,6 +675,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 class_id,
                 session_id,
+                session_at=data.session_at,
                 expires_at=data.expires_at,
                 name=data.name,
                 image_generation_enabled=data.image_generation_enabled,
@@ -937,7 +936,6 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
                 current_user_id(session_user_id),
                 archive_after_days=data.archive_after_days,
                 delete_after_days=data.delete_after_days,
-                student_default_ttl_hours=data.student_default_ttl_hours,
                 open_registration=data.open_registration,
             )
         )

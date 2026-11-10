@@ -56,7 +56,7 @@ def _portal_cookie(repo, user_id: int) -> dict[str, str]:
 def _sitting(client, repo, *, choice: str | None = "automatic"):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     repo.update_class_session(
         klass["id"],
@@ -104,12 +104,12 @@ def test_new_session_starts_automatic_and_cannot_return_to_mixed(tmp_path):
     client, repo = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     cookies = _portal_cookie(repo, teacher["id"])
     created = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "Week 1"},
+        json={"name": "Week 1", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert created.status_code == 200
     assert created.json()["classroom_model_choice"] == "automatic"

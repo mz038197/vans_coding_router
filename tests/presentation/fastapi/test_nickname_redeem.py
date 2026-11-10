@@ -47,7 +47,7 @@ def _portal_cookie(repo, user_id: int) -> dict[str, str]:
 
 def _live_session(repo):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     return teacher, klass, session
 
@@ -150,7 +150,7 @@ def test_nickname_redeem_same_class_later_session_is_same_user(tmp_path):
 def test_nickname_redeem_same_string_in_other_class_is_different_user(tmp_path):
     client, repo = _client(tmp_path)
     teacher, _, session_a = _live_session(repo)
-    klass_b = repo.create_class(teacher["id"], "Other", None, 2)
+    klass_b = repo.create_class(teacher["id"], "Other", None)
     session_b = repo.create_class_session(klass_b["id"], teacher["id"], "Week 1")
 
     a = _redeem(client, session_a["invite_code"], "Ada")
@@ -169,7 +169,9 @@ def test_nickname_redeem_rejects_invalid_expired_and_ended_invite(tmp_path):
     assert invalid.status_code == 400
 
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    repo.update_class_session(klass["id"], session["id"], expires_at=past)
+    repo.update_class_session(
+        klass["id"], session["id"], session_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat(), expires_at=past
+    )
     expired = _redeem(client, session["invite_code"], "Ada")
     assert expired.status_code == 400
 
@@ -632,7 +634,7 @@ def test_other_teacher_cannot_inactivate_class_member(tmp_path):
 def test_cannot_inactivate_student_from_another_class(tmp_path):
     client, repo = _client(tmp_path)
     teacher, klass, session = _live_session(repo)
-    other_class = repo.create_class(teacher["id"], "Other", None, 2)
+    other_class = repo.create_class(teacher["id"], "Other", None)
     first = _redeem(client, session["invite_code"], "Ada")
     listing = client.get(
         f"/teacher/classes/{klass['id']}/redemptions",

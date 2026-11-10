@@ -159,7 +159,7 @@ def _redeem_student_key(client, invite_code: str) -> str:
 
 def _owner_session(repo):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     with repo._connect() as conn:
         conn.execute(

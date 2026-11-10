@@ -297,7 +297,7 @@ def test_portal_session_row_shows_occupied_seats_versus_limit(tmp_path):
     assert '{"seat_limit"' in html or "{ seat_limit" in html
     assert "該席仍佔用課堂座位" in html
     fields = html[html.index("function sessionFieldsHtml("):html.index("function renderSessionTable(")]
-    assert fields.index('session-kicker">座位') < fields.index('session-kicker">Key 到期') < fields.index("${redemptionBox}") < fields.index('session-kicker">安裝清單')
+    assert fields.index('session-kicker">座位') < fields.index('session-kicker">課堂時段') < fields.index("${redemptionBox}") < fields.index('session-kicker">安裝清單')
     assert "${sessionSeatLimitCell(classId, session)}</div>" in fields
     assert "${sessionSeatLimitCell(classId, session)}${redemptionBox}" not in html
     assert 'class="session-field session-field-wide session-redemptions hidden"' in html
@@ -822,7 +822,6 @@ def test_admin_update_settings_endpoint(tmp_path):
         json={
             "archive_after_days": 10,
             "delete_after_days": 20,
-            "student_default_ttl_hours": 4,
             "open_registration": False,
         },
     )
@@ -831,7 +830,7 @@ def test_admin_update_settings_endpoint(tmp_path):
     payload = response.json()
     assert payload["prompt_logs"]["archive_after_days"] == 10
     assert payload["prompt_logs"]["delete_after_days"] == 20
-    assert payload["student_default_ttl_hours"] == 4
+    assert "student_default_ttl_hours" not in payload
     assert payload["auth"]["open_registration"] is False
     assert repo.get_runtime_settings()["archive_after_days"] == "10"
     assert repo.get_runtime_settings()["delete_after_days"] == "20"
@@ -844,7 +843,7 @@ def test_admin_clear_archive_endpoint(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    ended = repo.create_class(teacher["id"], "Ended", None)
     session = repo.create_class_session(ended["id"], teacher["id"], "Session")
     key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     context = repo.verify_api_key_context(key)
@@ -875,7 +874,7 @@ def test_admin_prompt_log_usage_and_delete_by_user(tmp_path):
     repo.update_user(teacher["id"], role="teacher")
     user_a = repo.upsert_google_user("a@example.com", "A")
     user_b = repo.upsert_google_user("b@example.com", "B")
-    klass = repo.create_class(teacher["id"], "Class", None, 2)
+    klass = repo.create_class(teacher["id"], "Class", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     key_a = repo.redeem_invite(session["invite_code"], user_a["id"])["api_key"]
     key_b = repo.redeem_invite(session["invite_code"], user_b["id"])["api_key"]
@@ -958,7 +957,7 @@ def test_admin_update_class_endpoint(tmp_path):
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
 
     response = client.patch(
         f"/admin/classes/{klass['id']}",
@@ -980,7 +979,7 @@ def test_teacher_ends_own_course(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
 
     response = client.patch(
         f"/teacher/classes/{klass['id']}",
@@ -999,7 +998,7 @@ def test_teacher_cannot_end_another_teachers_course(tmp_path):
     repo.update_user(owner["id"], role="teacher")
     other = repo.upsert_google_user("other@example.com", "Other")
     repo.update_user(other["id"], role="teacher")
-    klass = repo.create_class(owner["id"], "AI", None, 2)
+    klass = repo.create_class(owner["id"], "AI", None)
 
     response = client.patch(
         f"/teacher/classes/{klass['id']}",
@@ -1016,7 +1015,7 @@ def test_teacher_end_course_accepts_only_ended(tmp_path, status):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     repo.set_class_status(klass["id"], "ended")
 
     response = client.patch(
@@ -1035,7 +1034,7 @@ def test_admin_still_reopens_course_a_teacher_ended(tmp_path):
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     client.patch(
         f"/teacher/classes/{klass['id']}",
         cookies=_portal_cookie(repo, teacher),
@@ -1058,7 +1057,7 @@ def test_prompt_logs_endpoint_returns_preview_without_raw_prompt(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     auth_context = AuthContext(
         user_id=teacher["id"],
         email=teacher["email"],
@@ -1099,7 +1098,7 @@ def test_teacher_prompt_logs_carry_the_tier_name_and_confidence(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     auth_context = AuthContext(user_id=teacher["id"], email=teacher["email"], name=teacher["name"], class_id=klass["id"])
     repo.log_prompt(
         auth=auth_context,
@@ -1123,7 +1122,7 @@ def test_prompt_logs_can_filter_by_session_id(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session_a = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     session_b = repo.create_class_session(klass["id"], teacher["id"], "第二堂")
     context_a = repo.verify_api_key_context(repo.redeem_invite(session_a["invite_code"], student["id"])["api_key"])
@@ -1170,7 +1169,7 @@ def test_prompt_log_detail_endpoint(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     auth_context = AuthContext(
         user_id=teacher["id"],
         email=teacher["email"],
@@ -1211,7 +1210,7 @@ def test_list_classes_requires_teacher_and_returns_owned_classes(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     student = repo.upsert_google_user("student@gmail.com", "Student")
-    owned = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    owned = repo.create_class(teacher["id"], "AI 素養", None)
 
     response = client.get("/teacher/classes", cookies=_portal_cookie(repo, teacher))
     forbidden = client.get("/teacher/classes", cookies=_portal_cookie(repo, student))
@@ -1221,23 +1220,44 @@ def test_list_classes_requires_teacher_and_returns_owned_classes(tmp_path):
     assert forbidden.status_code == 403
 
 
+def test_create_session_requires_start_and_end(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
+    cookies = _portal_cookie(repo, teacher)
+    url = f"/teacher/classes/{klass['id']}/sessions"
+    start = "2026-06-21T14:00:00+00:00"
+
+    no_end = client.post(url, cookies=cookies, json={"name": "第一堂", "session_at": start})
+    no_start = client.post(url, cookies=cookies, json={"name": "第一堂", "expires_at": start})
+    end_not_after_start = client.post(
+        url, cookies=cookies, json={"name": "第一堂", "session_at": start, "expires_at": start}
+    )
+
+    assert no_end.status_code == 400
+    assert no_start.status_code == 400
+    assert end_not_after_start.status_code == 400
+    assert end_not_after_start.json()["detail"] == "結束時間必須晚於開始時間"
+    assert client.get(url, cookies=cookies).json()["items"] == []
+
+
 def test_list_and_create_class_sessions(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
     session_at = "2026-06-21T14:00:00+00:00"
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "session_at": session_at, "ttl_hours": 3},
+        json={"name": "第一堂", "session_at": session_at, "expires_at": "2026-06-21T17:30:00+00:00"},
     )
     assert create.status_code == 200
     created = create.json()
     assert created["session_at"] == session_at
     assert created["name"] == "第一堂"
-    assert created["expires_at"] == "2026-06-21T17:00:00+00:00"
+    assert created["expires_at"] == "2026-06-21T17:30:00+00:00"
 
     listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
     assert listing.status_code == 200
@@ -1258,7 +1278,7 @@ def test_get_class_session_enforces_portal_authorization_and_missing_target(tmp_
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     other = repo.upsert_google_user("other@school.edu", "Other")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
 
     found = client.get(
@@ -1289,13 +1309,13 @@ def test_webmcp_session_write_http_contracts_are_explicit_authorized_and_partial
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     student = repo.upsert_google_user("student@gmail.com", "Student")
-    target_class = repo.create_class(teacher["id"], "指定班級", None, 2)
+    target_class = repo.create_class(teacher["id"], "指定班級", None)
     teacher_cookie = _portal_cookie(repo, teacher)
 
     created = client.post(
         f"/teacher/classes/{target_class['id']}/sessions",
         cookies=teacher_cookie,
-        json={"name": "指定課堂", "ttl_hours": 3},
+        json={"name": "指定課堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert created.status_code == 200
     session_id = created.json()["id"]
@@ -1353,7 +1373,7 @@ def test_webmcp_session_write_http_contracts_are_explicit_authorized_and_partial
 def test_successful_webmcp_session_mutations_create_agent_action_audits(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     teacher_cookie = _portal_cookie(repo, teacher)
     webmcp_headers = {"X-Vans-Invocation-Channel": "webmcp"}
 
@@ -1364,7 +1384,7 @@ def test_successful_webmcp_session_mutations_create_agent_action_audits(tmp_path
         json={
             "name": "第一堂",
             "session_at": "2026-09-10T01:00:00+00:00",
-            "ttl_hours": 3,
+            "expires_at": "2026-09-10T04:00:00+00:00",
         },
     )
     assert created.status_code == 200
@@ -1406,7 +1426,7 @@ def test_successful_webmcp_session_mutations_create_agent_action_audits(tmp_path
     assert create_audit["arguments"] == {
         "name": "第一堂",
         "session_at": "2026-09-10T01:00:00+00:00",
-        "ttl_hours": 3,
+        "expires_at": "2026-09-10T04:00:00+00:00",
     }
     assert create_audit["invocation_channel"] == "webmcp"
     assert create_audit["occurred_at"]
@@ -1436,18 +1456,18 @@ def test_failed_or_non_webmcp_mutations_do_not_create_agent_action_audits(tmp_pa
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     other = repo.upsert_google_user("other@school.edu", "Other")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     teacher_cookie = _portal_cookie(repo, teacher)
     other_cookie = _portal_cookie(repo, other)
     path = f"/teacher/classes/{klass['id']}/sessions"
     webmcp_headers = {"X-Vans-Invocation-Channel": "webmcp"}
 
-    ordinary = client.post(path, cookies=teacher_cookie, json={"name": "人工建立"})
+    ordinary = client.post(path, cookies=teacher_cookie, json={"name": "人工建立", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"})
     forbidden = client.post(
         path,
         cookies=other_cookie,
         headers=webmcp_headers,
-        json={"name": "不應建立"},
+        json={"name": "不應建立", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     invalid = client.post(
         path,
@@ -1481,7 +1501,7 @@ def test_read_only_class_session_and_usage_http_contracts(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     student = repo.upsert_google_user("student@gmail.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     teacher_cookie = _portal_cookie(repo, teacher)
     student_cookie = _portal_cookie(repo, student)
@@ -1514,13 +1534,13 @@ def test_read_only_class_session_and_usage_http_contracts(tmp_path):
 def test_new_class_session_has_seat_limit_60(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     created = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     listing = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies)
 
@@ -1540,7 +1560,7 @@ def test_owner_and_admin_can_change_session_seat_limit(tmp_path):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     admin = repo.upsert_google_user("admin@school.edu", "Admin")
     other = repo.upsert_google_user("other@school.edu", "Other")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     teacher_cookies = _portal_cookie(repo, teacher)
     admin_cookies = _portal_cookie(repo, admin)
@@ -1576,7 +1596,7 @@ def test_owner_and_admin_can_change_session_seat_limit(tmp_path):
 def test_session_seat_limit_rejects_non_positive_values(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     cookies = _portal_cookie(repo, teacher)
 
@@ -1600,13 +1620,13 @@ def test_session_seat_limit_rejects_non_positive_values(tmp_path):
 def test_session_image_generation_toggle(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     session_id = create.json()["id"]
     assert repo.is_image_generation_enabled(session_id) is True
@@ -1631,13 +1651,13 @@ def test_session_image_generation_toggle(tmp_path):
 def test_session_tts_toggle(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     session_id = create.json()["id"]
     assert repo.is_tts_enabled(session_id) is True
@@ -1662,13 +1682,13 @@ def test_session_tts_toggle(tmp_path):
 def test_session_speech_transcription_toggle(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     session_id = create.json()["id"]
     assert repo.is_speech_transcription_enabled(session_id) is False
@@ -1693,13 +1713,13 @@ def test_session_speech_transcription_toggle(tmp_path):
 def test_new_session_decision_model_is_empty(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert create.status_code == 200
     body = create.json()
@@ -1711,12 +1731,12 @@ def test_new_session_decision_model_is_empty(tmp_path):
 def test_teacher_checks_models_onto_the_decision_shelf(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
     session_id = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     ).json()["id"]
     checked_ollama = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
@@ -1792,12 +1812,12 @@ def test_teacher_checks_models_onto_the_decision_shelf(tmp_path):
 def test_chat_allowlist_does_not_drop_decision_shelf_models(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
     session_id = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     ).json()["id"]
     seeded = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session_id}",
@@ -1832,12 +1852,12 @@ def test_chat_allowlist_does_not_drop_decision_shelf_models(tmp_path):
 def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
     session_id = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     ).json()["id"]
     with_decision = [
         {
@@ -1876,13 +1896,13 @@ def test_removing_decision_model_from_openrouter_list_clears_it(tmp_path):
 def test_session_prompt_logging_toggle(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     cookies = _portal_cookie(repo, teacher)
 
     create = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     session_id = create.json()["id"]
     assert repo.is_prompt_logging_enabled(session_id) is True
@@ -1928,7 +1948,7 @@ def test_install_vscode_models_download_returns_script(tmp_path):
 def test_install_vscode_models_download_embeds_session_allowlist(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     allowed = "ollama_cloud@minimax-m3:cloud"
     other = "openrouter@minimax/minimax-m3"
@@ -2005,12 +2025,74 @@ def test_install_vscode_models_command_download(tmp_path):
     assert "python3" in response.text
 
 
+def test_teacher_edits_the_session_window_after_creating_it(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
+    cookies = _portal_cookie(repo, teacher)
+    created = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={
+            "name": "第一堂",
+            "session_at": "2026-06-21T09:00:00+00:00",
+            "expires_at": "2026-06-21T11:00:00+00:00",
+        },
+    ).json()
+    url = f"/teacher/classes/{klass['id']}/sessions/{created['id']}"
+
+    start_only = client.patch(url, cookies=cookies, json={"session_at": "2026-06-21T08:30:00+00:00"})
+    assert start_only.status_code == 200
+    assert start_only.json()["session_at"] == "2026-06-21T08:30:00+00:00"
+    assert start_only.json()["expires_at"] == "2026-06-21T11:00:00+00:00"
+
+    both = client.patch(
+        url,
+        cookies=cookies,
+        json={"session_at": "2026-06-22T09:00:00+00:00", "expires_at": "2026-06-22T12:00:00+00:00"},
+    )
+    assert both.status_code == 200
+    assert both.json()["session_at"] == "2026-06-22T09:00:00+00:00"
+    assert both.json()["expires_at"] == "2026-06-22T12:00:00+00:00"
+
+    start_after_end = client.patch(url, cookies=cookies, json={"session_at": "2026-06-22T12:00:00+00:00"})
+    end_before_start = client.patch(url, cookies=cookies, json={"expires_at": "2026-06-22T08:00:00+00:00"})
+    cleared = client.patch(url, cookies=cookies, json={"session_at": ""})
+    assert start_after_end.status_code == 400
+    assert start_after_end.json()["detail"] == "結束時間必須晚於開始時間"
+    assert end_before_start.status_code == 400
+    assert cleared.status_code == 400
+
+    listed = client.get(f"/teacher/classes/{klass['id']}/sessions", cookies=cookies).json()["items"][0]
+    assert listed["session_at"] == "2026-06-22T09:00:00+00:00"
+    assert listed["expires_at"] == "2026-06-22T12:00:00+00:00"
+
+
+def test_ending_a_session_that_has_not_started_yet(tmp_path):
+    client, repo, _ = _client(tmp_path)
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
+    cookies = _portal_cookie(repo, teacher)
+    created = client.post(
+        f"/teacher/classes/{klass['id']}/sessions",
+        cookies=cookies,
+        json={"name": "下週", "session_at": "2099-01-01T09:00:00+00:00", "expires_at": "2099-01-01T11:00:00+00:00"},
+    ).json()
+
+    ended = client.patch(
+        f"/teacher/classes/{klass['id']}/sessions/{created['id']}", cookies=cookies, json={"status": "ended"}
+    )
+
+    assert ended.status_code == 200
+    assert ended.json()["status"] == "ended"
+
+
 def test_owner_and_admin_can_end_session_and_edit_expires(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     admin = repo.upsert_google_user("admin@school.edu", "Admin")
     other = repo.upsert_google_user("other@school.edu", "Other")
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     teacher_cookies = _portal_cookie(repo, teacher)
     admin_cookies = _portal_cookie(repo, admin)

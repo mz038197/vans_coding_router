@@ -36,6 +36,19 @@ from src.infrastructure.config import RouterSettings
 from src.infrastructure.repositories.router_repository_helpers import dt, parse_dt, prompt_log_messages, utc_now
 
 _ARCHIVE_BATCH_SIZE = 20
+_DEFAULT_SESSION_LENGTH = timedelta(hours=2)
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+def _check_session_window(start: datetime, end: datetime) -> None:
+    """A Class Session is a start-to-end window; either end may lie in the past (ADR 0091)."""
+    if end <= start:
+        raise ValueError("結束時間必須晚於開始時間")
 
 
 class RouterRepositoryBase(ABC):
@@ -980,16 +993,14 @@ class RouterRepositoryBase(ABC):
         teacher_id: int,
         name: str,
         ends_at: str | None,
-        api_key_ttl_hours: int | None = None,
     ) -> dict[str, Any]:
         now = dt(utc_now())
-        ttl = api_key_ttl_hours or self.settings.student_default_ttl_hours
         with self._connect() as conn:
             class_id = self._insert_returning_id(
                 conn,
-                "INSERT INTO classes(name, teacher_id, api_key_ttl_hours, ends_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (name, teacher_id, ttl, ends_at, now, now),
+                "INSERT INTO classes(name, teacher_id, ends_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (name, teacher_id, ends_at, now, now),
             )
             row = conn.execute(self._sql("SELECT * FROM classes WHERE id = ?"), (class_id,)).fetchone()
             return dict(row)
@@ -1026,8 +1037,8 @@ class RouterRepositoryBase(ABC):
         class_id: int,
         created_by: int,
         name: str,
-        ttl_hours: int | None = None,
         session_at: str | None = None,
+        expires_at: str | None = None,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any]:
         cleaned_name = name.strip()
@@ -1036,13 +1047,13 @@ class RouterRepositoryBase(ABC):
         klass = self.get_class(class_id)
         if not klass or klass["status"] != "active":
             raise ValueError("class is not active")
-        start = parse_dt(session_at) if session_at else utc_now()
+        start = _aware(parse_dt(session_at)) if session_at else utc_now()
         if start is None:
-            start = utc_now()
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=UTC)
-        ttl = int(ttl_hours if ttl_hours is not None else klass["api_key_ttl_hours"])
-        expires_at = start + timedelta(hours=ttl)
+            raise ValueError("invalid session_at")
+        end = _aware(parse_dt(expires_at)) if expires_at else start + _DEFAULT_SESSION_LENGTH
+        if end is None:
+            raise ValueError("invalid expires_at")
+        _check_session_window(start, end)
         invite_code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
         now = dt(utc_now())
         from src.domain.course_catalog import DEFAULT_COURSE_CATALOG_YAML
@@ -1064,7 +1075,7 @@ class RouterRepositoryBase(ABC):
                 (
                     class_id,
                     invite_code,
-                    dt(expires_at),
+                    dt(end),
                     dt(start),
                     cleaned_name,
                     created_by,
@@ -1129,6 +1140,13 @@ class RouterRepositoryBase(ABC):
         data["decision_model"] = stored if isinstance(stored, str) else ""
         return data
 
+    def _migrate_to_session_windows(self, conn: Any) -> None:
+        """ADR 0091: every sitting has a start, and nothing stores a class length any more."""
+        conn.execute(
+            self._sql("UPDATE class_sessions SET session_at = created_at WHERE session_at IS NULL OR session_at = ''")
+        )
+        conn.execute(self._sql("DELETE FROM runtime_settings WHERE key = 'student_default_ttl_hours'"))
+
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
         current = now or utc_now()
         if expires.tzinfo is None:
@@ -1173,9 +1191,11 @@ class RouterRepositoryBase(ABC):
         decision_model: Any = DECISION_MODEL_UNCHANGED,
         classroom_model_choice: Any = CLASSROOM_MODEL_CHOICE_UNCHANGED,
         agent_action_audit: AgentActionAudit | None = None,
+        session_at: str | None = None,
     ) -> dict[str, Any] | None:
         if (
-            expires_at is None
+            session_at is None
+            and expires_at is None
             and name is None
             and image_generation_enabled is None
             and tts_enabled is None
@@ -1196,15 +1216,34 @@ class RouterRepositoryBase(ABC):
         # Lifecycle truth is expires_at. status=ended => expire now; status=active alone is invalid.
         if status == "active" and expires_at is None:
             raise ValueError("重新開啟課堂請設定未來的到期時間")
-        if status == "ended" and expires_at is None:
+        # Ending now is not a window edit, so a sitting that has not started yet can still end.
+        ending_now = status == "ended" and expires_at is None
+        if ending_now:
             expires_at = dt(utc_now())
         with self._connect() as conn:
             row = conn.execute(
-                self._sql("SELECT id FROM class_sessions WHERE id = ? AND class_id = ?"),
+                self._sql("SELECT id, session_at, expires_at FROM class_sessions WHERE id = ? AND class_id = ?"),
                 (session_id, class_id),
             ).fetchone()
             if not row:
                 return None
+            new_start = _aware(parse_dt(row["session_at"]))
+            new_end = _aware(parse_dt(row["expires_at"]))
+            if session_at is not None:
+                new_start = _aware(parse_dt(session_at)) if session_at.strip() else None
+                if new_start is None:
+                    raise ValueError("開始時間不可清空" if not session_at.strip() else "invalid session_at")
+            if expires_at is not None:
+                new_end = _aware(parse_dt(expires_at))
+                if new_end is None:
+                    raise ValueError("invalid expires_at")
+            if (session_at is not None or (expires_at is not None and not ending_now)) and new_start and new_end:
+                _check_session_window(new_start, new_end)
+            if session_at is not None:
+                conn.execute(
+                    self._sql("UPDATE class_sessions SET session_at = ? WHERE id = ?"),
+                    (dt(new_start), session_id),
+                )
             if name is not None:
                 cleaned_name = name.strip()
                 if not cleaned_name:
@@ -1214,10 +1253,7 @@ class RouterRepositoryBase(ABC):
                     (cleaned_name, session_id),
                 )
             if expires_at is not None:
-                parsed = parse_dt(expires_at)
-                if parsed is None:
-                    raise ValueError("invalid expires_at")
-                self._apply_session_expires(conn, session_id, parsed)
+                self._apply_session_expires(conn, session_id, new_end)
             if image_generation_enabled is not None:
                 conn.execute(
                     self._sql("UPDATE class_sessions SET image_generation_enabled = ? WHERE id = ?"),
@@ -1964,7 +2000,6 @@ class RouterRepositoryBase(ABC):
         self,
         archive_after_days: int | None = None,
         delete_after_days: int | None = None,
-        student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, str]:
         updates: list[tuple[str, str]] = []
@@ -1973,8 +2008,6 @@ class RouterRepositoryBase(ABC):
             updates.append(("archive_after_days", str(archive_after_days)))
         if delete_after_days is not None:
             updates.append(("delete_after_days", str(delete_after_days)))
-        if student_default_ttl_hours is not None:
-            updates.append(("student_default_ttl_hours", str(student_default_ttl_hours)))
         if open_registration is not None:
             updates.append(("open_registration", "true" if open_registration else "false"))
         if not updates:

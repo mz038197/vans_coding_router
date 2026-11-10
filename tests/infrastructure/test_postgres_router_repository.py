@@ -61,7 +61,6 @@ def test_postgres_session_key_redeem_verify_and_prompt_log(postgres_repo):
         teacher_id=teacher["id"],
         name="AI 課程",
         ends_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
-        api_key_ttl_hours=2,
     )
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
@@ -94,7 +93,7 @@ def test_postgres_archive_moves_logs_to_archive_table(postgres_repo):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    ended = repo.create_class(teacher["id"], "Ended", None)
     repo.set_class_status(ended["id"], "ended")
     repo.set_class_status(ended["id"], "active")
     ended_session = repo.create_class_session(ended["id"], teacher["id"], "Ended Session")
@@ -132,7 +131,7 @@ def _student_context(repo):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "Tiers", None, 2)
+    klass = repo.create_class(teacher["id"], "Tiers", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
     assert context is not None
@@ -176,13 +175,13 @@ def test_postgres_archive_keeps_tier_name_and_confidence(postgres_repo):
 def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     first = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
     again = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")
     assert first["api_key"] == again["api_key"]
 
-    other = repo.create_class(teacher["id"], "Other", None, 2)
+    other = repo.create_class(teacher["id"], "Other", None)
     other_session = repo.create_class_session(other["id"], teacher["id"], "Week 1")
     other_redeem = repo.redeem_invite_with_nickname(other_session["invite_code"], "Ada")
     user_a = repo.verify_api_key_context(first["api_key"]).user_id
@@ -193,7 +192,7 @@ def test_postgres_nickname_redeem_identity_is_per_class(postgres_repo):
 def test_postgres_session_seat_limit_blocks_new_identities(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     assert session["seat_limit"] == 60
     repo.update_class_session(klass["id"], session["id"], seat_limit=1)
@@ -215,7 +214,7 @@ def test_postgres_session_seat_limit_blocks_new_identities(postgres_repo):
 def test_postgres_web_search_switch_is_off_until_turned_on(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     assert session["web_search_enabled"] is False
     assert repo.is_web_search_enabled(session["id"]) is False
@@ -237,7 +236,7 @@ def test_postgres_sitting_filled_from_the_starter_gets_no_auto_tiers(postgres_re
     assert _carries_auto_tiers(load_vans_template()), "the starter ships default Auto Tiers"
     repo = postgres_repo
     owner = repo.upsert_google_user("owner@gmail.com", "Owner")
-    klass = repo.create_class(owner["id"], "No template", None, 2)
+    klass = repo.create_class(owner["id"], "No template", None)
     created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
     backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
     with repo._connect() as conn:
@@ -307,7 +306,7 @@ def _postgres_last_used_at(repo, api_key_id: int) -> str | None:
 def test_postgres_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_minute(postgres_repo):
     repo = postgres_repo
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")["api_key"]
     minute = timedelta(seconds=60)
@@ -345,3 +344,46 @@ def test_postgres_role_table_roles_ignore_the_legacy_role_column(postgres_repo):
 
     assert repo.role_table_roles(admin["id"]) == ("admin", "student", "teacher")
     assert repo.role_table_roles(legacy["id"]) == ()
+
+
+def test_postgres_opening_a_legacy_database_gives_every_session_a_start_and_drops_the_class_length(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    klass = repo.create_class(teacher["id"], "AI 課程", None)
+    session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
+    with repo._connect() as conn:
+        conn.execute("ALTER TABLE classes ADD COLUMN api_key_ttl_hours INTEGER NOT NULL DEFAULT 2")
+        conn.execute("UPDATE class_sessions SET session_at = NULL WHERE id = %s", (session["id"],))
+        conn.execute(
+            "INSERT INTO runtime_settings(key, value, updated_at) VALUES ('student_default_ttl_hours', '3', %s)",
+            (datetime.now(UTC).isoformat(),),
+        )
+
+    reopened = build_router_repository(_settings())
+
+    listed = reopened.list_class_sessions(klass["id"])[0]
+    assert listed["session_at"] == listed["created_at"]
+    assert "api_key_ttl_hours" not in reopened.get_class(klass["id"])
+    assert "student_default_ttl_hours" not in reopened.get_runtime_settings()
+    assert reopened.create_class(teacher["id"], "新班", None)["name"] == "新班"
+
+
+def test_postgres_issued_classroom_api_key_follows_the_edited_session_window(postgres_repo):
+    repo = postgres_repo
+    teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
+    student = repo.upsert_google_user("student@gmail.com", "Student")
+    klass = repo.create_class(teacher["id"], "AI 課程", None)
+    start = datetime.now(UTC) - timedelta(minutes=5)
+    session = repo.create_class_session(
+        klass["id"], teacher["id"], "第一堂",
+        session_at=start.isoformat(), expires_at=(start + timedelta(hours=2)).isoformat(),
+    )
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+
+    repo.update_class_session(klass["id"], session["id"], expires_at=(start + timedelta(hours=6)).isoformat())
+    assert repo.verify_api_key_with_reason(key, now=start + timedelta(hours=4))[1] is None
+
+    repo.update_class_session(
+        klass["id"], session["id"], session_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    )
+    assert repo.verify_api_key_with_reason(key) == (None, "not_started")

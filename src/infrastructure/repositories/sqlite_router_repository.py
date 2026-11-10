@@ -63,7 +63,6 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     teacher_id INTEGER NOT NULL REFERENCES users(id),
-                    api_key_ttl_hours INTEGER NOT NULL DEFAULT 2,
                     status TEXT NOT NULL DEFAULT 'active',
                     ends_at TEXT,
                     created_at TEXT NOT NULL,
@@ -204,6 +203,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
             self._ensure_column(conn, "prompt_logs", "tier_name", "TEXT")
             self._ensure_column(conn, "prompt_logs", "tier_confidence", "REAL")
             self._ensure_column(conn, "class_sessions", "session_at", "TEXT")
+            self._migrate_to_session_windows(conn)
+            if "api_key_ttl_hours" in {row[1] for row in conn.execute("PRAGMA table_info(classes)").fetchall()}:
+                conn.execute("ALTER TABLE classes DROP COLUMN api_key_ttl_hours")
             self._ensure_column(conn, "class_sessions", "name", "TEXT")
             self._ensure_column(
                 conn,

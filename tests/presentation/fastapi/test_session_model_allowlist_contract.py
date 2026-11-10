@@ -32,7 +32,7 @@ def _sqlite_api_client(tmp_path) -> tuple[TestClient, SqliteRouterRepository, Fa
 def _student_chat_setup(repo: SqliteRouterRepository):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     student = repo.upsert_google_user("student@school.edu", "Student")
     redeem = repo.redeem_invite(session["invite_code"], student["id"])

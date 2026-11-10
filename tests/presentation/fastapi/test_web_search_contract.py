@@ -83,11 +83,11 @@ def _sitting(client, repo):
     teacher = _teacher(repo)
     token, _ = repo.create_portal_session(teacher["id"], "Test browser")
     cookies = {"vcr_portal_session": token}
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     created = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=cookies,
-        json={"name": "第一堂", "ttl_hours": 2},
+        json={"name": "第一堂", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert created.status_code == 200
     session = created.json()

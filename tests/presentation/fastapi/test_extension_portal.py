@@ -130,11 +130,11 @@ def test_teacher_chat_language_models_carry_no_router_only_fields(tmp_path):
 def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     created = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=_portal_cookie(repo, teacher["id"]),
-        json={"name": "Week 1"},
+        json={"name": "Week 1", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert created.status_code == 200
     assert created.json()["session_chat_language_models"] == load_vans_template()
@@ -151,7 +151,7 @@ def test_creating_class_session_keyed_get_returns_template_copy(tmp_path):
 def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
     with repo._connect() as conn:
@@ -187,7 +187,7 @@ def test_missing_session_document_is_copied_on_ship_not_student_get(tmp_path):
 def test_keyed_chat_language_models_returns_session_document_not_live_template(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     document = [
         {
@@ -226,7 +226,7 @@ def test_keyed_chat_language_models_returns_session_document_not_live_template(t
 def test_chat_language_models_bearer_filters_session_allowlist(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     allowed = "ollama_cloud@minimax-m3:cloud"
     other = "openrouter@minimax/minimax-m3"
@@ -312,7 +312,7 @@ def test_chat_language_models_personal_key_is_not_a_model_list_read(tmp_path):
 def test_session_model_allowlist_rejects_ids_outside_template(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     response = client.patch(
         f"/teacher/classes/{klass['id']}/sessions/{session['id']}",
@@ -337,7 +337,7 @@ def test_dev_google_login_returns_handoff_for_extension_client(tmp_path):
 def test_extension_redeem_with_handoff(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
 
     login = client.post(
@@ -367,7 +367,7 @@ def test_extension_redeem_with_handoff(tmp_path):
 def test_extension_course_catalog_get_and_fails_after_session_end(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     assert "actions:" in (session.get("course_catalog_yaml") or "")
 
@@ -429,7 +429,7 @@ actions:
 def test_keyed_chat_language_models_fails_after_session_end(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
 
@@ -456,7 +456,7 @@ def test_keyed_chat_language_models_fails_after_session_end(tmp_path):
 def test_v1_chat_still_fails_after_session_end(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
     _end_session(client, repo, teacher["id"], klass["id"], session["id"])
@@ -473,7 +473,7 @@ def test_v1_chat_still_fails_after_session_end(tmp_path):
 def test_key_is_refused_before_session_starts(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
     # A key redeemed before this rule shipped, on a sitting scheduled later.
@@ -504,7 +504,7 @@ def test_key_is_refused_before_session_starts(tmp_path):
 def test_nickname_redeem_is_refused_before_session_starts(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(
         klass["id"],
         teacher["id"],
@@ -523,7 +523,7 @@ def test_nickname_redeem_is_refused_before_session_starts(tmp_path):
 def test_disabled_key_fails_extension_gets(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
     with repo._connect() as conn:
@@ -542,7 +542,7 @@ def test_disabled_key_fails_extension_gets(tmp_path):
 def test_suspended_user_fails_extension_gets(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = _redeem_student_key(client, session["invite_code"])
     student = repo.get_user_by_email("student@gmail.com")
@@ -564,7 +564,7 @@ def test_suspended_user_fails_extension_gets(tmp_path):
 def test_teacher_patch_dumps_multiline_snippet_body_as_block_scalar(tmp_path):
     client, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     snippet_yaml = """
 actions: []

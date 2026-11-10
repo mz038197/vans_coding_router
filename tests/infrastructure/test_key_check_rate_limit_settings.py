@@ -50,7 +50,7 @@ def test_the_configured_limit_survives_runtime_settings(tmp_path):
     settings = load_router_settings(_config(tmp_path, "key_check:", "  calls_per_minute_per_service: 1200"))
 
     assert settings.key_check.calls_per_minute_per_service == 1200
-    overridden = apply_runtime_settings(settings, {"student_default_ttl_hours": "3"})
+    overridden = apply_runtime_settings(settings, {"archive_after_days": "3"})
     assert overridden.key_check.calls_per_minute_per_service == 1200
 
 

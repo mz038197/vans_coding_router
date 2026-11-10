@@ -156,7 +156,6 @@ class RoutingSettings:
 class RouterSettings:
     path: str | None = None
     public_url: str = "http://127.0.0.1:8000"
-    student_default_ttl_hours: int = 2
     auth: AuthSettings = field(default_factory=AuthSettings)
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
     prompt_logs: PromptLogSettings = field(default_factory=PromptLogSettings)
@@ -215,7 +214,6 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
     return _apply_env_overrides(RouterSettings(
         path=str(config_path),
         public_url=str(data.get("public_url", "http://127.0.0.1:8000")),
-        student_default_ttl_hours=int(data.get("student_default_ttl_hours", 2)),
         auth=AuthSettings(
             teacher_domain=str(auth.get("teacher_domain", "")).lower(),
             admin_emails=tuple(str(e).lower() for e in auth.get("admin_emails", [])),
@@ -298,7 +296,6 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
     return RouterSettings(
         path=settings.path,
         public_url=_env("PUBLIC_URL", settings.public_url),
-        student_default_ttl_hours=settings.student_default_ttl_hours,
         auth=auth,
         database=database,
         prompt_logs=settings.prompt_logs,
@@ -314,7 +311,6 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         return base
     archive_after_days = base.prompt_logs.archive_after_days
     delete_after_days = base.prompt_logs.delete_after_days
-    student_default_ttl_hours = base.student_default_ttl_hours
     open_registration = base.auth.open_registration
     if "archive_after_days" in overrides:
         archive_after_days = int(overrides["archive_after_days"])
@@ -322,14 +318,11 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         archive_after_days = int(overrides["retention_days"])
     if "delete_after_days" in overrides:
         delete_after_days = int(overrides["delete_after_days"])
-    if "student_default_ttl_hours" in overrides:
-        student_default_ttl_hours = int(overrides["student_default_ttl_hours"])
     if "open_registration" in overrides:
         open_registration = overrides["open_registration"].lower() in ("true", "1", "yes")
     return RouterSettings(
         path=base.path,
         public_url=base.public_url,
-        student_default_ttl_hours=student_default_ttl_hours,
         auth=replace(base.auth, open_registration=open_registration),
         database=base.database,
         prompt_logs=replace(
@@ -360,7 +353,6 @@ def settings_summary(settings: RouterSettings) -> dict[str, Any]:
             "google_client_secret": "***" if settings.auth.google_client_secret else "",
             "open_registration": settings.auth.open_registration,
         },
-        "student_default_ttl_hours": settings.student_default_ttl_hours,
         "prompt_logs": {
             "archive_after_days": settings.prompt_logs.archive_after_days,
             "delete_after_days": settings.prompt_logs.delete_after_days,
@@ -393,14 +385,11 @@ def update_non_secret_settings(
     path: str,
     archive_after_days: int | None = None,
     delete_after_days: int | None = None,
-    student_default_ttl_hours: int | None = None,
     open_registration: bool | None = None,
 ) -> RouterSettings:
     config_path = Path(path).expanduser()
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     data = data or {}
-    if student_default_ttl_hours is not None:
-        data["student_default_ttl_hours"] = student_default_ttl_hours
     if archive_after_days is not None or delete_after_days is not None:
         prompt_logs = data.setdefault("prompt_logs", {})
         if archive_after_days is not None:

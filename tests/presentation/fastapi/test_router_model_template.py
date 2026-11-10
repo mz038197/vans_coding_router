@@ -116,11 +116,11 @@ def test_new_class_session_copies_the_owner_template_once(tmp_path):
             ]
         },
     )
-    klass = repo.create_class(owner["id"], "Demo", None, 2)
+    klass = repo.create_class(owner["id"], "Demo", None)
     created = client.post(
         f"/teacher/classes/{klass['id']}/sessions",
         cookies=_portal_cookie(repo, owner["id"]),
-        json={"name": "Week 1"},
+        json={"name": "Week 1", "session_at": "2026-01-01T00:00:00+00:00", "expires_at": "2099-01-01T00:00:00+00:00"},
     )
     assert created.status_code == 200
     assert created.json()["session_chat_language_models"][0]["models"][0]["id"] == OWNER_ONLY

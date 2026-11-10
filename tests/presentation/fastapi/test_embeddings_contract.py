@@ -57,7 +57,7 @@ def _sqlite_api_client(tmp_path):
 def _sitting(repo, *, choice: str | None = "automatic", models: list | None = None):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     document_models = models if models is not None else [
         {"id": TEXT_ID, "name": "text"},

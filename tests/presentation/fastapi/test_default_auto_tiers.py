@@ -47,7 +47,7 @@ def _without_tiers(document: list) -> list:
 def test_existing_templates_and_sittings_are_not_given_the_default_tiers(tmp_path):
     _, repo, _ = _client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     old_document = _without_tiers(repo.get_router_model_template(teacher["id"]))
     repo.save_router_model_template(teacher["id"], old_document)

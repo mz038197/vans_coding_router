@@ -149,7 +149,6 @@ class RouterRepositoryPort(Protocol):
         teacher_id: int,
         name: str,
         ends_at: str | None,
-        api_key_ttl_hours: int | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -167,10 +166,11 @@ class RouterRepositoryPort(Protocol):
         class_id: int,
         created_by: int,
         name: str,
-        ttl_hours: int | None = None,
         session_at: str | None = None,
+        expires_at: str | None = None,
         agent_action_audit: AgentActionAudit | None = None,
     ) -> dict[str, Any]:
+        """Start and end default to now and two hours later (ADR 0091)."""
         ...
 
     def list_class_sessions(self, class_id: int) -> list[dict[str, Any]]:
@@ -194,7 +194,9 @@ class RouterRepositoryPort(Protocol):
         session_chat_language_models: Any = SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
         decision_model: Any = None,
         agent_action_audit: AgentActionAudit | None = None,
+        session_at: str | None = None,
     ) -> dict[str, Any] | None:
+        """Moving session_at or expires_at applies to keys already issued (ADR 0091)."""
         ...
 
     def get_decision_model(self, session_id: int) -> str:
@@ -323,7 +325,6 @@ class RouterRepositoryPort(Protocol):
         self,
         archive_after_days: int | None = None,
         delete_after_days: int | None = None,
-        student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, str]:
         ...

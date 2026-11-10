@@ -108,7 +108,7 @@ def test_session_tts_follows_the_speech_shelf(tmp_path):
     client, repo, gateway, _logger = _sqlite_api_client(tmp_path)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
-    klass = repo.create_class(teacher["id"], "AI 素養", None, 2)
+    klass = repo.create_class(teacher["id"], "AI 素養", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     with repo._connect() as conn:
         conn.execute(

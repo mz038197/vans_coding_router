@@ -15,7 +15,7 @@ def test_prompt_logs_passes_time_range_filters(tmp_path):
     use_case = PortalUseCase(repo, settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
 
     logs = use_case.prompt_logs(
         teacher_id=teacher["id"],
@@ -35,7 +35,7 @@ def test_prompt_logs_default_limit_without_filters(tmp_path):
     use_case = PortalUseCase(repo, settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     auth = AuthContext(user_id=teacher["id"], email=teacher["email"], name=teacher["name"], class_id=klass["id"])
 
     for idx in range(12):
@@ -70,7 +70,7 @@ def test_prompt_log_detail_returns_messages(tmp_path):
     use_case = PortalUseCase(repo, settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     auth = AuthContext(user_id=teacher["id"], email=teacher["email"], name=teacher["name"], class_id=klass["id"])
     repo.log_prompt(
         auth=auth,
@@ -101,7 +101,7 @@ def test_prompt_log_detail_requires_class_owner(tmp_path):
     other = repo.upsert_google_user("other@example.com", "Other")
     repo.update_user(teacher["id"], role="teacher")
     repo.update_user(other["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
 
     with pytest.raises(PermissionError):
         use_case.prompt_log_detail(other["id"], klass["id"], 1)
@@ -158,7 +158,6 @@ def test_admin_can_update_runtime_settings_in_db(tmp_path):
         admin["id"],
         archive_after_days=14,
         delete_after_days=28,
-        student_default_ttl_hours=3,
         open_registration=False,
     )
 
@@ -166,12 +165,12 @@ def test_admin_can_update_runtime_settings_in_db(tmp_path):
     assert repo.get_runtime_settings() == {
         "archive_after_days": "14",
         "delete_after_days": "28",
-        "student_default_ttl_hours": "3",
         "open_registration": "false",
     }
     assert summary["prompt_logs"]["archive_after_days"] == 14
     assert summary["prompt_logs"]["delete_after_days"] == 28
-    assert summary["student_default_ttl_hours"] == 3
+    # An old config file that still names the class length is read without it (ADR 0091).
+    assert "student_default_ttl_hours" not in summary
     assert summary["auth"]["open_registration"] is False
     assert use_case.settings.prompt_logs.archive_after_days == 14
     assert use_case.settings.prompt_logs.delete_after_days == 28
@@ -185,7 +184,7 @@ def test_admin_can_disable_class(tmp_path):
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
 
     updated = use_case.admin_update_class(admin["id"], klass["id"], status="ended")
 
@@ -201,7 +200,7 @@ def test_admin_can_end_and_reopen_other_teacher_session(tmp_path):
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
 
     ended = use_case.update_session(admin["id"], klass["id"], session["id"], status="ended")
@@ -227,7 +226,7 @@ def test_admin_can_update_privileged_and_owner_only_fields_together(tmp_path):
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
 
     updated = use_case.update_session(
@@ -251,7 +250,7 @@ def test_admin_can_update_non_privileged_fields_on_other_teacher_session(tmp_pat
     repo.update_user(admin["id"], role="admin")
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
 
     updated = use_case.update_session(
@@ -279,7 +278,7 @@ def test_other_teacher_cannot_end_session(tmp_path):
     other = repo.upsert_google_user("other@example.com", "Other")
     repo.update_user(teacher["id"], role="teacher")
     repo.update_user(other["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Lesson")
 
     with pytest.raises(PermissionError):
