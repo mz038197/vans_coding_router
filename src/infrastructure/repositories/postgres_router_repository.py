@@ -70,7 +70,6 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     name TEXT NOT NULL,
                     teacher_id INTEGER NOT NULL REFERENCES users(id),
-                    api_key_ttl_hours INTEGER NOT NULL DEFAULT 2,
                     status TEXT NOT NULL DEFAULT 'active',
                     ends_at TEXT,
                     created_at TEXT NOT NULL,
@@ -323,6 +322,8 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
+            self._migrate_to_session_windows(conn)
+            conn.execute("ALTER TABLE classes DROP COLUMN IF EXISTS api_key_ttl_hours")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS extension_handoff_nonces (

@@ -1,5 +1,4 @@
 public_url: "https://ai.vanscoding.com"
-student_default_ttl_hours: 2
 
 auth:
   teacher_domain: ""

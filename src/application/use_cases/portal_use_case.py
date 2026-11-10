@@ -354,9 +354,9 @@ class PortalUseCase:
         except (TypeError, ValueError):
             return None
 
-    def create_class(self, teacher_id: int, name: str, ends_at: str | None, api_key_ttl_hours: int | None) -> dict[str, Any]:
+    def create_class(self, teacher_id: int, name: str, ends_at: str | None) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
-        return self.repo.create_class(teacher_id, name, ends_at, api_key_ttl_hours)
+        return self.repo.create_class(teacher_id, name, ends_at)
 
     def list_classes(self, user_id: int) -> list[dict[str, Any]]:
         self._assert_teacher(user_id)
@@ -367,26 +367,28 @@ class PortalUseCase:
         teacher_id: int,
         class_id: int,
         name: str,
-        ttl_hours: int | None = None,
         session_at: str | None = None,
+        expires_at: str | None = None,
         invocation_channel: str | None = None,
         invocation_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._assert_teacher(teacher_id)
+        if not session_at or not expires_at:
+            raise ValueError("請設定課堂開始與結束時間")
         klass = self.repo.get_class(class_id)
         if not klass or klass["teacher_id"] != teacher_id:
             raise PermissionError("class not owned by teacher")
         arguments = invocation_arguments or self._create_session_arguments(
             name=name,
-            ttl_hours=ttl_hours,
             session_at=session_at,
+            expires_at=expires_at,
         )
         session = self.repo.create_class_session(
             class_id,
             teacher_id,
             name,
-            ttl_hours=ttl_hours,
             session_at=session_at,
+            expires_at=expires_at,
             agent_action_audit=self._agent_action_audit(
                 actor_user_id=teacher_id,
                 action="create_class_session",
@@ -427,6 +429,7 @@ class PortalUseCase:
         prompt_logging_enabled: bool | None = None,
         web_search_enabled: bool | None = None,
         decision_model: Any = DECISION_MODEL_UNCHANGED,
+        session_at: str | None = None,
         status: str | None = None,
         course_catalog_yaml: str | None = None,
         seat_limit: int | None = None,
@@ -457,6 +460,7 @@ class PortalUseCase:
             document = (existing or {}).get("session_chat_language_models") or []
             model_allowlist = validate_allowlist(model_allowlist, document)
         changes = invocation_arguments or self._session_change_arguments(
+            session_at=session_at,
             expires_at=expires_at,
             name=name,
             image_generation_enabled=image_generation_enabled,
@@ -480,6 +484,7 @@ class PortalUseCase:
         session = self.repo.update_class_session(
             class_id,
             session_id,
+            session_at=session_at,
             expires_at=expires_at,
             name=name,
             image_generation_enabled=image_generation_enabled,
@@ -530,15 +535,10 @@ class PortalUseCase:
     def _create_session_arguments(
         *,
         name: str,
-        ttl_hours: int | None,
-        session_at: str | None,
+        session_at: str,
+        expires_at: str,
     ) -> dict[str, Any]:
-        arguments: dict[str, Any] = {"name": name.strip()}
-        if session_at is not None:
-            arguments["session_at"] = session_at
-        if ttl_hours is not None:
-            arguments["ttl_hours"] = ttl_hours
-        return arguments
+        return {"name": name.strip(), "session_at": session_at, "expires_at": expires_at}
 
     @staticmethod
     def _session_change_arguments(**changes: Any) -> dict[str, Any]:
@@ -551,6 +551,8 @@ class PortalUseCase:
             return "update_session_capabilities"
         if fields == {"expires_at"}:
             return "change_session_expiry"
+        if "session_at" in fields and fields <= {"session_at", "expires_at"}:
+            return "change_session_window"
         if fields == {"seat_limit"}:
             return "change_session_seat_limit"
         if fields == {"model_allowlist"}:
@@ -780,14 +782,12 @@ class PortalUseCase:
         user_id: int,
         archive_after_days: int | None = None,
         delete_after_days: int | None = None,
-        student_default_ttl_hours: int | None = None,
         open_registration: bool | None = None,
     ) -> dict[str, Any]:
         self._assert_admin(user_id)
         self.repo.update_runtime_settings(
             archive_after_days=archive_after_days,
             delete_after_days=delete_after_days,
-            student_default_ttl_hours=student_default_ttl_hours,
             open_registration=open_registration,
         )
         self.refresh_settings()

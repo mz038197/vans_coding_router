@@ -115,7 +115,7 @@ Image generation, Speech, and Speech Transcription for a Classroom API Key follo
 - Admin emails receive `admin`, `teacher`, and `student` roles.
 - Other new users receive `student`.
 - Teachers create classes and class sessions.
-- Class sessions can specify TTL at creation time.
+- A class session runs from a start time to an end time; both are set at creation and stay editable.
 - Teachers can patch a session expiry; issued session API keys are updated to the same expiry.
 - Usage is recorded after upstream responses and surfaced per class/student/session.
 

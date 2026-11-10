@@ -61,7 +61,7 @@ def _key_check(client, body, credential=MCP_CREDENTIAL):
 
 def _live_session(repo, session_at=None):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "Demo", None, 2)
+    klass = repo.create_class(teacher["id"], "Demo", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1", session_at=session_at)
     return teacher, klass, session
 
@@ -329,7 +329,7 @@ def test_no_log_line_carries_the_whole_key(tmp_path, caplog):
 
 def _teacher_with_classes(repo, email="teacher@school.edu", names=("Mon AM", "Wed PM")):
     teacher = repo.upsert_google_user(email, "Teacher")
-    classes = [repo.create_class(teacher["id"], name, None, 2) for name in names]
+    classes = [repo.create_class(teacher["id"], name, None) for name in names]
     return teacher, classes
 
 

@@ -1,5 +1,4 @@
 public_url: "http://127.0.0.1:8000"
-student_default_ttl_hours: 2
 
 auth:
   teacher_domain: ""

@@ -136,7 +136,7 @@ class _Harness:
         teacher = self.repo.upsert_google_user("teacher@school.edu", "Teacher")
         self.repo.update_user(teacher["id"], roles=["teacher"])
         self.teacher = teacher
-        self.klass = self.repo.create_class(teacher["id"], "AI 素養", None, 2)
+        self.klass = self.repo.create_class(teacher["id"], "AI 素養", None)
         self.session = self.repo.create_class_session(self.klass["id"], teacher["id"], "第一堂")
         student = self.repo.upsert_google_user("student@school.edu", "Student")
         self.student_key = self.repo.redeem_invite(self.session["invite_code"], student["id"])["api_key"]

@@ -47,7 +47,7 @@ class World:
         repo.update_user(self.admin["id"], roles=["admin"])
         self.teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
         repo.update_user(self.teacher["id"], roles=["teacher"])
-        self.klass = repo.create_class(self.teacher["id"], "AI 素養", None, 2)
+        self.klass = repo.create_class(self.teacher["id"], "AI 素養", None)
         self.session = repo.create_class_session(self.klass["id"], self.teacher["id"], "第一堂")
         with repo._connect() as conn:
             conn.execute(

@@ -34,7 +34,7 @@ def test_the_config_names_the_env_var_that_holds_the_search_key(tmp_path, monkey
     settings = load_router_settings(_config(tmp_path, "web_search:", '  api_key_env: "MY_SEARCH_KEY"'))
 
     assert resolve_web_search_api_key(settings.web_search) == "tvly-secret"
-    overridden = apply_runtime_settings(settings, {"student_default_ttl_hours": "3"})
+    overridden = apply_runtime_settings(settings, {"archive_after_days": "3"})
     assert resolve_web_search_api_key(overridden.web_search) == "tvly-secret"
 
     monkeypatch.delenv("MY_SEARCH_KEY")

@@ -27,7 +27,6 @@
       "name",
       "status",
       "ends_at",
-      "api_key_ttl_hours",
       "member_count",
     ]);
   }
@@ -229,16 +228,16 @@
     }, {
       name: "create_class_session",
       title: "Create Class Session",
-      description: "Create a Class Session in an explicit Class or the current Portal Class.",
+      description: "Create a Class Session in an explicit Class or the current Portal Class. It runs from session_at to expires_at.",
       inputSchema: {
         type: "object",
         properties: {
           class_id: { type: "integer", minimum: 1 },
           name: { type: "string", minLength: 1 },
-          session_at: { type: "string" },
-          ttl_hours: { type: "integer", minimum: 1 },
+          session_at: { type: "string", minLength: 1 },
+          expires_at: { type: "string", minLength: 1 },
         },
-        required: ["name"],
+        required: ["name", "session_at", "expires_at"],
         additionalProperties: false,
       },
       async execute(input) {
@@ -246,7 +245,7 @@
         if (!classId) {
           return structuredError("missing_target", null, "class_id is required");
         }
-        const body = selectFields(input, ["name", "session_at", "ttl_hours"]);
+        const body = selectFields(input, ["name", "session_at", "expires_at"]);
         return requestResult(
           request,
           `/teacher/classes/${classId}/sessions`,

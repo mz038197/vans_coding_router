@@ -180,7 +180,6 @@ def test_sqlite_session_key_redeem_verify_and_prompt_log(tmp_path):
         teacher_id=teacher["id"],
         name="AI 課程",
         ends_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
-        api_key_ttl_hours=2,
     )
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
@@ -204,7 +203,7 @@ def test_prompt_logs_can_be_filtered_by_time_range(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
     context = repo.verify_api_key_context(redeemed["api_key"])
@@ -236,8 +235,8 @@ def test_archive_prompt_logs_moves_old_logs_and_keeps_young_logs_on_an_ended_cla
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
 
-    active = repo.create_class(teacher["id"], "Active", None, 2)
-    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    active = repo.create_class(teacher["id"], "Active", None)
+    ended = repo.create_class(teacher["id"], "Ended", None)
     repo.set_class_status(ended["id"], "ended")
     active_session = repo.create_class_session(active["id"], teacher["id"], "Active Session")
     repo.set_class_status(ended["id"], "active")
@@ -299,7 +298,7 @@ def test_archive_keeps_the_tier_name_and_confidence_in_an_older_archive_file(tmp
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    klass = repo.create_class(teacher["id"], "Active", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
     repo.log_prompt(context, "tiered", "tiered", "openrouter@vendor/strong", "ok", None, tier=TierSelection("t-strong", "進階", 0.92))
@@ -325,7 +324,7 @@ def test_archive_prompt_logs_finishes_a_backlog_larger_than_one_batch(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    klass = repo.create_class(teacher["id"], "Active", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     context = repo.verify_api_key_context(key)
@@ -350,7 +349,7 @@ def test_purge_archived_prompt_logs_deletes_by_created_at(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "Active", None, 2)
+    klass = repo.create_class(teacher["id"], "Active", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     context = repo.verify_api_key_context(key)
@@ -378,7 +377,7 @@ def test_clear_all_archived_prompt_logs(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    ended = repo.create_class(teacher["id"], "Ended", None, 2)
+    ended = repo.create_class(teacher["id"], "Ended", None)
     session = repo.create_class_session(ended["id"], teacher["id"], "Session")
     key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
     context = repo.verify_api_key_context(key)
@@ -408,7 +407,7 @@ def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
     repo.update_user(teacher["id"], role="teacher")
     user_a = repo.upsert_google_user("a@example.com", "A")
     user_b = repo.upsert_google_user("b@example.com", "B")
-    klass = repo.create_class(teacher["id"], "Class", None, 2)
+    klass = repo.create_class(teacher["id"], "Class", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     key_a = repo.redeem_invite(session["invite_code"], user_a["id"])["api_key"]
     key_b = repo.redeem_invite(session["invite_code"], user_b["id"])["api_key"]
@@ -423,7 +422,7 @@ def test_delete_prompt_logs_for_users_keeps_other_users(tmp_path):
     assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC))["archived"] == 2
 
     # new class for fresh live logs after archive
-    live_class = repo.create_class(teacher["id"], "Live", None, 2)
+    live_class = repo.create_class(teacher["id"], "Live", None)
     live_session = repo.create_class_session(live_class["id"], teacher["id"], "Live Session")
     key_a2 = repo.redeem_invite(live_session["invite_code"], user_a["id"])["api_key"]
     key_b2 = repo.redeem_invite(live_session["invite_code"], user_b["id"])["api_key"]
@@ -466,7 +465,6 @@ def test_session_key_hash_updates_when_session_secret_rotates(tmp_path):
         teacher["id"],
         "AI",
         (datetime.now(UTC) + timedelta(days=1)).isoformat(),
-        2,
     )
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     repo.redeem_invite(session["invite_code"], student["id"])
@@ -490,7 +488,7 @@ def test_verify_api_key_strips_surrounding_whitespace(tmp_path):
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@gmail.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
 
@@ -505,14 +503,14 @@ def test_create_session_with_session_at_sets_expires_at(tmp_path):
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session_at = datetime(2026, 6, 21, 14, 0, tzinfo=UTC).isoformat()
     session = repo.create_class_session(
         klass["id"],
         teacher["id"],
         "第一堂",
-        ttl_hours=3,
         session_at=session_at,
+        expires_at=datetime(2026, 6, 21, 17, 0, tzinfo=UTC).isoformat(),
     )
     assert session["session_at"] == session_at
     assert session["name"] == "第一堂"
@@ -525,9 +523,11 @@ def _class_with_session_starting_at(tmp_path, session_at: datetime):
     )
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(
-        klass["id"], teacher["id"], "第一堂", ttl_hours=3, session_at=session_at.isoformat()
+        klass["id"], teacher["id"], "第一堂",
+        session_at=session_at.isoformat(),
+        expires_at=(session_at + timedelta(hours=3)).isoformat(),
     )
     return repo, session
 
@@ -544,6 +544,44 @@ def test_classroom_api_key_is_not_started_before_session_at(tmp_path):
 
     assert repo.verify_api_key_with_reason(key) == (None, "not_started")
     assert repo.verify_api_key_context(key) is None
+
+
+def test_issued_classroom_api_key_follows_the_edited_session_window(tmp_path):
+    start = datetime.now(UTC) - timedelta(minutes=5)
+    repo, session = _class_with_session_starting_at(tmp_path, start)
+    student = repo.upsert_google_user("student@example.com", "Student")
+    key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
+    later_than_old_end = start + timedelta(hours=4)
+
+    repo.update_class_session(
+        session["class_id"], session["id"], expires_at=(start + timedelta(hours=6)).isoformat()
+    )
+    assert repo.verify_api_key_with_reason(key, now=later_than_old_end)[1] is None
+
+    repo.update_class_session(
+        session["class_id"], session["id"], session_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    )
+    assert repo.verify_api_key_with_reason(key) == (None, "not_started")
+
+
+def test_opening_a_legacy_database_gives_every_session_a_start_and_drops_the_class_length(tmp_path):
+    repo, session = _class_with_session_starting_at(tmp_path, datetime.now(UTC) - timedelta(minutes=5))
+    with repo._connect() as conn:
+        conn.execute("ALTER TABLE classes ADD COLUMN api_key_ttl_hours INTEGER NOT NULL DEFAULT 2")
+        conn.execute("UPDATE class_sessions SET session_at = NULL WHERE id = ?", (session["id"],))
+        conn.execute(
+            "INSERT INTO runtime_settings(key, value, updated_at) VALUES ('student_default_ttl_hours', '3', ?)",
+            (datetime.now(UTC).isoformat(),),
+        )
+
+    reopened = SqliteRouterRepository(repo.db_path, repo.settings)
+
+    listed = reopened.list_class_sessions(session["class_id"])[0]
+    assert listed["session_at"] == listed["created_at"]
+    assert "api_key_ttl_hours" not in reopened.get_class(session["class_id"])
+    assert "student_default_ttl_hours" not in reopened.get_runtime_settings()
+    teacher = reopened.get_user_by_email("teacher@example.com")
+    assert reopened.create_class(teacher["id"], "新班", None)["name"] == "新班"
 
 
 def test_personal_api_key_replaced_by_a_newer_one_is_invalid(tmp_path):
@@ -591,7 +629,7 @@ def test_create_session_requires_name(tmp_path):
     )
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     with pytest.raises(ValueError, match="課堂名稱"):
         repo.create_class_session(klass["id"], teacher["id"], "   ")
 
@@ -602,7 +640,7 @@ def test_update_session_name(tmp_path):
     )
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Old Name")
     updated = repo.update_class_session(klass["id"], session["id"], name="New Name")
     assert updated is not None
@@ -615,7 +653,7 @@ def test_session_model_allowlist_round_trip(tmp_path):
     )
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "第一堂")
     template = load_vans_template()
     assert session["session_chat_language_models"] == without_auto_tiers(template)
@@ -654,7 +692,7 @@ def test_get_active_keys_includes_session_name(tmp_path):
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI Course", None, 2)
+    klass = repo.create_class(teacher["id"], "AI Course", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Lesson 1")
     repo.redeem_invite(session["invite_code"], student["id"])
     keys = repo.get_active_keys(student["id"])
@@ -673,7 +711,7 @@ def test_list_class_sessions_includes_redemption_count(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     repo.redeem_invite(session["invite_code"], student["id"])
     items = repo.list_class_sessions(klass["id"])
@@ -690,7 +728,7 @@ def test_redeem_same_invite_returns_same_key(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     first = repo.redeem_invite(session["invite_code"], student["id"])
     second = repo.redeem_invite(session["invite_code"], student["id"])
@@ -707,7 +745,7 @@ def test_end_session_invalidates_key_and_blocks_redeem(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
     assert repo.verify_api_key_context(redeemed["api_key"]) is not None
@@ -739,7 +777,7 @@ def test_backfill_aligns_ended_session_future_expires(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Legacy Ended")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
     future = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
@@ -768,7 +806,7 @@ def test_agent_action_audit_migrates_to_nullable_non_session_targets(tmp_path):
     repo = SqliteRouterRepository(db_path, settings)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     repo.record_agent_action_audit(
         actor_user_id=teacher["id"],
@@ -839,7 +877,7 @@ def test_update_session_expires_at_syncs_api_keys(tmp_path):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Test Session")
     redeemed = repo.redeem_invite(session["invite_code"], student["id"])
     new_expires = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
@@ -866,7 +904,7 @@ def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
     assert _carries_auto_tiers(load_vans_template()), "the starter ships default Auto Tiers"
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
     owner = repo.upsert_google_user("owner@gmail.com", "Owner")
-    klass = repo.create_class(owner["id"], "No template", None, 2)
+    klass = repo.create_class(owner["id"], "No template", None)
     created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
     backfilled = repo.create_class_session(klass["id"], owner["id"], "Week 2")
     with repo._connect() as conn:
@@ -888,7 +926,7 @@ def _usage_world(repo):
     teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
     repo.update_user(teacher["id"], role="teacher")
     student = repo.upsert_google_user("student@example.com", "Student")
-    klass = repo.create_class(teacher["id"], "Usage", None, 2)
+    klass = repo.create_class(teacher["id"], "Usage", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Session")
     context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
     assert context is not None
@@ -944,7 +982,7 @@ def test_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_
     settings = _settings(tmp_path)
     repo = SqliteRouterRepository(settings.database.path, settings)
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
-    klass = repo.create_class(teacher["id"], "AI", None, 2)
+    klass = repo.create_class(teacher["id"], "AI", None)
     session = repo.create_class_session(klass["id"], teacher["id"], "Week 1")
     api_key = repo.redeem_invite_with_nickname(session["invite_code"], "Ada")["api_key"]
     minute = timedelta(seconds=60)

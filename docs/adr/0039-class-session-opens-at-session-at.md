@@ -1,5 +1,7 @@
 # A Class Session opens at its start time
 
+Status: amended by ADR 0091. Every sitting has a start time; the no-`session_at` exemption is gone, and moving the start applies to issued keys.
+
 A Class Session's `session_at` is now the start of its window, as well as the base its `expires_at` is computed from. Before that time the Invite Code cannot be redeemed, by Nickname Redeem, Sign-in Handoff, or Portal Google redeem. Redemption fails with "課堂尚未開始…". A Classroom API Key bound to that sitting is refused as `not_started` everywhere a live key is required: `/v1` answers 403 with code `api_key_not_started`, and the keyed `GET /extension/course-catalog` and `GET /extension/chat-language-models` answer 403 with "課堂尚未開始，請在開始時間後再使用".
 
 The key check covers keys that already exist on a sitting scheduled later, such as keys redeemed before this rule shipped. New keys cannot appear before the start, because redemption is refused.
