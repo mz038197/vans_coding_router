@@ -9,4 +9,4 @@ The id may still live in the teacher-owned Session Chat Language Models document
 ## Considered Options
 
 - **Leave the Decision Model in student chat lists**: rejected. Students would treat a Decision Model as a normal Session Chat Language Model.
-- **Forbid the Decision Model from Session Chat Language Models entirely**: rejected. Options come from that OpenRouter list (ADR-0021); stripping the id from the stored document would delete the picker source.
+- **Forbid the Decision Model from Session Chat Language Models entirely**: rejected. Options come from an OpenRouter list; stripping the id from the stored document would delete the picker source.

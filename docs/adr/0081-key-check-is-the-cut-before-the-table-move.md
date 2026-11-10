@@ -1,8 +1,8 @@
-# The key check, not signing, is the cut before the table move
+# The key check is the cut before the table move
 
 Status: accepted. Amends ADR 0073.
 
-ADR 0073 waits for signature checks to replace the MCP services' reads of `neondb` before the table move and the router role switch. The key check now replaces those reads first, while signed issuance stays off. The order is:
+The key check replaces the MCP services' reads of `neondb` before the table move and the router role switch (ADR 0073). The order is:
 
 1. `vans_signals_app` goes live.
 2. The router serves the key check and reads `VCR_SERVICE_TOKENS`.
@@ -15,4 +15,4 @@ road-test can use the key check any time after step 2. Each step can be undone a
 
 ## Considered Options
 
-- **Wait for signing before any MCP change**: rejected. The table coupling and the copied validity rules would stay until signing ships, and the copies have already drifted from the router (no `not_started` check, `users.role` instead of the role table).
+- **Wait for a different verification scheme before any MCP change**: rejected. The table coupling and the copied validity rules would stay until then, and the copies have already drifted from the router (no `not_started` check, `users.role` instead of the role table).

@@ -4,11 +4,11 @@ OpenRouter’s Upstream Model Catalog has two teacher shelves because upstream l
 
 A Model ID checked from the decision shelf stays a decision-shelf id in that sitting until the teacher unchecks it. A later upstream list does not turn it into a text chat model or put it back on student chat lists. Chat and Responses with a Decision Model id are refused the same way as a Model ID off the Session Model Allowlist. A file upload arrives on the text shelf. A previously stored single choice is not a Decision Model and is not checked onto the decision shelf; the teacher rechecks.
 
-This supersedes ADR-0021 and widens ADR-0022.
+This widens ADR-0022.
 
 ## Considered Options
 
-- **Any checked OpenRouter id can be the Decision Model** (ADR-0021): rejected. The text shelf does not list decision models, so it cannot supply a Decision Model.
+- **Any checked OpenRouter id can be the Decision Model**: rejected. The text shelf does not list decision models, so it cannot supply a Decision Model.
 - **Omit only the selected Decision Model from student lists** (ADR-0022): rejected. Another decision-shelf id checked into the same document would still appear as a chat model.
 - **Reclassify a checked id from the latest upstream list**: rejected. A catalog miss or a modality change would show a decision model to students, or drop a Decision Model the teacher never unchecked.
 - **Keep one chosen Decision Model beside the checked list**: rejected. The check is the permission, same as text models for chat. A second field can disagree with what is checked.

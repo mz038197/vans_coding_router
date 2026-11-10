@@ -2,7 +2,7 @@
 
 Status: accepted. Amended by ADR 0049 (the brand panel dissolves into the login pane) and ADR 0084 (VCRouter, the route V Brand Icon, gold swirl).
 
-Supersedes ADR 0002 and amends ADR 0045. The Portal login shell is a split page with no top navigation. The left brand panel holds the Login Network, the Brand Logo on its light badge plate, and the words "Vans Coding Router". The right login pane holds 歡迎回來, the tagline, the sign-in button and a one-line hint. The product name appears once, in the brand panel. The Theme toggle floats top-right. On narrow screens the brand panel stacks on top at 40% of the viewport height.
+Amends ADR 0045. The Portal login shell is a split page with no top navigation. The left brand panel holds the Login Network, the Brand Logo on its light badge plate, and the words "Vans Coding Router". The right login pane holds 歡迎回來, the tagline, the sign-in button and a one-line hint. The product name appears once, in the brand panel. The Theme toggle floats top-right. On narrow screens the brand panel stacks on top at 40% of the viewport height.
 
 The Login Network is now a swirl shaded with a 4x4 Bayer dither, drawn with plain WebGL. It has no Three.js and no CDN load. Its palette is fixed at `#220011` / `#00ffff` on both Themes. Only the small dither accent above 歡迎回來 and the sign-in button's focus ring follow the Theme; they reuse the two swirl colours. With reduced motion it draws one still frame. Without WebGL the panel keeps its `#220011` background (silent degrade, as before).
 
@@ -10,7 +10,7 @@ Chosen from prototype variants at commit `3e170cc` (the deleted local branch `pr
 
 ## Considered Options
 
-- **Scaffold React, shadcn and Tailwind to drop in the `DitheringShader` component.** Rejected for the same reason as ADR 0002: the Portal is vanilla HTML/CSS/JS, and one effect does not justify a frontend build.
+- **Scaffold React, shadcn and Tailwind to drop in the `DitheringShader` component.** Rejected: the Portal is vanilla HTML/CSS/JS, and one effect does not justify a frontend build.
 - **Full-bleed swirl behind a floating login card (variant A).** Rejected. The card fights the pattern and the name still repeats.
 - **Swirl confined to a banner on the login card (variant C).** Rejected. Too small to carry the page.
 - **A 凡思超能力 wordmark image in the brand panel (variant B2).** Rejected by the owner in favour of the English name.

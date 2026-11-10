@@ -1,6 +1,6 @@
 # Teachers edit models in a six-step wizard
 
-Status: accepted. Supersedes ADR-0032 and amends ADR-0037.
+Status: accepted. Amends ADR-0037.
 
 The teacher editor for Session Chat Language Models and the Router Model Template is one modal that walks six steps: 模型選擇 (the Classroom Model Choice), 學生可用的模型 (the text shelf), 分配難度 (Auto Tiers and each text-shelf Model ID's tier), 自動選模：誰來判斷難度 (the selector shelf), 其他功能 (the image, embeddings, speech, and speech-transcription shelves, and the decision shelf), and 檢查與儲存 (a plain-language review). A step list marks each step ✓, ⚠, or —; the teacher may open any step at any time, and 儲存 is on every step. The modal body is the one scroll area. The editor always opens on step 1.
 
@@ -14,7 +14,7 @@ The Router Model Template editor opens as 預設模型設定 from the course tab
 
 ## Considered Options
 
-- **Keep the two-column editor (ADR-0032) and add the tiers above it**: rejected. Three nested scroll areas, tiers apart from the model each one holds, and the selector shelf hidden behind the 決策 filter.
+- **Keep the earlier two-column editor and add the tiers above it**: rejected. Three nested scroll areas, tiers apart from the model each one holds, and the selector shelf hidden behind the 決策 filter.
 - **A tier board with one column per Auto Tier**: rejected after the teacher compared both prototypes.
 - **Keep the mode on the sitting row, saved at once**: rejected. The mode and the models it uses would be saved apart, and a refused model save could leave the mode changed.
 - **Keep the decision shelf in step 4 beside the selector shelf**: rejected. Under 學生自選 step 4 reads —, yet the decision shelf still applies.

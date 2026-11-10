@@ -1,6 +1,6 @@
 # No shared vans-auth package: each Partner Service calls the key check itself
 
-Status: accepted. Supersedes ADR 0062. Amends ADRs 0076, 0077, 0079, and 0080.
+Status: accepted. Amends ADRs 0076, 0077, 0079, and 0080.
 
 There is no `vans-auth` package. The contract between the router and a Partner Service is the key check itself (ADR 0077). Each Partner Service keeps its own small key check client in its own repository, in its own language.
 
@@ -10,7 +10,7 @@ The rules of ADR 0079 stay and now bind every client: an accepted answer is kept
 
 A Partner Service keeps only identity in its client. Service rules, such as road-test's groups or which MCP tools a student may call, stay in the service after the answer comes back.
 
-The planned direction is an API gateway in front of the Partner Services that checks keys once and passes the identity on. When it arrives, each Partner Service replaces its client with a read of what the gateway passes. Until then the key check is the only path. Signed issuance stays off (ADR 0074), and whether a Partner Service ever checks a signed key itself is decided again with the gateway, not here.
+The planned direction is an API gateway in front of the Partner Services that checks keys once and passes the identity on. When it arrives, each Partner Service replaces its client with a read of what the gateway passes. Until then the key check is the only path.
 
 ## Considered Options
 
