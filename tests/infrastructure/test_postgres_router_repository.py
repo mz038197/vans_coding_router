@@ -1,6 +1,9 @@
 import os
+import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 import pytest
 
 from src.domain.auto_tier import TierSelection
@@ -8,6 +11,7 @@ from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.factory import build_router_repository
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from tests.infrastructure.fresh_schema_snapshot import POSTGRES_ONLY_TABLE_COLUMNS, SHARED_TABLE_COLUMNS
 
 
 def _settings() -> RouterSettings:
@@ -387,3 +391,35 @@ def test_postgres_issued_classroom_api_key_follows_the_edited_session_window(pos
         klass["id"], session["id"], session_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat()
     )
     assert repo.verify_api_key_with_reason(key) == (None, "not_started")
+
+
+def test_postgres_a_fresh_database_has_exactly_the_snapshot_columns(postgres_repo):
+    schema = f"fresh_schema_{uuid.uuid4().hex[:12]}"
+    base_url = os.environ["TEST_DATABASE_URL"]
+    separator = "&" if "?" in base_url else "?"
+    fresh_url = f"{base_url}{separator}options=-csearch_path%3D{schema}"
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        conn.execute(f"CREATE SCHEMA {schema}")
+    try:
+        settings = _settings()
+        build_router_repository(
+            replace(settings, database=replace(settings.database, url=fresh_url))
+        )
+        with psycopg.connect(base_url) as conn:
+            rows = conn.execute(
+                "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = %s",
+                (schema,),
+            ).fetchall()
+    finally:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            conn.execute(f"DROP SCHEMA {schema} CASCADE")
+
+    columns: dict[str, set[str]] = {}
+    for table, column in rows:
+        columns.setdefault(table, set()).add(column)
+
+    # Postgres archives Prompt Logs in a table; SQLite uses yearly files instead.
+    assert {table: frozenset(names) for table, names in columns.items()} == {
+        **SHARED_TABLE_COLUMNS,
+        **POSTGRES_ONLY_TABLE_COLUMNS,
+    }

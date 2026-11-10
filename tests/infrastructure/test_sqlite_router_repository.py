@@ -8,6 +8,7 @@ from src.domain.session_model_allowlist import template_model_ids
 from src.infrastructure.config import AuthSettings, DatabaseSettings, PromptLogSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
+from tests.infrastructure.fresh_schema_snapshot import SHARED_TABLE_COLUMNS
 
 
 def _settings(tmp_path) -> RouterSettings:
@@ -1061,3 +1062,23 @@ def test_v1_check_writes_last_used_at_on_every_pass_while_the_key_check_waits_a_
             )
         assert repo.verify_api_key_context(api_key) is not None
         assert _stored_last_used_at(repo, context.api_key_id) != written_a_second_ago
+
+
+def test_a_fresh_database_has_exactly_the_snapshot_columns(tmp_path):
+    settings = _settings(tmp_path)
+    SqliteRouterRepository(settings.database.path, settings)
+
+    with sqlite3.connect(settings.database.path) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        columns = {
+            table: frozenset(row[1] for row in conn.execute(f"PRAGMA table_info({table})"))
+            for table in tables
+        }
+
+    # SQLite archives Prompt Logs in yearly files, so prompt_logs_archive is Postgres only.
+    assert columns == SHARED_TABLE_COLUMNS
