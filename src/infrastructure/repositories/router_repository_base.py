@@ -52,8 +52,7 @@ def _check_session_window(start: datetime, end: datetime) -> None:
 
 
 class RouterRepositoryBase(ABC):
-    # Every write into token_usage (live recording and both dialects' backfills) uses this
-    # column list, in this order.
+    # Live recording writes into token_usage with this column list, in this order.
     TOKEN_USAGE_INSERT = (
         "INSERT INTO token_usage("
         "user_id, class_id, session_id, model, api_endpoint, "

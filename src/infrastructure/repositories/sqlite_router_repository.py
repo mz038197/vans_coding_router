@@ -250,8 +250,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
-            # Upgrades yearly archive files written by older versions (columns added over time;
-            # token counts from #121). Keep indefinitely: old archive files stay on disk.
+            # Upgrades yearly archive files written by older versions: prompt_logs columns added
+            # since the archive began, and the token counts from #121. Keep indefinitely: old
+            # archive files stay on disk and are never migrated in bulk.
             self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "api_endpoint", "TEXT")

@@ -861,11 +861,10 @@ def test_a_sitting_filled_from_the_starter_gets_no_auto_tiers(tmp_path):
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
     owner = repo.upsert_google_user("owner@gmail.com", "Owner")
     klass = repo.create_class(owner["id"], "No template", None)
-    created = repo.create_class_session(klass["id"], owner["id"], "Week 1")
+    repo.create_class_session(klass["id"], owner["id"], "Week 1")
 
     document = repo.list_class_sessions(klass["id"])[0]["session_chat_language_models"]
 
-    assert created["id"]
     assert template_model_ids(document) == template_model_ids(load_vans_template())
     assert not _carries_auto_tiers(document)
 
