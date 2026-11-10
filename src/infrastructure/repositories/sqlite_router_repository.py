@@ -393,23 +393,35 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     archived_at TEXT NOT NULL,
                     message_preview TEXT,
-                    messages_json TEXT
+                    messages_json TEXT,
+                    api_endpoint TEXT,
+                    response_preview TEXT,
+                    tier_name TEXT,
+                    tier_confidence REAL,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # Upgrades yearly archive files written by older versions (columns added over time;
+            # token counts from #121). Keep indefinitely: old archive files stay on disk.
             self._ensure_column(conn, "prompt_logs_archive", "message_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "messages_json", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "api_endpoint", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "response_preview", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "tier_name", "TEXT")
             self._ensure_column(conn, "prompt_logs_archive", "tier_confidence", "REAL")
+            for token_column in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                self._ensure_column(conn, "prompt_logs_archive", token_column, "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """
                 INSERT INTO prompt_logs_archive(
                     id, user_id, class_id, session_id, raw_prompt, final_prompt, model, status,
                     client_ip, created_at, archived_at, message_preview, messages_json,
-                    api_endpoint, response_preview, tier_name, tier_confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    api_endpoint, response_preview, tier_name, tier_confidence,
+                    prompt_tokens, completion_tokens, total_tokens
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -429,6 +441,9 @@ class SqliteRouterRepository(RouterRepositoryBase):
                     row.get("response_preview") or "",
                     row.get("tier_name"),
                     row.get("tier_confidence"),
+                    row.get("prompt_tokens") or 0,
+                    row.get("completion_tokens") or 0,
+                    row.get("total_tokens") or 0,
                 ),
             )
             conn.commit()

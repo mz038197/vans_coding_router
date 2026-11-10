@@ -315,6 +315,63 @@ def test_archive_keeps_the_tier_name_and_confidence_in_an_older_archive_file(tmp
     assert rows == [("tiered", "進階", 0.92), ("untiered", None, None)]
 
 
+def _archive_two_logs_with_token_counts(tmp_path):
+    settings = RouterSettings(
+        database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
+        prompt_logs=PromptLogSettings(archive_after_days=15, delete_after_days=30),
+    )
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "Active", None)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+    repo.log_prompt(context, "counted", "counted", "fake-model", "ok", None, 12, 30, 42)
+    repo.log_prompt(context, "uncounted", "uncounted", "fake-model", "error", None)
+    with repo._connect() as conn:
+        conn.execute("UPDATE prompt_logs SET created_at = ?", ("2025-01-01T00:00:00+00:00",))
+
+    assert repo.archive_prompt_logs(now=datetime(2026, 6, 18, tzinfo=UTC), archive_after_days=15)["archived"] == 2
+
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        return conn.execute(
+            "SELECT raw_prompt, prompt_tokens, completion_tokens, total_tokens"
+            " FROM prompt_logs_archive ORDER BY raw_prompt"
+        ).fetchall()
+
+
+def test_archive_keeps_prompt_log_token_counts(tmp_path):
+    assert _archive_two_logs_with_token_counts(tmp_path) == [("counted", 12, 30, 42), ("uncounted", 0, 0, 0)]
+
+
+def test_archive_adds_token_columns_to_an_older_archive_file(tmp_path):
+    (tmp_path / "archive").mkdir()
+    with sqlite3.connect(tmp_path / "archive" / "archive_2025.db") as conn:
+        conn.execute(
+            """
+            CREATE TABLE prompt_logs_archive (
+                id INTEGER, user_id INTEGER, class_id INTEGER, session_id INTEGER,
+                raw_prompt TEXT NOT NULL, final_prompt TEXT NOT NULL, model TEXT NOT NULL,
+                status TEXT NOT NULL, client_ip TEXT, created_at TEXT NOT NULL,
+                archived_at TEXT NOT NULL, message_preview TEXT, messages_json TEXT,
+                api_endpoint TEXT, response_preview TEXT, tier_name TEXT, tier_confidence REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO prompt_logs_archive(id, raw_prompt, final_prompt, model, status, created_at, archived_at)"
+            " VALUES (999, 'already archived', 'already archived', 'fake-model', 'ok',"
+            " '2025-01-01T00:00:00+00:00', '2025-02-01T00:00:00+00:00')"
+        )
+
+    assert _archive_two_logs_with_token_counts(tmp_path) == [
+        ("already archived", 0, 0, 0),
+        ("counted", 12, 30, 42),
+        ("uncounted", 0, 0, 0),
+    ]
+
+
 def test_archive_prompt_logs_finishes_a_backlog_larger_than_one_batch(tmp_path):
     settings = RouterSettings(
         database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")),
@@ -950,8 +1007,8 @@ def test_upgrade_backfills_token_usage_from_ok_prompt_logs_live_and_archived(tmp
     SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))  # a later restart
 
     row = next(r for r in upgraded.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student["id"])
-    # The SQLite archive never stored token counts, so an archived log adds a request but no tokens.
-    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (1, 2, 3)
+    # The archive keeps token counts (#121), so the archived log adds its tokens, as on Postgres.
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"]) == (5, 6, 11)
     assert row["request_count"] == 2
     assert row["sessions"][0]["request_count"] == 2
 
