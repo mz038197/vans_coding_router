@@ -25,7 +25,7 @@ function extractNamedFunction(source, name) {
 }
 
 function load() {
-  const names = ["escapeHtml", "modelIdPrefix", "upstreamLogoHtml", "sessionModelListHtml"];
+  const names = ["escapeHtml", "modelIdPrefix", "upstreamLogoHtml", "shortModelName", "sessionModelListHtml"];
   const context = {};
   vm.createContext(context);
   vm.runInContext(names.map((name) => extractNamedFunction(portalHtml, name)).join("\n"), context);

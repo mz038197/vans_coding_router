@@ -945,6 +945,14 @@
       return `<i class="upstream-logo upstream-logo-${logo.file}" role="img" aria-label="${logo.label}"${title}></i>`;
     }
 
+    // A Model ID without its upstream, vendor, `cloud` suffix and last `:` (as a space).
+    function shortModelName(id) {
+      return id.slice(id.indexOf('@') + 1)
+        .replace(/^[^/]+\//, '')
+        .replace(/[:-]cloud$/, '')
+        .replace(/:([^:]+)$/, ' $1');
+    }
+
     // Chat models as a multi-column list, grouped by upstream (the Model ID's provider segment,
     // before `@`; 其他 when there is none). A teacher-given name is shown as written; otherwise a
     // short form of the upstream model id. The row's title (full id) is the only hover text.
@@ -955,12 +963,8 @@
         if (!groups.has(upstream)) groups.set(upstream, []);
         groups.get(upstream).push(model);
       }
-      const shortName = (id) => id.slice(id.indexOf('@') + 1)
-        .replace(/^[^/]+\//, '')
-        .replace(/[:-]cloud$/, '')
-        .replace(/:([^:]+)$/, ' $1');
       const rows = [...groups].flatMap(([upstream, group]) => group.map((model) => {
-        const name = model.name || shortName(model.id);
+        const name = model.name || shortModelName(model.id);
         return `<div class="session-model-row" title="${escapeHtml(model.id)}">${upstreamLogoHtml(upstream, { hover: false })}<span class="session-model-name">${escapeHtml(name)}</span></div>`;
       }));
       return `<div class="session-model-list">${rows.join('')}</div>`;
@@ -2643,8 +2647,22 @@
         : '最新紀錄';
     }
 
+    // The model that served a log, drawn like the sitting's model list: upstream logo, then the
+    // teacher-given name or the short id; the full id on hover. A rejected log reached no model.
+    function courseCardLogModelTag(item, session) {
+      const id = (item.model || '').trim();
+      if (!id || item.status === 'rejected') return '';
+      let name = '';
+      for (const provider of (session && session.session_chat_language_models) || []) {
+        const match = ((provider && provider.models) || []).find((model) => model && model.id === id);
+        if (match && match.name) { name = match.name; break; }
+      }
+      const logo = id.includes('@') ? upstreamLogoHtml(modelIdPrefix(id), { hover: false }) : '';
+      return ` <span class="tag course-card-log-model" title="${escapeHtml(id)}">${logo}<span class="session-model-name">${escapeHtml(name || shortModelName(id))}</span></span>`;
+    }
+
     // With a student filter the name is dropped, except on a log whose prompt merely mentions that Gmail.
-    function renderCourseCardLogs(items, filterKey) {
+    function renderCourseCardLogs(items, filterKey, session) {
       if (!items.length) return '<p class="hint">沒有紀錄</p>';
       return items.slice(0, COURSE_CARD_LOG_LIMIT).map((item) => {
         const own = filterKey && (item.user_email === filterKey || (!item.user_email && item.user_name === filterKey));
@@ -2652,7 +2670,7 @@
         const rejected = item.status === 'rejected' ? ' · <span class="course-card-rejected">rejected</span>' : '';
         return `<div class="course-card-log">
           <div class="course-card-log-text">${who}${escapeHtml(formatLogPreview(item))}</div>
-          <div class="meta">${escapeHtml(formatLocalDateTime(item.created_at))} · ${renderLogEndpointTag(item)} · ${formatTokenCount(item.total_tokens)}${rejected}</div>
+          <div class="meta">${escapeHtml(formatLocalDateTime(item.created_at))} · ${renderLogEndpointTag(item)}${courseCardLogModelTag(item, session)} · ${formatTokenCount(item.total_tokens)}${rejected}</div>
         </div>`;
       }).join('');
     }
@@ -2674,7 +2692,7 @@
       try {
         const payload = await api(`/teacher/classes/${classId}/prompt-logs?${params.toString()}`);
         const target = document.getElementById(`course-card-logs-${sessionId}`);
-        if (target) target.innerHTML = renderCourseCardLogs(payload.items || [], filter ? filter.email : '');
+        if (target) target.innerHTML = renderCourseCardLogs(payload.items || [], filter ? filter.email : '', session);
       } catch (err) {
         const target = document.getElementById(`course-card-logs-${sessionId}`);
         if (target) target.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
