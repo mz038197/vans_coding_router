@@ -197,6 +197,8 @@ function loadCourseCardLogs() {
     "modelIdPrefix",
     "upstreamLogoHtml",
     "shortModelName",
+    "modelLabelHtml",
+    "sessionModels",
     "courseCardLogModelTag",
     "renderCourseCardLogs",
   ];
@@ -246,4 +248,21 @@ test("a rejected log reached no model, so it has no model tag", () => {
   const html = renderCourseCardLogs([logRow("vcr-auto", { status: "rejected" })], "", namedSession);
   assert.doesNotMatch(html, /course-card-log-model/);
   assert.match(html, /rejected/);
+});
+
+test("a log without a model has no model tag", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const html = renderCourseCardLogs([logRow(""), logRow(null)], "", namedSession);
+  assert.doesNotMatch(html, /course-card-log-model/);
+});
+
+test("a model on a shelf, such as the image shelf, still shows its teacher-given name", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const session = {
+    session_chat_language_models: [
+      { provider: "openrouter", models: [{ id: "openrouter@black-forest-labs/flux.2-pro", name: "Flux Pro", imageShelf: true }] },
+    ],
+  };
+  const html = renderCourseCardLogs([logRow("openrouter@black-forest-labs/flux.2-pro")], "", session);
+  assert.match(html, />Flux Pro</);
 });

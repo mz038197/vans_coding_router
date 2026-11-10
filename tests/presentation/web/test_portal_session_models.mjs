@@ -25,7 +25,7 @@ function extractNamedFunction(source, name) {
 }
 
 function load() {
-  const names = ["escapeHtml", "modelIdPrefix", "upstreamLogoHtml", "shortModelName", "sessionModelListHtml"];
+  const names = ["escapeHtml", "modelIdPrefix", "upstreamLogoHtml", "shortModelName", "modelLabelHtml", "sessionModelListHtml"];
   const context = {};
   vm.createContext(context);
   vm.runInContext(names.map((name) => extractNamedFunction(portalHtml, name)).join("\n"), context);
@@ -36,7 +36,7 @@ function load() {
 function rows(html) {
   return [...html.matchAll(/<div class="session-model-row" title="([^"]*)">([\s\S]*?)<\/div>/g)].map(([, title, inner]) => {
     const logo = inner.match(/aria-label="([^"]*)"/)?.[1] ?? inner.match(/session-model-upstream">([^<]*)</)?.[1];
-    const name = inner.match(/<span class="session-model-name">([^<]*)<\/span>/)?.[1];
+    const name = inner.match(/<span class="model-label-name">([^<]*)<\/span>/)?.[1];
     return [logo, name, title];
   });
 }
