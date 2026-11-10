@@ -453,21 +453,6 @@ class RouterRepositoryBase(ABC):
             return
         conn.executemany(sql, params)
 
-    def _insert_or_ignore_user_role(self, conn: Any, user_id: int, role: str, granted_at: str) -> None:
-        if self.dialect == "postgres":
-            conn.execute(
-                self._sql(
-                    "INSERT INTO user_roles(user_id, role, granted_at) VALUES (?, ?, ?) "
-                    "ON CONFLICT (user_id, role) DO NOTHING"
-                ),
-                (user_id, role, granted_at),
-            )
-            return
-        conn.execute(
-            self._sql("INSERT OR IGNORE INTO user_roles(user_id, role, granted_at) VALUES (?, ?, ?)"),
-            (user_id, role, granted_at),
-        )
-
     def _insert_or_ignore_redemption(self, conn: Any, session_id: int, user_id: int, redeemed_at: str) -> None:
         if self.dialect == "postgres":
             conn.execute(
@@ -514,53 +499,6 @@ class RouterRepositoryBase(ABC):
         cur = conn.execute(self._sql(query), params)
         return int(cur.lastrowid)
 
-    def _backfill_user_roles(self, conn: Any) -> None:
-        now = dt(utc_now())
-        rows = conn.execute(self._sql("SELECT id, role FROM users")).fetchall()
-        for row in rows:
-            roles = self._roles_for_legacy_role(row["role"])
-            for role in roles:
-                self._insert_or_ignore_user_role(conn, int(row["id"]), role, now or "")
-
-    def _backfill_ended_session_expires(self, conn: Any) -> None:
-        """Align legacy status=ended rows so expires_at is the lifecycle truth."""
-        now = utc_now()
-        now_s = dt(now)
-        rows = conn.execute(
-            self._sql("SELECT id, expires_at FROM class_sessions WHERE status = 'ended'")
-        ).fetchall()
-        for row in rows:
-            expires = parse_dt(row["expires_at"])
-            if expires is None:
-                continue
-            if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=UTC)
-            if expires <= now:
-                continue
-            session_id = int(row["id"])
-            conn.execute(
-                self._sql("UPDATE class_sessions SET expires_at = ? WHERE id = ?"),
-                (now_s, session_id),
-            )
-            conn.execute(
-                self._sql("UPDATE api_keys SET expires_at = ? WHERE session_id = ?"),
-                (now_s, session_id),
-            )
-
-    def _backfill_session_chat_language_models(self, conn: Any) -> None:
-        document_json = self._starter_sitting_json()
-        conn.execute(
-            self._sql(
-                """
-                UPDATE class_sessions
-                SET session_chat_language_models_json = ?
-                WHERE session_chat_language_models_json IS NULL
-                   OR session_chat_language_models_json = ''
-                """
-            ),
-            (document_json,),
-        )
-
     def _starter_template_json(self) -> str:
         from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 
@@ -587,18 +525,6 @@ class RouterRepositoryBase(ABC):
             ),
             (user_id, self._starter_template_json(), dt(utc_now())),
         )
-
-    def _backfill_router_model_templates(self, conn: Any) -> None:
-        rows = conn.execute(
-            self._sql(
-                """
-                SELECT DISTINCT user_id FROM user_roles
-                WHERE role IN ('teacher', 'admin')
-                """
-            )
-        ).fetchall()
-        for row in rows:
-            self._ensure_router_model_template(conn, int(row["user_id"]), ("teacher",))
 
     def get_router_model_template(self, user_id: int) -> list[Any] | None:
         with self._connect() as conn:
@@ -1139,13 +1065,6 @@ class RouterRepositoryBase(ABC):
         stored = data.get("decision_model")
         data["decision_model"] = stored if isinstance(stored, str) else ""
         return data
-
-    def _migrate_to_session_windows(self, conn: Any) -> None:
-        """ADR 0091: every sitting has a start, and nothing stores a class length any more."""
-        conn.execute(
-            self._sql("UPDATE class_sessions SET session_at = created_at WHERE session_at IS NULL OR session_at = ''")
-        )
-        conn.execute(self._sql("DELETE FROM runtime_settings WHERE key = 'student_default_ttl_hours'"))
 
     def _session_status_for_expires(self, expires: datetime, now: datetime | None = None) -> str:
         current = now or utc_now()
@@ -1850,23 +1769,6 @@ class RouterRepositoryBase(ABC):
                     dt(utc_now()),
                 ),
             )
-
-    def _backfill_token_usage_from_prompt_logs(self, conn: Any) -> None:
-        """Run once, when the token_usage table is first created.
-
-        Copies every successful live Prompt Log. Each dialect copies its archive separately.
-        """
-        conn.execute(
-            f"""
-            {self.TOKEN_USAGE_INSERT}
-            SELECT user_id, class_id, session_id, model, COALESCE(api_endpoint, ''),
-                   COALESCE(prompt_tokens, 0), COALESCE(completion_tokens, 0),
-                   COALESCE(total_tokens, 0), created_at
-            FROM prompt_logs
-            WHERE status = 'ok' AND user_id IS NOT NULL
-            ORDER BY created_at, id
-            """
-        )
 
     def class_usage(self, teacher_id: int, class_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:

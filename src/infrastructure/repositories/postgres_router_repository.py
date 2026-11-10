@@ -88,7 +88,21 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
                     session_at TEXT,
-                    name TEXT
+                    name TEXT,
+                    image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    tts_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    speech_transcription_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    decision_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    decision_model_allowlist_json TEXT,
+                    decision_model TEXT NOT NULL DEFAULT '',
+                    prompt_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []
+',
+                    seat_limit INTEGER NOT NULL DEFAULT 60,
+                    model_allowlist_json TEXT,
+                    session_chat_language_models_json TEXT,
+                    classroom_model_choice TEXT
                 )
                 """
             )
@@ -133,6 +147,13 @@ class PostgresRouterRepository(RouterRepositoryBase):
             )
             conn.execute(
                 """
+                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
+                ON class_members(class_id, classroom_nickname)
+                WHERE classroom_nickname IS NOT NULL
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS prompt_logs (
                     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     user_id INTEGER REFERENCES users(id),
@@ -148,7 +169,11 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     client_ip TEXT,
                     created_at TEXT NOT NULL,
                     message_preview TEXT,
-                    messages_json TEXT
+                    messages_json TEXT,
+                    api_endpoint TEXT,
+                    response_preview TEXT,
+                    tier_name TEXT,
+                    tier_confidence DOUBLE PRECISION
                 )
                 """
             )
@@ -170,19 +195,13 @@ class PostgresRouterRepository(RouterRepositoryBase):
                     created_at TEXT NOT NULL,
                     archived_at TEXT NOT NULL,
                     message_preview TEXT,
-                    messages_json TEXT
+                    messages_json TEXT,
+                    api_endpoint TEXT,
+                    response_preview TEXT,
+                    tier_name TEXT,
+                    tier_confidence DOUBLE PRECISION
                 )
                 """
-            )
-            self._backfill_user_roles(conn)
-            self._backfill_ended_session_expires(conn)
-            for table in ("prompt_logs", "prompt_logs_archive"):
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS api_endpoint TEXT")
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS response_preview TEXT")
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_name TEXT")
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tier_confidence DOUBLE PRECISION")
-            token_usage_is_new = (
-                conn.execute("SELECT to_regclass('token_usage') AS t").fetchone()["t"] is None
             )
             conn.execute(
                 """
@@ -203,58 +222,6 @@ class PostgresRouterRepository(RouterRepositoryBase):
             conn.execute("CREATE INDEX IF NOT EXISTS token_usage_class_user ON token_usage(class_id, user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS token_usage_session_user ON token_usage(session_id, user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS token_usage_user ON token_usage(user_id)")
-            if token_usage_is_new:
-                self._backfill_token_usage_from_prompt_logs(conn)
-                self._backfill_token_usage_from_archive(conn)
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS image_generation_enabled BOOLEAN NOT NULL DEFAULT TRUE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS tts_enabled BOOLEAN NOT NULL DEFAULT TRUE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS speech_transcription_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS decision_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS decision_model_allowlist_json TEXT"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS decision_model TEXT NOT NULL DEFAULT ''"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS prompt_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS course_catalog_yaml TEXT NOT NULL DEFAULT 'actions: []\n'"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS seat_limit INTEGER NOT NULL DEFAULT 60"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS model_allowlist_json TEXT"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS session_chat_language_models_json TEXT"
-            )
-            conn.execute(
-                "ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS classroom_model_choice TEXT"
-            )
-            self._backfill_session_chat_language_models(conn)
-            conn.execute("ALTER TABLE class_members ADD COLUMN IF NOT EXISTS classroom_nickname TEXT")
-            conn.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS class_members_classroom_nickname
-                ON class_members(class_id, classroom_nickname)
-                WHERE classroom_nickname IS NOT NULL
-                """
-            )
-            conn.commit()
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS portal_sessions (
@@ -308,12 +275,6 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 "CREATE INDEX IF NOT EXISTS agent_action_audits_target ON agent_action_audits(class_id, session_id)"
             )
             conn.execute(
-                "ALTER TABLE agent_action_audits ALTER COLUMN class_id DROP NOT NULL"
-            )
-            conn.execute(
-                "ALTER TABLE agent_action_audits ALTER COLUMN session_id DROP NOT NULL"
-            )
-            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
@@ -322,8 +283,6 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
-            self._migrate_to_session_windows(conn)
-            conn.execute("ALTER TABLE classes DROP COLUMN IF EXISTS api_key_ttl_hours")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS extension_handoff_nonces (
@@ -341,22 +300,6 @@ class PostgresRouterRepository(RouterRepositoryBase):
                 )
                 """
             )
-            self._backfill_router_model_templates(conn)
-
-    def _backfill_token_usage_from_archive(self, conn: Any) -> None:
-        """Copy successful archived Prompt Logs; skip a row still in the live table."""
-        conn.execute(
-            f"""
-            {self.TOKEN_USAGE_INSERT}
-            SELECT a.user_id, a.class_id, a.session_id, a.model, COALESCE(a.api_endpoint, ''),
-                   COALESCE(a.prompt_tokens, 0), COALESCE(a.completion_tokens, 0),
-                   COALESCE(a.total_tokens, 0), a.created_at
-            FROM prompt_logs_archive a
-            WHERE a.status = 'ok' AND a.user_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM prompt_logs l WHERE l.id = a.id)
-            ORDER BY a.created_at, a.id
-            """
-        )
 
     def _archive_prompt_log_batch(self, cutoff: str, archived_at: datetime, limit: int) -> int:
         with self._connect() as conn:
