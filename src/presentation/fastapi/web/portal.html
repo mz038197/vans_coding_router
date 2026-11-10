@@ -895,15 +895,18 @@
       </div>`;
     }
 
-    function sessionChatLanguageModelsCount(session) {
+    // Every model with a Model ID in the sitting's Session Chat Language Models, shelves included.
+    function sessionModels(session) {
       const document = session.session_chat_language_models;
-      if (!Array.isArray(document)) return 0;
-      let count = 0;
-      for (const provider of document) {
+      if (!Array.isArray(document)) return [];
+      return document.flatMap((provider) => {
         const models = provider && provider.models;
-        if (Array.isArray(models)) count += models.filter((model) => model && model.id).length;
-      }
-      return count;
+        return Array.isArray(models) ? models.filter((model) => model && typeof model.id === 'string' && model.id) : [];
+      });
+    }
+
+    function sessionChatLanguageModelsCount(session) {
+      return sessionModels(session).length;
     }
 
     function sessionModelAllowlistLabel(session) {
@@ -920,16 +923,8 @@
     }
 
     function sessionTextModels(session) {
-      const rows = [];
       const shelfFlags = ['decisionShelf', 'imageShelf', 'embeddingsShelf', 'speechShelf', 'speechTranscriptionShelf'];
-      for (const provider of session.session_chat_language_models || []) {
-        for (const model of (provider && provider.models) || []) {
-          if (!model || !model.id) continue;
-          if (shelfFlags.some((flag) => model[flag] === true)) continue;
-          rows.push(model);
-        }
-      }
-      return rows;
+      return sessionModels(session).filter((model) => !shelfFlags.some((flag) => model[flag] === true));
     }
 
     // An upstream's logo, named for screen readers (and on hover unless `hover` is false, so a
@@ -945,6 +940,21 @@
       return `<i class="upstream-logo upstream-logo-${logo.file}" role="img" aria-label="${logo.label}"${title}></i>`;
     }
 
+    // A Model ID without its upstream, vendor, `cloud` suffix and last `:` (as a space).
+    function shortModelName(id) {
+      return id.slice(id.indexOf('@') + 1)
+        .replace(/^[^/]+\//, '')
+        .replace(/[:-]cloud$/, '')
+        .replace(/:([^:]+)$/, ' $1');
+    }
+
+    // A model as the sitting's model list draws it: the upstream's logo (none when `upstream` is
+    // empty), then the teacher-given `name` or the short Model ID. The caller puts the full id on hover.
+    function modelLabelHtml(upstream, id, name) {
+      const logo = upstream ? upstreamLogoHtml(upstream, { hover: false }) : '';
+      return `${logo}<span class="model-label-name">${escapeHtml(name || shortModelName(id))}</span>`;
+    }
+
     // Chat models as a multi-column list, grouped by upstream (the Model ID's provider segment,
     // before `@`; 其他 when there is none). A teacher-given name is shown as written; otherwise a
     // short form of the upstream model id. The row's title (full id) is the only hover text.
@@ -955,14 +965,9 @@
         if (!groups.has(upstream)) groups.set(upstream, []);
         groups.get(upstream).push(model);
       }
-      const shortName = (id) => id.slice(id.indexOf('@') + 1)
-        .replace(/^[^/]+\//, '')
-        .replace(/[:-]cloud$/, '')
-        .replace(/:([^:]+)$/, ' $1');
-      const rows = [...groups].flatMap(([upstream, group]) => group.map((model) => {
-        const name = model.name || shortName(model.id);
-        return `<div class="session-model-row" title="${escapeHtml(model.id)}">${upstreamLogoHtml(upstream, { hover: false })}<span class="session-model-name">${escapeHtml(name)}</span></div>`;
-      }));
+      const rows = [...groups].flatMap(([upstream, group]) => group.map((model) => (
+        `<div class="session-model-row" title="${escapeHtml(model.id)}">${modelLabelHtml(upstream, model.id, model.name)}</div>`
+      )));
       return `<div class="session-model-list">${rows.join('')}</div>`;
     }
 
@@ -2643,8 +2648,18 @@
         : '最新紀錄';
     }
 
+    // The model that served a log, drawn like the sitting's model list: upstream logo, then the
+    // teacher-given name or the short id; the full id on hover. A rejected log reached no model.
+    function courseCardLogModelTag(item, session) {
+      const id = (item.model || '').trim();
+      if (!id || item.status === 'rejected') return '';
+      const named = session ? sessionModels(session).find((model) => model.id === id && model.name) : null;
+      const upstream = id.includes('@') ? modelIdPrefix(id) : '';
+      return ` <span class="tag course-card-log-model" title="${escapeHtml(id)}">${modelLabelHtml(upstream, id, named && named.name)}</span>`;
+    }
+
     // With a student filter the name is dropped, except on a log whose prompt merely mentions that Gmail.
-    function renderCourseCardLogs(items, filterKey) {
+    function renderCourseCardLogs(items, filterKey, session) {
       if (!items.length) return '<p class="hint">沒有紀錄</p>';
       return items.slice(0, COURSE_CARD_LOG_LIMIT).map((item) => {
         const own = filterKey && (item.user_email === filterKey || (!item.user_email && item.user_name === filterKey));
@@ -2652,7 +2667,7 @@
         const rejected = item.status === 'rejected' ? ' · <span class="course-card-rejected">rejected</span>' : '';
         return `<div class="course-card-log">
           <div class="course-card-log-text">${who}${escapeHtml(formatLogPreview(item))}</div>
-          <div class="meta">${escapeHtml(formatLocalDateTime(item.created_at))} · ${renderLogEndpointTag(item)} · ${formatTokenCount(item.total_tokens)}${rejected}</div>
+          <div class="meta">${escapeHtml(formatLocalDateTime(item.created_at))} · ${renderLogEndpointTag(item)}${courseCardLogModelTag(item, session)} · ${formatTokenCount(item.total_tokens)}${rejected}</div>
         </div>`;
       }).join('');
     }
@@ -2674,7 +2689,7 @@
       try {
         const payload = await api(`/teacher/classes/${classId}/prompt-logs?${params.toString()}`);
         const target = document.getElementById(`course-card-logs-${sessionId}`);
-        if (target) target.innerHTML = renderCourseCardLogs(payload.items || [], filter ? filter.email : '');
+        if (target) target.innerHTML = renderCourseCardLogs(payload.items || [], filter ? filter.email : '', session);
       } catch (err) {
         const target = document.getElementById(`course-card-logs-${sessionId}`);
         if (target) target.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
@@ -3381,13 +3396,7 @@ snippets:
     }
 
     function sessionHasShelf(session, flag) {
-      for (const provider of session.session_chat_language_models || []) {
-        for (const model of (provider && provider.models) || []) {
-          if (!model || model[flag] !== true || typeof model.id !== 'string' || !model.id) continue;
-          return true;
-        }
-      }
-      return false;
+      return sessionModels(session).some((model) => model[flag] === true);
     }
 
     function sessionPromptLoggingEnabled(session) {

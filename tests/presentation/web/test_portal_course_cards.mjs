@@ -189,3 +189,80 @@ test("a click on the pencil, the status tag or the rename input does not toggle 
 test("while a rename is open, a click on the summary row does not toggle the card", () => {
   assert.deepEqual(summaryClick({ renaming: true }), []);
 });
+
+// A Course Card's latest logs: each log's meta row names the model that served it.
+function loadCourseCardLogs() {
+  const names = [
+    "escapeHtml",
+    "modelIdPrefix",
+    "upstreamLogoHtml",
+    "shortModelName",
+    "modelLabelHtml",
+    "sessionModels",
+    "courseCardLogModelTag",
+    "renderCourseCardLogs",
+  ];
+  const context = {
+    COURSE_CARD_LOG_LIMIT: 10,
+    formatLogPreview: (item) => item.message_preview || "",
+    formatLocalDateTime: () => "TIME",
+    formatTokenCount: (value) => String(value),
+    renderLogEndpointTag: () => "<span class=\"tag\">responses</span>",
+  };
+  vm.createContext(context);
+  vm.runInContext(names.map((name) => extractNamedFunction(portalHtml, name)).join("\n"), context);
+  return context;
+}
+
+const namedSession = {
+  session_chat_language_models: [
+    { provider: "openrouter", models: [{ id: "openrouter@z-ai/glm-5.3-flash", name: "GLM 5.3 Flash - OR" }] },
+  ],
+};
+
+function logRow(model, extra = {}) {
+  return { user_name: "Vans", message_preview: "hi", created_at: "x", total_tokens: 634, status: "ok", model, ...extra };
+}
+
+test("a log served by a model the teacher named shows its upstream logo and that name, full id on hover", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const html = renderCourseCardLogs([logRow("openrouter@z-ai/glm-5.3-flash")], "", namedSession);
+  assert.match(html, /upstream-logo-openrouter/);
+  assert.match(html, />GLM 5\.3 Flash - OR</);
+  assert.match(html, /title="openrouter@z-ai\/glm-5\.3-flash"/);
+});
+
+test("a log served by a model the teacher did not name shows the short form of its id", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const html = renderCourseCardLogs(
+    [logRow("ollama_cloud@deepseek-v4.1-flash:1017"), logRow("openrouter@minimax/minimax-m3")],
+    "",
+    namedSession,
+  );
+  assert.match(html, /upstream-logo-ollama[^]*>deepseek-v4\.1-flash 1017</);
+  assert.match(html, /upstream-logo-openrouter[^]*>minimax-m3</);
+});
+
+test("a rejected log reached no model, so it has no model tag", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const html = renderCourseCardLogs([logRow("vcr-auto", { status: "rejected" })], "", namedSession);
+  assert.doesNotMatch(html, /course-card-log-model/);
+  assert.match(html, /rejected/);
+});
+
+test("a log without a model has no model tag", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const html = renderCourseCardLogs([logRow(""), logRow(null)], "", namedSession);
+  assert.doesNotMatch(html, /course-card-log-model/);
+});
+
+test("a model on a shelf, such as the image shelf, still shows its teacher-given name", () => {
+  const { renderCourseCardLogs } = loadCourseCardLogs();
+  const session = {
+    session_chat_language_models: [
+      { provider: "openrouter", models: [{ id: "openrouter@black-forest-labs/flux.2-pro", name: "Flux Pro", imageShelf: true }] },
+    ],
+  };
+  const html = renderCourseCardLogs([logRow("openrouter@black-forest-labs/flux.2-pro")], "", session);
+  assert.match(html, />Flux Pro</);
+});

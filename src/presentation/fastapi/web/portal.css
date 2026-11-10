@@ -2663,7 +2663,7 @@
       font-size: 14px;
     }
     .session-model-row { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 20px; }
-    .session-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .model-label-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-model-upstream { flex: none; font-size: 12px; color: var(--text-muted); }
 
     /* Upstream logos: monochrome through a mask, so they follow the text colour in light and dark. */
@@ -2797,6 +2797,14 @@
     .course-card-log-text { overflow-wrap: anywhere; }
     .course-card-log .meta { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
     .course-card-log .meta .tag { font-size: 12px; padding: 0 4px; }
+    .course-card-log .meta .course-card-log-model {
+      gap: 4px;
+      max-width: 220px;
+      vertical-align: bottom;
+      background: var(--surface-3);
+      color: var(--text-primary);
+    }
+    .course-card-log-model .upstream-logo { width: 12px; height: 12px; }
     .course-card-rejected { color: var(--danger); }
     /* Stack the halves when the card itself is narrow (laptop with the rail open, tablet, phone). */
     .course-card { container-type: inline-size; }
