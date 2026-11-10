@@ -128,8 +128,10 @@ def test_a_timed_out_portion_stays_unavailable_and_saved_models_stay_editable(tm
     openrouter = gateway.gateways["openrouter"]
     original = openrouter.models
 
+    slow_fetch_sec = 60
+
     async def slow_models(*args, **kwargs):
-        await asyncio.sleep(2)
+        await asyncio.sleep(slow_fetch_sec)
         return await original(*args, **kwargs)
 
     openrouter.models = slow_models
@@ -140,7 +142,9 @@ def test_a_timed_out_portion_stays_unavailable_and_saved_models_stay_editable(tm
         providers=_classroom_providers(),
         catalog_fetch_timeout_sec=0.05,
     )
-    assert time.monotonic() - started < 1
+    # Startup gave up at the 0.05s timeout instead of waiting out the slow fetch.
+    # The bound is loose so a busy full-suite run does not trip it.
+    assert time.monotonic() - started < 10
     teacher, klass, session = _owner_session(repo)
     cookies = _portal_cookie(repo, teacher["id"])
 
