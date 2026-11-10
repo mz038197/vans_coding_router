@@ -1108,11 +1108,16 @@
     }
 
     function renderActiveKeysSection(keys) {
+      renderActiveKeysRows(keys);
+      setActiveKeysCollapsed(true);
+    }
+
+    // Rows and count only: leaves the section open or collapsed as the user left it.
+    function renderActiveKeysRows(keys) {
       const items = keys || [];
       const countEl = document.getElementById('activeKeysCount');
       if (countEl) countEl.textContent = String(items.length);
       document.getElementById('keys').innerHTML = renderActiveKeysTable(items);
-      setActiveKeysCollapsed(true);
     }
 
     function renderTeacherKeyMeta(keys) {
@@ -5387,9 +5392,17 @@ snippets:
       if (adminHost && !adminHost.classList.contains('hidden')) {
         await loadAdminClassSessions(classId);
       }
-      if (typeof refresh === 'function') {
-        try { await refresh(); } catch (_) { /* ignore */ }
-      }
+      // No full refresh(): it rebuilds the course detail panel and loses the teacher's place.
+      // Only the other views that show this sitting's name, window or status re-render.
+      // The save already succeeded, so a failure here must not surface as a save error.
+      try {
+        const monitorClass = document.getElementById('monitorClassId');
+        if (monitorClass && monitorClass.value === String(classId)) {
+          await syncMonitorSessionSelect(classId);
+        }
+        const me = await api('/auth/me');
+        renderActiveKeysRows(me.keys || []);
+      } catch (_) { /* ignore */ }
     }
 
     async function loadAdminClassSessions(classId) {
