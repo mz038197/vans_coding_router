@@ -35,12 +35,19 @@ from src.domain.errors import (
 )
 from src.domain.extra_usage import is_anthropic_credit_exhaustion
 from src.infrastructure.config import ProviderSettings, resolve_provider_api_keys
+from src.infrastructure.gateways.anthropic_thinking_envelope import (
+    AssistantRound,
+    encode_thinking_envelope,
+    replay_assistant_rounds,
+)
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
 
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_VERSION = "2026-10-21"
+# Lets every request ask Anthropic to drop an invalid thinking block instead of failing (ADR 0093).
+THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 DEFAULT_MAX_TOKENS = 32000
 _MESSAGES_PATH = "/messages"
 _MODELS_PATH = "/models"
@@ -310,6 +317,7 @@ class AnthropicGateway:
                                     raise self._stream_error(event)
                                 if _stop_reason(event) == "refusal":
                                     raise self._refusal_stop_error()
+                                _log_input_transformations(event, payload.get("model"))
                                 yield event
                             return
                 except httpx.RequestError as exc:
@@ -325,6 +333,7 @@ class AnthropicGateway:
             **self.provider.extra_headers,
             "x-api-key": api_key,
             "anthropic-version": ANTHROPIC_VERSION,
+            "anthropic-beta": THINKING_BINDING_BETA,
         }
 
     def _exhausted_keys_error(self, pool: UpstreamKeyPool) -> UpstreamServiceError:
@@ -363,6 +372,32 @@ def _stop_reason(event: dict[str, Any]) -> str | None:
         return None
     delta = event.get("delta")
     return str(delta["stop_reason"]) if isinstance(delta, dict) and delta.get("stop_reason") else None
+
+
+def _log_input_transformations(event: dict[str, Any], model: Any) -> None:
+    """Log each change Anthropic made to the input (a dropped thinking block and why); never stored.
+
+    ``message_start`` carries the array on its message; after a server-side fallback the final
+    ``message_delta`` carries it again with the serving model's entries.
+    """
+    kind = event.get("type")
+    if kind == "message_start":
+        holder = event.get("message")
+    elif kind == "message_delta":
+        holder = event
+    else:
+        return
+    entries = holder.get("input_transformations") if isinstance(holder, dict) else None
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        reason = entry.get("reason") if isinstance(entry, dict) else None
+        logger.warning(
+            "anthropic_input_transformation model=%s reason=%s entry=%s",
+            model,
+            reason,
+            json.dumps(entry, ensure_ascii=False)[:500],
+        )
 
 
 _STREAM_ERROR_STATUS = {
@@ -452,12 +487,9 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw_input, str):
         _append_message(messages, "user", [_text_block(raw_input)])
     elif isinstance(raw_input, list):
-        for item in raw_input:
-            role, blocks = _responses_item_to_blocks(item)
-            if role == "system":
-                system_parts.extend(block["text"] for block in blocks)
-            else:
-                _append_message(messages, role, blocks)
+        turns = _responses_turns(raw_input)
+        system_parts.extend(block["text"] for role, blocks in turns if role == "system" for block in blocks)
+        _append_replayed_turns(messages, [turn for turn in turns if turn[0] != "system"], model=str(body.get("model") or ""))
 
     payload: dict[str, Any] = {
         "model": body.get("model"),
@@ -467,7 +499,7 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
         # Automatic prompt caching: Anthropic places the breakpoint on the last cacheable block.
         "cache_control": {"type": "ephemeral"},
         # The summary text becomes the Responses reasoning summary (Responses Reasoning Projection).
-        "thinking": {"type": "adaptive", "display": "summarized"},
+        "thinking": thinking_config(),
     }
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
@@ -494,6 +526,16 @@ _CLAUDE_EFFORT = {
     "xhigh": "xhigh",
     "max": "max",
 }
+
+
+def thinking_config() -> dict[str, Any]:
+    """Thinking for every Messages request: summarized adaptive thinking, and a thinking block that
+    no longer matches its prefix is dropped rather than failing the request (ADR 0093)."""
+    return {
+        "type": "adaptive",
+        "display": "summarized",
+        "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+    }
 
 
 def _claude_effort(value: Any) -> str | None:
@@ -533,6 +575,57 @@ def _anthropic_tools(raw_tools: Any) -> list[dict[str, Any]]:
         translated["input_schema"] = parameters if isinstance(parameters, dict) else {"type": "object"}
         tools.append(translated)
     return tools
+
+
+def _responses_turns(items: list[Any]) -> list[tuple[str, Any]]:
+    """Responses input items as turns: ``("system" | "user", blocks)`` or ``("assistant", AssistantRound)``.
+
+    A round is one assistant reply: the run of assistant items (reasoning, message, function_call)
+    between other turns. A reasoning item opens a new round, since every reply this router makes
+    starts with one; its ``encrypted_content`` is the round's envelope and its summary is ignored.
+    """
+    turns: list[tuple[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict) and item.get("type") == "reasoning":
+            turns.append(("assistant", AssistantRound(envelope=item.get("encrypted_content"))))
+            continue
+        role, blocks = _responses_item_to_blocks(item)
+        if role == "assistant":
+            if not turns or turns[-1][0] != "assistant":
+                turns.append(("assistant", AssistantRound()))
+            turns[-1][1].blocks.extend(blocks)
+        else:
+            turns.append((role, blocks))
+    return turns
+
+
+def _append_replayed_turns(messages: list[dict[str, Any]], turns: list[tuple[str, Any]], *, model: str) -> None:
+    """Append user and assistant turns, rebuilding assistant rounds from their envelopes (ADR 0093).
+
+    ``turns`` hold ``(role, blocks)`` for user turns and ``("assistant", AssistantRound)`` for rounds.
+    """
+    rounds = [value for role, value in turns if role == "assistant"]
+    replayed = replay_assistant_rounds(rounds, model=model)
+    if rounds:
+        logger.info(
+            "anthropic_thinking_replay model=%s rounds=%s rebuilt=%s",
+            model,
+            len(rounds),
+            replayed.rebuilt,
+        )
+    position = 0
+    for role, value in turns:
+        if role == "assistant":
+            _append_message(messages, "assistant", replayed.content[position])
+            position += 1
+        else:
+            _append_message(messages, role, [_repair_tool_result(block, replayed.tool_use_ids) for block in value])
+
+
+def _repair_tool_result(block: dict[str, Any], tool_use_ids: dict[str, str]) -> dict[str, Any]:
+    if block.get("type") == "tool_result" and block.get("tool_use_id") in tool_use_ids:
+        return {**block, "tool_use_id": tool_use_ids[block["tool_use_id"]]}
+    return block
 
 
 def _responses_item_to_blocks(item: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -772,12 +865,12 @@ def responses_reply_from_message(
     output: list[dict[str, Any]] = []
     for kind in _output_kinds(message):
         if kind == "thinking":
-            output.append(_responses_reasoning_item(message))
+            output.append(_responses_reasoning_item(message, model=model))
         elif kind == "text":
             output.append(_responses_message_item(message))
         else:
             output.append(_responses_function_call_item(message, _tool_block_index(kind)))
-    if not output:
+    if len(output) == 1:
         output.append(_responses_message_item(message))
     incomplete = message.stop_reason == "max_tokens"
     return {
@@ -815,7 +908,9 @@ class ResponsesStream:
         self.message.apply(event)
         kind = event.get("type")
         if kind == "message_start":
-            return [self._event("response.created", response=self._response_shell())]
+            # The reasoning item always comes first: it carries the round's envelope (ADR 0093).
+            created = self._event("response.created", response=self._response_shell())
+            return [created, *self._open_item("thinking")]
         if kind == "content_block_start":
             return self._block_started(event)
         if kind == "content_block_delta":
@@ -849,6 +944,8 @@ class ResponsesStream:
     def finish(self) -> list[dict[str, Any]]:
         reply = responses_reply_from_message(self.message, model=self.model, created_at=self._created_at)
         if self._notice:
+            # A round cut short is not one Claude can continue from: no envelope for it.
+            reply["output"][0].pop("encrypted_content", None)
             messages = [item for item in reply["output"] if item["type"] == "message"]
             if not messages:
                 messages = [_responses_message_item(self.message)]
@@ -1005,13 +1102,14 @@ def _encode_responses_event(event: dict[str, Any]) -> bytes:
 
 
 def _output_kinds(message: AnthropicMessage) -> list[str]:
-    """Output item kinds in first-arrival order. All thinking blocks share one reasoning item
-    (one summary part each); all text blocks share one assistant message item; each tool_use
-    block is its own function_call item, keyed ``tool:<block index>``."""
-    kinds: list[str] = []
+    """Output item kinds: the reasoning item first (it carries the round's envelope, ADR 0093),
+    then the rest in first-arrival order. All thinking blocks share the reasoning item (one summary
+    part each); all text blocks share one assistant message item; each tool_use block is its own
+    function_call item, keyed ``tool:<block index>``."""
+    kinds: list[str] = ["thinking"]
     for index, block in enumerate(message.content):
         kind = block.get("type")
-        if kind in ("thinking", "text") and kind not in kinds:
+        if kind == "text" and kind not in kinds:
             kinds.append(kind)
         elif kind == "tool_use":
             kinds.append(_tool_kind(index))
@@ -1045,12 +1143,18 @@ def _responses_function_call_item(
     }
 
 
-def _responses_reasoning_item(message: AnthropicMessage) -> dict[str, Any]:
-    return {
+def _responses_reasoning_item(message: AnthropicMessage, *, model: str) -> dict[str, Any]:
+    """The round's first item. Its summary is what Copilot shows; its ``encrypted_content`` is the
+    envelope the next request rebuilds the round from. Copilot drops a reasoning item without one."""
+    item: dict[str, Any] = {
         "type": "reasoning",
         "id": message.item_id("rs"),
         "summary": [{"type": "summary_text", "text": text} for text in message.thinking_summaries()],
     }
+    envelope = encode_thinking_envelope(message.content, model=model)
+    if envelope:
+        item["encrypted_content"] = envelope
+    return item
 
 
 def _responses_message_item(message: AnthropicMessage) -> dict[str, Any]:

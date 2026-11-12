@@ -227,13 +227,16 @@ async def test_a_non_streaming_reply_leads_with_claudes_thinking_summary(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_a_reply_without_thinking_has_no_reasoning_item(monkeypatch):
+async def test_a_reply_without_thinking_still_leads_with_an_empty_reasoning_item(monkeypatch):
+    # The reasoning item carries the round's envelope even when Claude did not think (ADR 0093).
     fake = _FakeAnthropic(_text_reply("Hello there"))
     gateway = _gateway(monkeypatch, fake)
 
     reply = await gateway.responses_create({"model": "claude-opus-5-5", "input": "hi"})
 
-    assert [item["type"] for item in reply["output"]] == ["message"]
+    assert [item["type"] for item in reply["output"]] == ["reasoning", "message"]
+    assert reply["output"][0]["summary"] == []
+    assert reply["output"][0]["encrypted_content"]
 
 
 async def _stream_events(gateway: AnthropicGateway, body: dict) -> list[dict]:
@@ -395,8 +398,9 @@ async def test_a_refusal_before_any_text_streams_only_the_readable_message(monke
     events = await _stream_events(gateway, {"model": "claude-opus-5-5", "input": "hi", "stream": True})
 
     completed = events[-1]["response"]
-    assert [item["type"] for item in completed["output"]] == ["message"]
-    assert completed["output"][0]["content"][0]["text"] == "Claude 拒絕回應這個請求，請換個說法再試"
+    assert [item["type"] for item in completed["output"]] == ["reasoning", "message"]
+    assert "encrypted_content" not in completed["output"][0]  # a cut-short round carries no envelope
+    assert completed["output"][1]["content"][0]["text"] == "Claude 拒絕回應這個請求，請換個說法再試"
     assert "".join(e["delta"] for e in _of_type(events, "response.output_text.delta")) == (
         "Claude 拒絕回應這個請求，請換個說法再試"
     )
@@ -639,9 +643,9 @@ async def test_a_claude_tool_use_comes_back_as_a_function_call_with_the_same_cal
     reply = await gateway.responses_create({"model": "claude-opus-5-5", "input": "open a.py", "tools": [_READ_FILE_TOOL]})
 
     assert reply["status"] == "completed"
-    assert [item["type"] for item in reply["output"]] == ["message", "function_call"]
+    assert [item["type"] for item in reply["output"]] == ["reasoning", "message", "function_call"]
     assert _assistant_text(reply) == "Let me look."
-    call = reply["output"][1]
+    call = reply["output"][2]
     assert call["call_id"] == "toolu_01abc"
     assert call["name"] == "read_file"
     assert json.loads(call["arguments"]) == {"path": "a.py"}
@@ -883,8 +887,8 @@ async def test_a_streamed_tool_use_streams_as_a_function_call_with_the_same_call
 
     assert [event["sequence_number"] for event in events] == list(range(len(events)))
     added = [event for event in _of_type(events, "response.output_item.added")]
-    assert [event["item"]["type"] for event in added] == ["message", "function_call", "function_call"]
-    calls = {event["item"]["call_id"]: event for event in added[1:]}
+    assert [event["item"]["type"] for event in added] == ["reasoning", "message", "function_call", "function_call"]
+    calls = {event["item"]["call_id"]: event for event in added[2:]}
     assert set(calls) == {"toolu_A", "toolu_B"}
     assert calls["toolu_A"]["item"]["name"] == "read_file"
     assert calls["toolu_A"]["item"]["arguments"] == ""
