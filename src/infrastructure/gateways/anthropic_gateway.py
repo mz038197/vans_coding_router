@@ -6,7 +6,8 @@ The module has four sections:
    routing gateway, vcr-auto, Key Failover, Token Usage and Prompt Log need no change.
 2. Upstream transport: the key pool, Key Failover and the Anthropic SSE event stream.
    Upstream calls always stream; non-stream replies are assembled by the router.
-3. Request translation: student requests (Responses, later chat) into a Messages request.
+3. Request translation: student requests (Responses, later chat) into a Messages request,
+   deterministic so the same history always produces the same bytes (ADR 0093).
 4. Response translation: Anthropic events into the student's reply shape.
 """
 
@@ -353,6 +354,9 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     Fields are copied by allow-list, so sampling fields (temperature, top_p, top_k) and
     Copilot's own fields never reach Anthropic.
     """
+    n = body.get("n")
+    if isinstance(n, int) and not isinstance(n, bool) and n > 1:
+        raise _translation_refusal("Claude 一次只能產生一個回答，不支援 n > 1")
     system_parts: list[str] = []
     if isinstance(body.get("instructions"), str) and body["instructions"]:
         system_parts.append(body["instructions"])
@@ -379,29 +383,128 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     }
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
+    tools = _anthropic_tools(body.get("tools"))
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = _anthropic_tool_choice(body.get("tool_choice"), body.get("parallel_tool_calls"))
+    output_format = _structured_output_format(body.get("text"))
+    if output_format:
+        # output_config also carries effort; merge so neither setting overwrites the other.
+        payload.setdefault("output_config", {})["format"] = output_format
     return payload
 
 
+def _structured_output_format(text: Any) -> dict[str, Any] | None:
+    """A Responses JSON-schema text format as Anthropic structured outputs; other formats send nothing."""
+    fmt = text.get("format") if isinstance(text, dict) else None
+    if not isinstance(fmt, dict) or fmt.get("type") != "json_schema" or not isinstance(fmt.get("schema"), dict):
+        return None
+    return {"type": "json_schema", "schema": fmt["schema"]}
+
+
+def _anthropic_tool_choice(tool_choice: Any, parallel_tool_calls: Any) -> dict[str, Any]:
+    # A forced choice (`required` or a named tool) becomes auto: Opus 5.5 and Fable 5.2 reject it (ADR 0092).
+    if tool_choice == "none" or (isinstance(tool_choice, dict) and tool_choice.get("type") == "none"):
+        return {"type": "none"}
+    choice: dict[str, Any] = {"type": "auto"}
+    if parallel_tool_calls is False:
+        choice["disable_parallel_tool_use"] = True
+    return choice
+
+
+def _anthropic_tools(raw_tools: Any) -> list[dict[str, Any]]:
+    tools: list[dict[str, Any]] = []
+    for tool in raw_tools if isinstance(raw_tools, list) else []:
+        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
+            kind = tool.get("type") if isinstance(tool, dict) else type(tool).__name__
+            # Server tools (web search, code execution) are out of scope; drop them, keep the rest.
+            logger.info("anthropic_tool_dropped type=%s", kind)
+            continue
+        translated: dict[str, Any] = {"name": str(tool["name"])}
+        if tool.get("description"):
+            translated["description"] = str(tool["description"])
+        parameters = tool.get("parameters")
+        translated["input_schema"] = parameters if isinstance(parameters, dict) else {"type": "object"}
+        tools.append(translated)
+    return tools
+
+
 def _responses_item_to_blocks(item: Any) -> tuple[str, list[dict[str, Any]]]:
-    if not isinstance(item, dict) or item.get("type", "message") != "message":
-        item_type = item.get("type") if isinstance(item, dict) else type(item).__name__
+    item_type = item.get("type", "message") if isinstance(item, dict) else type(item).__name__
+    if item_type == "function_call":
+        return "assistant", [_tool_use_block(item)]
+    if item_type == "function_call_output":
+        return "user", [_tool_result_block(item)]
+    if item_type != "message":
         raise _translation_refusal(f"Claude 目前不支援輸入項目「{item_type}」")
     role = item.get("role")
     if role in ("system", "developer"):
         role = "system"
     elif role not in ("user", "assistant"):
         raise _translation_refusal(f"Claude 不支援角色「{role}」")
-    content = item.get("content")
+    blocks = _content_blocks(item.get("content"))
+    if role == "system" and any(block["type"] != "text" for block in blocks):
+        raise _translation_refusal("Claude 的系統指示只能是文字")
+    return role, blocks
+
+
+def _content_blocks(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
-        return role, [_text_block(content)]
+        return [_text_block(content)]
     blocks: list[dict[str, Any]] = []
     for part in content or []:
         part_type = part.get("type") if isinstance(part, dict) else None
         if part_type in ("input_text", "output_text", "text"):
             blocks.append(_text_block(str(part.get("text") or "")))
+        elif part_type in ("input_image", "image_url"):
+            blocks.append(_image_block(part))
+        elif part_type in ("input_file", "file"):
+            raise _translation_refusal("Claude 目前不支援檔案附件，請改貼文字或圖片")
+        elif part_type in ("input_audio", "audio"):
+            raise _translation_refusal("Claude 不支援語音輸入，請改用文字")
         else:
             raise _translation_refusal(f"Claude 目前不支援內容「{part_type}」")
-    return role, blocks
+    return blocks
+
+
+def _image_block(part: dict[str, Any]) -> dict[str, Any]:
+    url = part.get("image_url")
+    if isinstance(url, dict):  # chat-style {"image_url": {"url": ...}}
+        url = url.get("url")
+    if not isinstance(url, str) or not url:
+        # A file_id points into OpenAI's file store, which Anthropic cannot read.
+        raise _translation_refusal("Claude 只能接收網址或內嵌的圖片，不支援以檔案 ID 傳圖")
+    if url.startswith("data:"):
+        header, _, data = url.partition(",")
+        media_type = header[len("data:") :].split(";")[0] or "image/png"
+        return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
+    return {"type": "image", "source": {"type": "url", "url": url}}
+
+
+def _tool_use_block(item: dict[str, Any]) -> dict[str, Any]:
+    # The call id is the original Anthropic tool-use id, so it goes back unchanged.
+    try:
+        tool_input = json.loads(item.get("arguments") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        tool_input = {}
+    return {
+        "type": "tool_use",
+        "id": str(item.get("call_id") or ""),
+        "name": str(item.get("name") or ""),
+        "input": tool_input if isinstance(tool_input, dict) else {},
+    }
+
+
+def _tool_result_block(item: dict[str, Any]) -> dict[str, Any]:
+    block: dict[str, Any] = {"type": "tool_result", "tool_use_id": str(item.get("call_id") or "")}
+    output = item.get("output")
+    if isinstance(output, list):
+        content = [b for b in _content_blocks(output) if b["type"] != "text" or b["text"]]
+        if content:
+            block["content"] = content
+    elif output:
+        block["content"] = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+    return block
 
 
 def _append_message(messages: list[dict[str, Any]], role: str, blocks: list[dict[str, Any]]) -> None:
@@ -453,6 +556,9 @@ class AnthropicMessage:
     content: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str | None = None
     usage: dict[str, int] = field(default_factory=dict)
+    # Tool input arrives as JSON text in pieces; it is parsed into the block's `input` on block stop,
+    # so `content` always holds plain Anthropic content blocks.
+    _partial_json: dict[int, str] = field(default_factory=dict, repr=False)
 
     def apply(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
@@ -468,6 +574,19 @@ class AnthropicMessage:
             if delta.get("type") == "text_delta":
                 block = self._block_at(event)
                 block["text"] = str(block.get("text") or "") + str(delta.get("text") or "")
+            elif delta.get("type") == "input_json_delta":
+                index = _event_index(event)
+                self._partial_json[index] = self._partial_json.get(index, "") + str(delta.get("partial_json") or "")
+        elif kind == "content_block_stop":
+            index = _event_index(event)
+            raw = self._partial_json.pop(index, "")
+            if raw:
+                block = self._block_at(event)
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = {}
+                block["input"] = parsed if isinstance(parsed, dict) else {}
         elif kind == "message_delta":
             delta = event.get("delta") or {}
             if delta.get("stop_reason"):
@@ -477,8 +596,11 @@ class AnthropicMessage:
     def text(self) -> str:
         return "".join(str(block.get("text") or "") for block in self.content if block.get("type") == "text")
 
+    def tool_uses(self) -> list[dict[str, Any]]:
+        return [block for block in self.content if block.get("type") == "tool_use"]
+
     def _block_at(self, event: dict[str, Any]) -> dict[str, Any]:
-        index = int(event.get("index") or 0)
+        index = _event_index(event)
         while len(self.content) <= index:
             self.content.append({})
         return self.content[index]
@@ -489,6 +611,10 @@ class AnthropicMessage:
         for key, value in usage.items():
             if isinstance(value, int) and not isinstance(value, bool):
                 self.usage[key] = value
+
+
+def _event_index(event: dict[str, Any]) -> int:
+    return int(event.get("index") or 0)
 
 
 async def _assemble_message(events: AsyncGenerator[dict[str, Any], None]) -> AnthropicMessage:
@@ -513,14 +639,40 @@ def openai_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
     }
 
 
-def responses_reply_from_message(message: AnthropicMessage, *, model: str) -> dict[str, Any]:
-    output_item = {
-        "type": "message",
-        "id": f"msg_{uuid.uuid4().hex}",
+def function_call_item_from_tool_use(block: dict[str, Any]) -> dict[str, Any]:
+    """A Responses function_call for one Anthropic tool_use block; the tool-use id is the call id."""
+    call_id = str(block.get("id") or "")
+    tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+    return {
+        "type": "function_call",
+        "id": f"fc_{call_id}",
+        "call_id": call_id,
+        "name": str(block.get("name") or ""),
+        "arguments": json.dumps(tool_input, ensure_ascii=False),
         "status": "completed",
-        "role": "assistant",
-        "content": [{"type": "output_text", "text": message.text(), "annotations": []}],
     }
+
+
+def responses_output_from_message(message: AnthropicMessage) -> list[dict[str, Any]]:
+    """Output items: one assistant message with the text, then one function_call per tool use."""
+    output: list[dict[str, Any]] = []
+    tool_uses = message.tool_uses()
+    text = message.text()
+    if text or not tool_uses:
+        output.append(
+            {
+                "type": "message",
+                "id": f"msg_{uuid.uuid4().hex}",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text, "annotations": []}],
+            }
+        )
+    output.extend(function_call_item_from_tool_use(block) for block in tool_uses)
+    return output
+
+
+def responses_reply_from_message(message: AnthropicMessage, *, model: str) -> dict[str, Any]:
     incomplete = message.stop_reason == "max_tokens"
     return {
         "id": f"resp_{message.id or uuid.uuid4().hex}",
@@ -529,6 +681,6 @@ def responses_reply_from_message(message: AnthropicMessage, *, model: str) -> di
         "status": "incomplete" if incomplete else "completed",
         "incomplete_details": {"reason": "max_output_tokens"} if incomplete else None,
         "model": model,
-        "output": [output_item],
+        "output": responses_output_from_message(message),
         "usage": openai_usage_from_anthropic(message.usage),
     }
