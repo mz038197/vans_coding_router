@@ -55,7 +55,7 @@ _MESSAGES_PATH = "/messages"
 _MODELS_PATH = "/models"
 _MODELS_PARAMS = {"lifecycle": "active", "limit": "1000"}
 DEFAULT_CREDIT_EXHAUSTION_MESSAGE = "Anthropic credit is exhausted or a spend limit was reached"
-REFUSAL_MESSAGE = "Claude 拒絕回應這個請求，請換個說法再試"
+CONTENT_REFUSAL_MESSAGE = "Claude 拒絕回應這個請求，請換個說法再試"
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ class AnthropicGateway:
                                 if event.get("type") == "error":
                                     raise self._stream_error(event)
                                 if _stop_reason(event) == "refusal":
-                                    raise self._refusal_stop_error()
+                                    raise self._content_refusal_error()
                                 _log_input_transformations(event, payload.get("model"))
                                 yield event
                             return
@@ -371,12 +371,12 @@ class AnthropicGateway:
             body["upstream"] = upstream
         return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
 
-    def _refusal_stop_error(self) -> UpstreamServiceError:
+    def _content_refusal_error(self) -> UpstreamServiceError:
         # A refusal is Claude's answer, not a failing key or Model ID: no quarantine, vcr-auto stops.
         return UpstreamServiceError(
             status_code=400,
             backend=self.provider.name,
-            body={"error": {"type": "refusal", "message": REFUSAL_MESSAGE}},
+            body={"error": {"type": "refusal", "message": CONTENT_REFUSAL_MESSAGE}},
         )
 
     def _stream_error(self, event: dict[str, Any]) -> UpstreamServiceError:
@@ -495,7 +495,7 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     """
     n = body.get("n")
     if isinstance(n, int) and not isinstance(n, bool) and n > 1:
-        raise _translation_refusal("Claude 一次只能產生一個回答，不支援 n > 1")
+        raise _unsupported_request_error("Claude 一次只能產生一個回答，不支援 n > 1")
     system_parts: list[str] = []
     if isinstance(body.get("instructions"), str) and body["instructions"]:
         system_parts.append(body["instructions"])
@@ -653,15 +653,15 @@ def _responses_item_to_blocks(item: Any) -> tuple[str, list[dict[str, Any]]]:
     if item_type == "function_call_output":
         return "user", [_tool_result_block(item)]
     if item_type != "message":
-        raise _translation_refusal(f"Claude 目前不支援輸入項目「{item_type}」")
+        raise _unsupported_request_error(f"Claude 目前不支援輸入項目「{item_type}」")
     role = item.get("role")
     if role in ("system", "developer"):
         role = "system"
     elif role not in ("user", "assistant"):
-        raise _translation_refusal(f"Claude 不支援角色「{role}」")
+        raise _unsupported_request_error(f"Claude 不支援角色「{role}」")
     blocks = _content_blocks(item.get("content"))
     if role == "system" and any(block["type"] != "text" for block in blocks):
-        raise _translation_refusal("Claude 的系統指示只能是文字")
+        raise _unsupported_request_error("Claude 的系統指示只能是文字")
     return role, blocks
 
 
@@ -676,11 +676,11 @@ def _content_blocks(content: Any) -> list[dict[str, Any]]:
         elif part_type in ("input_image", "image_url"):
             blocks.append(_image_block(part))
         elif part_type in ("input_file", "file"):
-            raise _translation_refusal("Claude 目前不支援檔案附件，請改貼文字或圖片")
+            raise _unsupported_request_error("Claude 目前不支援檔案附件，請改貼文字或圖片")
         elif part_type in ("input_audio", "audio"):
-            raise _translation_refusal("Claude 不支援語音輸入，請改用文字")
+            raise _unsupported_request_error("Claude 不支援語音輸入，請改用文字")
         else:
-            raise _translation_refusal(f"Claude 目前不支援內容「{part_type}」")
+            raise _unsupported_request_error(f"Claude 目前不支援內容「{part_type}」")
     return blocks
 
 
@@ -690,7 +690,7 @@ def _image_block(part: dict[str, Any]) -> dict[str, Any]:
         url = url.get("url")
     if not isinstance(url, str) or not url:
         # A file_id points into OpenAI's file store, which Anthropic cannot read.
-        raise _translation_refusal("Claude 只能接收網址或內嵌的圖片，不支援以檔案 ID 傳圖")
+        raise _unsupported_request_error("Claude 只能接收網址或內嵌的圖片，不支援以檔案 ID 傳圖")
     if url.startswith("data:"):
         header, _, data = url.partition(",")
         media_type = header[len("data:") :].split(";")[0] or "image/png"
@@ -754,7 +754,8 @@ def _max_tokens(body: dict[str, Any]) -> int:
     return DEFAULT_MAX_TOKENS
 
 
-def _translation_refusal(message: str) -> UpstreamServiceError:
+def _unsupported_request_error(message: str) -> UpstreamServiceError:
+    """The router's own 400 for a request Claude cannot take; raised before any upstream call."""
     return UpstreamServiceError(
         status_code=400,
         backend="anthropic",
@@ -863,7 +864,7 @@ async def _assemble_message(events: AsyncGenerator[dict[str, Any], None]) -> Ant
     return message
 
 
-def openai_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
+def responses_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
     """Map Anthropic usage to Responses usage; cache read and cache write count as input."""
     cache_read = usage.get("cache_read_input_tokens", 0)
     cache_write = usage.get("cache_creation_input_tokens", 0)
@@ -902,7 +903,7 @@ def responses_reply_from_message(
         "incomplete_details": {"reason": "max_output_tokens"} if incomplete else None,
         "model": model,
         "output": output,
-        "usage": openai_usage_from_anthropic(message.usage),
+        "usage": responses_usage_from_anthropic(message.usage),
     }
 
 
@@ -1268,9 +1269,9 @@ def _chat_message_items(message: ChatMessage) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def openai_chat_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
+def chat_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
     """Chat usage; cache read and cache write count as prompt tokens, as on Responses."""
-    responses_usage = openai_usage_from_anthropic(usage)
+    responses_usage = responses_usage_from_anthropic(usage)
     return {
         "prompt_tokens": responses_usage["input_tokens"],
         "prompt_tokens_details": {"cached_tokens": responses_usage["input_tokens_details"]["cached_tokens"]},
@@ -1298,7 +1299,7 @@ def chat_reply_from_message(message: AnthropicMessage, *, model: str, created: i
         "created": created if created is not None else int(time.time()),
         "model": model,
         "choices": [{"index": 0, "message": reply_message, "finish_reason": _chat_finish_reason(message.stop_reason)}],
-        "usage": openai_chat_usage_from_anthropic(message.usage),
+        "usage": chat_usage_from_anthropic(message.usage),
     }
 
 
@@ -1378,7 +1379,7 @@ class ChatStream:
         if envelope:
             delta["reasoning_opaque"] = envelope
         chunk = self._chunk(delta, finish_reason=_chat_finish_reason(self.message.stop_reason))
-        chunk["usage"] = openai_chat_usage_from_anthropic(self.message.usage)
+        chunk["usage"] = chat_usage_from_anthropic(self.message.usage)
         return [chunk]
 
     def _block_started(self, event: dict[str, Any]) -> list[dict[str, Any]]:
