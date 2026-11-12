@@ -128,8 +128,23 @@ class AnthropicGateway:
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         payload = messages_request_from_responses(body)
         stream = ResponsesStream(model=str(body.get("model") or ""))
-        async for event in self._message_events(payload):
-            for out in stream.feed(event):
+        try:
+            async for event in self._message_events(payload):
+                for out in stream.feed(event):
+                    yield _encode_responses_event(out)
+        except (UpstreamServiceError, ServiceUnavailableError) as exc:
+            if not stream.started:
+                raise  # nothing sent yet: the router's error handling and vcr-auto still apply
+            # Mid-stream (a refusal stop, or an in-stream error event): end this same response with
+            # a Readable Upstream Error, as the router's own stream error handling would.
+            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
+            logger.warning(
+                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
+                self.provider.name,
+                exc.status_code,
+                message,
+            )
+            for out in stream.fail(message):
                 yield _encode_responses_event(out)
         for out in stream.finish():
             yield _encode_responses_event(out)
@@ -665,6 +680,7 @@ class ResponsesStream:
         self._sequence = 0
         self._item_index: dict[str, int] = {}  # "thinking" | "text" -> output_index
         self._summary_index: dict[int, int] = {}  # Anthropic block index -> summary_index
+        self._notice = ""  # a Readable Upstream Error that ended the stream early
 
     def feed(self, event: dict[str, Any]) -> list[dict[str, Any]]:
         self.message.apply(event)
@@ -679,8 +695,36 @@ class ResponsesStream:
             return self._block_stopped(event)
         return []
 
+    @property
+    def started(self) -> bool:
+        return self._sequence > 0
+
+    def fail(self, message: str) -> list[dict[str, Any]]:
+        """Stream ``message`` as the end of the answer text; ``finish`` then closes the response.
+
+        The notice stays out of ``self.message``: it is the router's text, not Claude's.
+        """
+        self._notice = ("\n\n" if self.message.text() else "") + message
+        out = self._open_item("text") if "text" not in self._item_index else []
+        out.append(
+            self._event(
+                "response.output_text.delta",
+                item_id=self.message.item_id("msg"),
+                output_index=self._item_index["text"],
+                content_index=0,
+                delta=self._notice,
+            )
+        )
+        return out
+
     def finish(self) -> list[dict[str, Any]]:
         reply = responses_reply_from_message(self.message, model=self.model, created_at=self._created_at)
+        if self._notice:
+            messages = [item for item in reply["output"] if item["type"] == "message"]
+            if not messages:
+                messages = [_responses_message_item(self.message)]
+                reply["output"].extend(messages)
+            messages[0]["content"][0]["text"] += self._notice
         out: list[dict[str, Any]] = []
         for output_index, item in enumerate(reply["output"]):
             kind = "thinking" if item["type"] == "reasoning" else "text"

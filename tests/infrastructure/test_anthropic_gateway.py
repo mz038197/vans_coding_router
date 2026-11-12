@@ -346,6 +346,63 @@ async def test_each_thinking_block_streams_as_its_own_summary_part(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "readable"),
+    [
+        (
+            {"type": "message_delta", "delta": {"stop_reason": "refusal"}, "usage": {"output_tokens": 3}},
+            "Claude 拒絕回應這個請求，請換個說法再試",
+        ),
+        ({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}, "Overloaded"),
+    ],
+)
+async def test_an_error_mid_stream_ends_the_same_response_with_a_readable_message(monkeypatch, ending, readable):
+    fake = _FakeAnthropic(
+        _sse(
+            {"type": "message_start", "message": {"id": "msg_04", "model": "claude-opus-5-5", "usage": {}}},
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Sure, here"}},
+            ending,
+            {"type": "message_stop"},
+        )
+    )
+    gateway = _gateway(monkeypatch, fake)
+
+    events = await _stream_events(gateway, {"model": "claude-opus-5-5", "input": "hi", "stream": True})
+
+    assert len(_of_type(events, "response.created")) == 1
+    assert events[-1]["type"] == "response.completed"
+    assert [event["sequence_number"] for event in events] == list(range(len(events)))
+    streamed = "".join(event["delta"] for event in _of_type(events, "response.output_text.delta"))
+    completed_text = events[-1]["response"]["output"][-1]["content"][0]["text"]
+    assert streamed == completed_text
+    assert completed_text.startswith("Sure, here")
+    assert completed_text.endswith(readable)
+    assert gateway.pool_status()["keys"][0]["in_flight"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_before_any_text_streams_only_the_readable_message(monkeypatch):
+    fake = _FakeAnthropic(
+        _sse(
+            {"type": "message_start", "message": {"id": "msg_05", "model": "claude-opus-5-5", "usage": {}}},
+            {"type": "message_delta", "delta": {"stop_reason": "refusal"}, "usage": {"output_tokens": 0}},
+            {"type": "message_stop"},
+        )
+    )
+    gateway = _gateway(monkeypatch, fake)
+
+    events = await _stream_events(gateway, {"model": "claude-opus-5-5", "input": "hi", "stream": True})
+
+    completed = events[-1]["response"]
+    assert [item["type"] for item in completed["output"]] == ["message"]
+    assert completed["output"][0]["content"][0]["text"] == "Claude 拒絕回應這個請求，請換個說法再試"
+    assert "".join(e["delta"] for e in _of_type(events, "response.output_text.delta")) == (
+        "Claude 拒絕回應這個請求，請換個說法再試"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_streaming_upstream_error_raises_before_any_event(monkeypatch):
     from src.domain.errors import UpstreamServiceError
 
