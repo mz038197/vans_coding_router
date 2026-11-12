@@ -1239,14 +1239,17 @@ def _responses_tool_from_chat(tool: dict[str, Any]) -> dict[str, Any]:
 def _chat_message_items(message: ChatMessage) -> list[dict[str, Any]]:
     """One chat message as Responses input items.
 
-    Echoed ``reasoning_content`` / ``reasoning`` / ``cot_summary`` on assistant messages are only
-    summaries, never Claude's signed thinking, so they are not sent back (ADR 0093).
+    Each assistant message is one round and opens with a reasoning item whose ``encrypted_content``
+    is the ``cot_id`` Copilot echoes from our ``reasoning_opaque``: the round's envelope, so the
+    Responses replay rebuilds it. Echoed ``reasoning_content`` / ``reasoning`` / ``cot_summary`` are
+    only summaries, never Claude's signed thinking, so they are not sent back (ADR 0093).
     """
     content = message.content if isinstance(message.content, (str, list)) else ""
     if message.role == "tool":
         return [{"type": "function_call_output", "call_id": message.tool_call_id or "", "output": content}]
     items: list[dict[str, Any]] = [{"type": "message", "role": message.role, "content": content}]
     if message.role == "assistant":
+        items.insert(0, {"type": "reasoning", "encrypted_content": message.extra.get("cot_id")})
         for call in message.tool_calls or []:
             function = call.get("function") if isinstance(call, dict) else None
             if not isinstance(function, dict):
@@ -1283,6 +1286,9 @@ def chat_reply_from_message(message: AnthropicMessage, *, model: str, created: i
     reasoning = _chat_reasoning_content(message)
     if reasoning:
         reply_message["reasoning_content"] = reasoning
+    envelope = encode_thinking_envelope(message.content, model=model)
+    if envelope:
+        reply_message["reasoning_opaque"] = envelope
     tool_calls = [
         _chat_tool_call(message, index) for index, block in enumerate(message.content) if block.get("type") == "tool_use"
     ]
@@ -1364,7 +1370,13 @@ class ChatStream:
         return [self._chunk({"content": ("\n\n" if self.message.text() else "") + message})]
 
     def finish(self) -> list[dict[str, Any]]:
-        chunk = self._chunk({}, finish_reason=_chat_finish_reason(self.message.stop_reason))
+        """The last chunk: finish reason, usage, and the round's envelope in ``reasoning_opaque``
+        (ADR 0093), which Copilot sends back as ``cot_id``."""
+        delta: dict[str, Any] = {}
+        envelope = encode_thinking_envelope(self.message.content, model=self.model)
+        if envelope:
+            delta["reasoning_opaque"] = envelope
+        chunk = self._chunk(delta, finish_reason=_chat_finish_reason(self.message.stop_reason))
         chunk["usage"] = openai_chat_usage_from_anthropic(self.message.usage)
         return [chunk]
 

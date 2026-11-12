@@ -35,9 +35,12 @@ async def test_a_text_chat_request_returns_claudes_answer_as_a_chat_completion(m
     assert fake.sent["stream"] is True
     assert reply["object"] == "chat.completion"
     assert reply["model"] == "claude-opus-5-5"
-    assert reply["choices"] == [
-        {"index": 0, "message": {"role": "assistant", "content": "Hello there"}, "finish_reason": "stop"}
-    ]
+    [choice] = reply["choices"]
+    assert choice["index"] == 0 and choice["finish_reason"] == "stop"
+    assert {k: v for k, v in choice["message"].items() if k != "reasoning_opaque"} == {
+        "role": "assistant",
+        "content": "Hello there",
+    }
     assert reply["usage"]["prompt_tokens"] == 42
     assert reply["usage"]["completion_tokens"] == 7
     assert reply["usage"]["total_tokens"] == 49
