@@ -493,8 +493,10 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
         _append_message(messages, "user", [_text_block(raw_input)])
     elif isinstance(raw_input, list):
         turns = _responses_turns(raw_input)
-        system_parts.extend(block["text"] for role, blocks in turns if role == "system" for block in blocks)
-        _append_replayed_turns(messages, [turn for turn in turns if turn[0] != "system"], model=str(body.get("model") or ""))
+        system = [turn for turn in turns if isinstance(turn, _BlocksTurn) and turn.role == "system"]
+        system_parts.extend(block["text"] for turn in system for block in turn.blocks)
+        rest = [turn for turn in turns if not (isinstance(turn, _BlocksTurn) and turn.role == "system")]
+        _append_replayed_turns(messages, rest, model=str(body.get("model") or ""))
 
     payload: dict[str, Any] = {
         "model": body.get("model"),
@@ -582,34 +584,43 @@ def _anthropic_tools(raw_tools: Any) -> list[dict[str, Any]]:
     return tools
 
 
-def _responses_turns(items: list[Any]) -> list[tuple[str, Any]]:
-    """Responses input items as turns: ``("system" | "user", blocks)`` or ``("assistant", AssistantRound)``.
+@dataclass
+class _BlocksTurn:
+    """A system or user turn: content blocks sent as they are."""
+
+    role: str  # "system" | "user"
+    blocks: list[dict[str, Any]]
+
+
+# A turn is a system or user turn, or one assistant round (rebuilt from its envelope on replay).
+_Turn = _BlocksTurn | AssistantRound
+
+
+def _responses_turns(items: list[Any]) -> list[_Turn]:
+    """Responses input items as turns.
 
     A round is one assistant reply: the run of assistant items (reasoning, message, function_call)
     between other turns. A reasoning item opens a new round, since every reply this router makes
     starts with one; its ``encrypted_content`` is the round's envelope and its summary is ignored.
     """
-    turns: list[tuple[str, Any]] = []
+    turns: list[_Turn] = []
     for item in items:
         if isinstance(item, dict) and item.get("type") == "reasoning":
-            turns.append(("assistant", AssistantRound(envelope=item.get("encrypted_content"))))
+            turns.append(AssistantRound(envelope=item.get("encrypted_content")))
             continue
         role, blocks = _responses_item_to_blocks(item)
         if role == "assistant":
-            if not turns or turns[-1][0] != "assistant":
-                turns.append(("assistant", AssistantRound()))
-            turns[-1][1].blocks.extend(blocks)
+            if not turns or not isinstance(turns[-1], AssistantRound):
+                turns.append(AssistantRound())
+            turns[-1].blocks.extend(blocks)
         else:
-            turns.append((role, blocks))
+            turns.append(_BlocksTurn(role, blocks))
     return turns
 
 
-def _append_replayed_turns(messages: list[dict[str, Any]], turns: list[tuple[str, Any]], *, model: str) -> None:
-    """Append user and assistant turns, rebuilding assistant rounds from their envelopes (ADR 0093).
-
-    ``turns`` hold ``(role, blocks)`` for user turns and ``("assistant", AssistantRound)`` for rounds.
-    """
-    rounds = [value for role, value in turns if role == "assistant"]
+def _append_replayed_turns(messages: list[dict[str, Any]], turns: list[_Turn], *, model: str) -> None:
+    """Append user turns and assistant rounds, rebuilding each round from its envelope (ADR 0093)."""
+    rounds = [turn for turn in turns if isinstance(turn, AssistantRound)]
     replayed = replay_assistant_rounds(rounds, model=model)
     if rounds:
         logger.info(
@@ -619,12 +630,13 @@ def _append_replayed_turns(messages: list[dict[str, Any]], turns: list[tuple[str
             replayed.rebuilt,
         )
     position = 0
-    for role, value in turns:
-        if role == "assistant":
+    for turn in turns:
+        if isinstance(turn, AssistantRound):
             _append_message(messages, "assistant", replayed.content[position])
             position += 1
         else:
-            _append_message(messages, role, [_repair_tool_result(block, replayed.tool_use_ids) for block in value])
+            blocks = [_repair_tool_result(block, replayed.tool_use_ids) for block in turn.blocks]
+            _append_message(messages, turn.role, blocks)
 
 
 def _repair_tool_result(block: dict[str, Any], tool_use_ids: dict[str, str]) -> dict[str, Any]:
