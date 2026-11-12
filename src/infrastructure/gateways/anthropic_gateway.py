@@ -512,7 +512,7 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": body.get("model"),
         "messages": [_compact_message(message) for message in messages],
-        "max_tokens": _max_tokens(body.get("max_output_tokens")),
+        "max_tokens": _max_tokens(body),
         "stream": True,
         # Automatic prompt caching: Anthropic places the breakpoint on the last cacheable block.
         "cache_control": {"type": "ephemeral"},
@@ -745,9 +745,12 @@ def _text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}
 
 
-def _max_tokens(value: Any) -> int:
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
+def _max_tokens(body: dict[str, Any]) -> int:
+    """The first limit the body sets: the Responses name, then the chat names some clients send."""
+    for name in ("max_output_tokens", "max_completion_tokens", "max_tokens"):
+        value = body.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
     return DEFAULT_MAX_TOKENS
 
 

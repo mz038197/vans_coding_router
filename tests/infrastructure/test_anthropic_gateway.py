@@ -151,6 +151,19 @@ async def test_max_tokens_defaults_to_32000_and_follows_the_sent_limit(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
+async def test_a_responses_body_may_send_its_limit_under_the_chat_names(monkeypatch, field):
+    fake = _FakeAnthropic()
+    gateway = _gateway(monkeypatch, fake)
+
+    await gateway.responses_create({"model": "claude-opus-5-5", "input": "hi", field: 700})
+    assert fake.sent["max_tokens"] == 700
+
+    await gateway.responses_create({"model": "claude-opus-5-5", "input": "hi", field: 700, "max_output_tokens": 900})
+    assert fake.sent["max_tokens"] == 900
+
+
+@pytest.mark.asyncio
 async def test_sampling_fields_are_dropped_and_prompt_caching_is_automatic(monkeypatch):
     fake = _FakeAnthropic()
     gateway = _gateway(monkeypatch, fake)
