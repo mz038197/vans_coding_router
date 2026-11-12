@@ -32,7 +32,7 @@ from src.domain.errors import (
     UpstreamTransportError,
     extract_upstream_error_text,
 )
-from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_key_failover_exhaustion
+from src.domain.extra_usage import is_anthropic_credit_exhaustion
 from src.infrastructure.config import ProviderSettings, resolve_provider_api_keys
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
@@ -44,6 +44,8 @@ DEFAULT_MAX_TOKENS = 32000
 _MESSAGES_PATH = "/messages"
 _MODELS_PATH = "/models"
 _MODELS_PARAMS = {"lifecycle": "active", "limit": "1000"}
+DEFAULT_CREDIT_EXHAUSTION_MESSAGE = "Anthropic credit is exhausted or a spend limit was reached"
+REFUSAL_MESSAGE = "Claude 拒絕回應這個請求，請換個說法再試"
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +266,7 @@ class AnthropicGateway:
                     ) as response:
                         if response.status_code >= 400:
                             text = (await response.aread()).decode("utf-8", errors="replace")
-                            if not is_key_failover_exhaustion(response.status_code, text):
+                            if not is_anthropic_credit_exhaustion(response.status_code, text):
                                 raise UpstreamServiceError(
                                     status_code=response.status_code,
                                     backend=self.provider.name,
@@ -290,6 +292,8 @@ class AnthropicGateway:
                             async for event in _sse_events(response):
                                 if event.get("type") == "error":
                                     raise self._stream_error(event)
+                                if _stop_reason(event) == "refusal":
+                                    raise self._refusal_stop_error()
                                 yield event
                             return
                 except httpx.RequestError as exc:
@@ -308,17 +312,41 @@ class AnthropicGateway:
         }
 
     def _exhausted_keys_error(self, pool: UpstreamKeyPool) -> UpstreamServiceError:
-        body = {"error": pool.last_extra_usage_message or DEFAULT_EXTRA_USAGE_MESSAGE}
-        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+        return self._credit_exhaustion_error(pool.last_extra_usage_message or DEFAULT_CREDIT_EXHAUSTION_MESSAGE)
 
     def _quarantine_exhausted_key(self, pool: UpstreamKeyPool, index: int, text: str) -> UpstreamServiceError:
-        pool.quarantine(index, extract_upstream_error_text(text) or DEFAULT_EXTRA_USAGE_MESSAGE)
-        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=_json_or_text(text))
+        message = extract_upstream_error_text(text) or DEFAULT_CREDIT_EXHAUSTION_MESSAGE
+        pool.quarantine(index, message)
+        return self._credit_exhaustion_error(message, upstream=_json_or_text(text))
+
+    def _credit_exhaustion_error(self, message: str, *, upstream: Any = None) -> UpstreamServiceError:
+        # Anthropic's exhaustion bodies carry no OpenRouter or Ollama marker, so the router's
+        # provider-agnostic checks (vcr-auto, operator alerts) would miss them. Re-shape them as
+        # a 402 Credit Exhaustion; the student still reads Anthropic's own message.
+        body: dict[str, Any] = {"error": {"type": "payment_required", "message": message}}
+        if upstream is not None:
+            body["upstream"] = upstream
+        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+
+    def _refusal_stop_error(self) -> UpstreamServiceError:
+        # A refusal is Claude's answer, not a failing key or Model ID: no quarantine, vcr-auto stops.
+        return UpstreamServiceError(
+            status_code=400,
+            backend=self.provider.name,
+            body={"error": {"type": "refusal", "message": REFUSAL_MESSAGE}},
+        )
 
     def _stream_error(self, event: dict[str, Any]) -> UpstreamServiceError:
         error = event.get("error") if isinstance(event.get("error"), dict) else {}
         status = _STREAM_ERROR_STATUS.get(str(error.get("type")), 502)
         return UpstreamServiceError(status_code=status, backend=self.provider.name, body=event)
+
+
+def _stop_reason(event: dict[str, Any]) -> str | None:
+    if event.get("type") != "message_delta":
+        return None
+    delta = event.get("delta")
+    return str(delta["stop_reason"]) if isinstance(delta, dict) and delta.get("stop_reason") else None
 
 
 _STREAM_ERROR_STATUS = {
