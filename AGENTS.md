@@ -50,4 +50,4 @@ Schema migrations run on every start and are not version-tracked. Keep them few:
 - When you change database code, delete every migration that meets that condition.
 - A push to master deploys to production and runs the migrations there. Tell the owner about a schema change before you push it.
 
-Portal login, classes, and class sessions do not need upstream API keys. Forwarding chat, image, or speech calls needs `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`, and/or `OPENAI_API_KEY`.
+Portal login, classes, and class sessions do not need upstream API keys. Forwarding chat, image, or speech calls needs `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and/or `ANTHROPIC_API_KEY`.
