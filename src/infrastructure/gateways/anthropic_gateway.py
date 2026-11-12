@@ -19,7 +19,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Protocol
 
 import httpx
 
@@ -93,13 +93,7 @@ class AnthropicGateway:
 
     async def models(self) -> dict[str, Any]:
         """Active models in one call; the Upstream Model Catalog lists them under All Models."""
-        await self.startup()
-        assert self._client is not None
-        if not self.provider.base_url:
-            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
-        pool = self._pool
-        if pool is None:
-            raise ServiceUnavailableError(f"{self.provider.name} unavailable: no API key configured")
+        client, pool, base_url = await self._upstream()
         # A listing takes no concurrency slot; any key that is not quarantined will do.
         index = next((i for i in range(pool.key_count) if not pool.is_quarantined(i)), 0)
         headers = {
@@ -108,8 +102,8 @@ class AnthropicGateway:
             "anthropic-version": ANTHROPIC_VERSION,
         }
         try:
-            response = await self._client.get(
-                f"{self.provider.base_url.rstrip('/')}{_MODELS_PATH}",
+            response = await client.get(
+                f"{base_url}{_MODELS_PATH}",
                 headers=headers,
                 params=_MODELS_PARAMS,
             )
@@ -138,25 +132,7 @@ class AnthropicGateway:
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         payload = messages_request_from_responses(body)
         stream = ResponsesStream(model=str(body.get("model") or ""))
-        try:
-            async for event in self._message_events(payload):
-                for out in stream.feed(event):
-                    yield _encode_responses_event(out)
-        except (UpstreamServiceError, ServiceUnavailableError) as exc:
-            if not stream.started:
-                raise  # nothing sent yet: the router's error handling and vcr-auto still apply
-            # Mid-stream (a refusal stop, or an in-stream error event): end this same response with
-            # a Readable Upstream Error, as the router's own stream error handling would.
-            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
-            logger.warning(
-                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
-                self.provider.name,
-                exc.status_code,
-                message,
-            )
-            for out in stream.fail(message):
-                yield _encode_responses_event(out)
-        for out in stream.finish():
+        async for out in self._drive_stream(payload, stream):
             yield _encode_responses_event(out)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
@@ -167,25 +143,7 @@ class AnthropicGateway:
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
         payload = messages_request_from_chat(req)
         stream = ChatStream(model=req.model)
-        try:
-            async for event in self._message_events(payload):
-                for chunk in stream.feed(event):
-                    yield _encode_chat_chunk(chunk)
-        except (UpstreamServiceError, ServiceUnavailableError) as exc:
-            if not stream.started:
-                raise  # nothing sent yet: the router's error handling and vcr-auto still apply
-            # Mid-stream (a refusal stop, or an in-stream error event): finish this same chat stream
-            # with a Readable Upstream Error, as on Responses.
-            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
-            logger.warning(
-                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
-                self.provider.name,
-                exc.status_code,
-                message,
-            )
-            for chunk in stream.fail(message):
-                yield _encode_chat_chunk(chunk)
-        for chunk in stream.finish():
+        async for chunk in self._drive_stream(payload, stream):
             yield _encode_chat_chunk(chunk)
         yield b"data: [DONE]\n\n"
 
@@ -275,20 +233,49 @@ class AnthropicGateway:
     # 2. Upstream transport: key pool, Key Failover, Anthropic SSE events
     # -----------------------------------------------------------------------
 
+    async def _upstream(self) -> tuple[httpx.AsyncClient, UpstreamKeyPool, str]:
+        """The client, the key pool and the base URL, or ServiceUnavailableError when one is missing."""
+        await self.startup()
+        assert self._client is not None
+        if not self.provider.base_url:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
+        if self._pool is None:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: no API key configured")
+        return self._client, self._pool, self.provider.base_url.rstrip("/")
+
+    async def _drive_stream(self, payload: dict[str, Any], stream: ReplyStream) -> AsyncGenerator[dict[str, Any], None]:
+        """Feed one Messages stream through ``stream`` and yield what it emits, ending with ``finish``.
+
+        An error before ``stream`` has emitted anything raises, so the router's error handling and
+        vcr-auto still apply. Mid-stream (a refusal stop, or an in-stream error event) the same reply
+        ends with a Readable Upstream Error, as the router's own stream error handling would.
+        """
+        try:
+            async for event in self._message_events(payload):
+                for out in stream.feed(event):
+                    yield out
+        except (UpstreamServiceError, ServiceUnavailableError) as exc:
+            if not stream.started:
+                raise
+            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
+            logger.warning(
+                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
+                self.provider.name,
+                exc.status_code,
+                message,
+            )
+            for out in stream.fail(message):
+                yield out
+        for out in stream.finish():
+            yield out
+
     async def _message_events(self, payload: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
         """Stream one Messages request and yield its parsed SSE events.
 
         Errors before the first event raise without yielding, so vcr-auto can still move on.
         """
-        await self.startup()
-        assert self._client is not None
-        if not self.provider.base_url:
-            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
-        pool = self._pool
-        if pool is None:
-            raise ServiceUnavailableError(f"{self.provider.name} unavailable: no API key configured")
-
-        url = f"{self.provider.base_url.rstrip('/')}{_MESSAGES_PATH}"
+        client, pool, base_url = await self._upstream()
+        url = f"{base_url}{_MESSAGES_PATH}"
         tried: set[int] = set()
         last_error: UpstreamServiceError | None = None
         while True:
@@ -302,7 +289,7 @@ class AnthropicGateway:
                 except NoSelectableUpstreamKeyError as exc:
                     raise (last_error or self._exhausted_keys_error(pool)) from exc
                 try:
-                    async with self._client.stream(
+                    async with client.stream(
                         "POST", url, headers=self._headers(pool.key_at(index)), json=payload
                     ) as response:
                         if response.status_code >= 400:
@@ -766,6 +753,19 @@ def _unsupported_request_error(message: str) -> UpstreamServiceError:
 # ---------------------------------------------------------------------------
 # 4. Response translation: Anthropic events -> student reply
 # ---------------------------------------------------------------------------
+
+
+class ReplyStream(Protocol):
+    """A streaming emitter: Anthropic events in, the student's stream events out (Responses or chat)."""
+
+    @property
+    def started(self) -> bool: ...
+
+    def feed(self, event: dict[str, Any]) -> list[dict[str, Any]]: ...
+
+    def fail(self, message: str) -> list[dict[str, Any]]: ...
+
+    def finish(self) -> list[dict[str, Any]]: ...
 
 
 @dataclass
