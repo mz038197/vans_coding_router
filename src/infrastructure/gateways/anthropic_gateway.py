@@ -6,7 +6,7 @@ The module has four sections:
    routing gateway, vcr-auto, Key Failover, Token Usage and Prompt Log need no change.
 2. Upstream transport: the key pool, Key Failover and the Anthropic SSE event stream.
    Upstream calls always stream; non-stream replies are assembled by the router.
-3. Request translation: student requests (Responses, later chat) into a Messages request,
+3. Request translation: student requests (Responses; chat restated as Responses) into a Messages request,
    deterministic so the same history always produces the same bytes (ADR 0093).
 4. Response translation: Anthropic events into the student's reply shape.
 """
@@ -23,7 +23,7 @@ from typing import Any, AsyncGenerator
 
 import httpx
 
-from src.domain.entities.chat import ChatCompletionRequest
+from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
     ImageGenerationNotSupportedError,
     ServiceUnavailableError,
@@ -158,11 +158,34 @@ class AnthropicGateway:
             yield _encode_responses_event(out)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
-        raise self._refusal("Claude 目前不支援 /v1/chat/completions")
+        payload = messages_request_from_chat(req)
+        message = await _assemble_message(self._message_events(payload))
+        return chat_reply_from_message(message, model=req.model or message.model)
 
     async def chat_completions_stream(self, req: ChatCompletionRequest) -> AsyncGenerator[bytes, None]:
-        raise self._refusal("Claude 目前不支援 /v1/chat/completions")
-        yield b""  # pragma: no cover
+        payload = messages_request_from_chat(req)
+        stream = ChatStream(model=req.model)
+        try:
+            async for event in self._message_events(payload):
+                for chunk in stream.feed(event):
+                    yield _encode_chat_chunk(chunk)
+        except (UpstreamServiceError, ServiceUnavailableError) as exc:
+            if not stream.started:
+                raise  # nothing sent yet: the router's error handling and vcr-auto still apply
+            # Mid-stream (a refusal stop, or an in-stream error event): finish this same chat stream
+            # with a Readable Upstream Error, as on Responses.
+            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
+            logger.warning(
+                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
+                self.provider.name,
+                exc.status_code,
+                message,
+            )
+            for chunk in stream.fail(message):
+                yield _encode_chat_chunk(chunk)
+        for chunk in stream.finish():
+            yield _encode_chat_chunk(chunk)
+        yield b"data: [DONE]\n\n"
 
     async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
         raise ImageGenerationNotSupportedError()
@@ -1165,3 +1188,229 @@ def _responses_message_item(message: AnthropicMessage) -> dict[str, Any]:
         "role": "assistant",
         "content": [{"type": "output_text", "text": message.text(), "annotations": []}],
     }
+
+
+# ---------------------------------------------------------------------------
+# 3b. Chat request translation: chat completions request -> Messages request
+# ---------------------------------------------------------------------------
+
+
+def messages_request_from_chat(req: ChatCompletionRequest) -> dict[str, Any]:
+    """Build a Messages request from a chat completions request.
+
+    The chat request is first restated as a Responses body, so both endpoints share one set of
+    translation rules (and the same history always produces the same bytes). Fields are copied by
+    allow-list, so sampling fields and Copilot's own fields never reach Anthropic.
+    """
+    return messages_request_from_responses(responses_body_from_chat(req))
+
+
+def responses_body_from_chat(req: ChatCompletionRequest) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for message in req.messages:
+        items.extend(_chat_message_items(message))
+    extra = req.extra
+    body: dict[str, Any] = {"model": req.model, "input": items, "n": extra.get("n")}
+    max_tokens = extra.get("max_completion_tokens")
+    body["max_output_tokens"] = max_tokens if max_tokens is not None else extra.get("max_tokens")
+    if extra.get("reasoning_effort") is not None:
+        body["reasoning"] = {"effort": extra["reasoning_effort"]}
+    response_format = extra.get("response_format")
+    if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+        json_schema = response_format.get("json_schema")
+        schema = json_schema.get("schema") if isinstance(json_schema, dict) else None
+        body["text"] = {"format": {"type": "json_schema", "schema": schema}}
+    tools = [_responses_tool_from_chat(tool) for tool in extra.get("tools") or [] if isinstance(tool, dict)]
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = extra.get("tool_choice")
+        body["parallel_tool_calls"] = extra.get("parallel_tool_calls")
+    return body
+
+
+def _responses_tool_from_chat(tool: dict[str, Any]) -> dict[str, Any]:
+    # Chat nests the function under "function"; Responses keeps it flat.
+    function = tool.get("function")
+    if tool.get("type") != "function" or not isinstance(function, dict):
+        return tool  # not a function tool: the shared translation drops it
+    return {"type": "function", **function}
+
+
+def _chat_message_items(message: ChatMessage) -> list[dict[str, Any]]:
+    """One chat message as Responses input items.
+
+    Echoed ``reasoning_content`` / ``reasoning`` / ``cot_summary`` on assistant messages are only
+    summaries, never Claude's signed thinking, so they are not sent back (ADR 0093).
+    """
+    content = message.content if isinstance(message.content, (str, list)) else ""
+    if message.role == "tool":
+        return [{"type": "function_call_output", "call_id": message.tool_call_id or "", "output": content}]
+    items: list[dict[str, Any]] = [{"type": "message", "role": message.role, "content": content}]
+    if message.role == "assistant":
+        for call in message.tool_calls or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict):
+                continue
+            items.append(
+                {
+                    "type": "function_call",
+                    "call_id": str(call.get("id") or ""),
+                    "name": str(function.get("name") or ""),
+                    "arguments": function.get("arguments") or "{}",
+                }
+            )
+    return items
+
+
+# ---------------------------------------------------------------------------
+# 4b. Chat reply translation: Anthropic events -> chat completion
+# ---------------------------------------------------------------------------
+
+
+def openai_chat_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
+    """Chat usage; cache read and cache write count as prompt tokens, as on Responses."""
+    responses_usage = openai_usage_from_anthropic(usage)
+    return {
+        "prompt_tokens": responses_usage["input_tokens"],
+        "prompt_tokens_details": {"cached_tokens": responses_usage["input_tokens_details"]["cached_tokens"]},
+        "completion_tokens": responses_usage["output_tokens"],
+        "total_tokens": responses_usage["total_tokens"],
+    }
+
+
+def chat_reply_from_message(message: AnthropicMessage, *, model: str, created: int | None = None) -> dict[str, Any]:
+    reply_message: dict[str, Any] = {"role": "assistant", "content": message.text()}
+    reasoning = _chat_reasoning_content(message)
+    if reasoning:
+        reply_message["reasoning_content"] = reasoning
+    tool_calls = [
+        _chat_tool_call(message, index) for index, block in enumerate(message.content) if block.get("type") == "tool_use"
+    ]
+    if tool_calls:
+        reply_message["tool_calls"] = tool_calls
+    return {
+        "id": message.item_id("chatcmpl"),
+        "object": "chat.completion",
+        "created": created if created is not None else int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "message": reply_message, "finish_reason": _chat_finish_reason(message.stop_reason)}],
+        "usage": openai_chat_usage_from_anthropic(message.usage),
+    }
+
+
+_CHAT_THINKING_SEPARATOR = "\n\n"
+
+
+def _chat_reasoning_content(message: AnthropicMessage) -> str:
+    """Each thinking block's summary, in order; the stream joins them the same way."""
+    return _CHAT_THINKING_SEPARATOR.join(text for text in message.thinking_summaries() if text)
+
+
+def _chat_tool_call(message: AnthropicMessage, index: int) -> dict[str, Any]:
+    # The Anthropic tool-use id is the chat tool call id, so the tool result goes back unchanged.
+    block = message.content[index]
+    return {
+        "id": str(block.get("id") or ""),
+        "type": "function",
+        "function": {"name": str(block.get("name") or ""), "arguments": message.tool_arguments(index)},
+    }
+
+
+def _chat_finish_reason(stop_reason: str | None) -> str:
+    if stop_reason == "tool_use":
+        return "tool_calls"
+    if stop_reason == "max_tokens":
+        return "length"
+    return "stop"
+
+
+class ChatStream:
+    """Turns Anthropic stream events into chat completion chunks, as they arrive.
+
+    Thinking streams as ``delta.reasoning_content``, text as ``delta.content``. The last chunk
+    carries the finish reason and the usage, which is where Token Usage reads it.
+    """
+
+    def __init__(self, *, model: str):
+        self.model = model
+        self.message = AnthropicMessage()
+        self._created = int(time.time())
+        self._started = False
+        self._thinking_streamed = False
+        self._separate_thinking = False
+        self._tool_index: dict[int, int] = {}  # Anthropic block index -> chat tool call index
+
+    @property
+    def started(self) -> bool:
+        return self._started
+
+    def feed(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        self.message.apply(event)
+        kind = event.get("type")
+        if kind == "message_start":
+            self._started = True
+            return [self._chunk({"role": "assistant", "content": ""})]
+        if kind == "content_block_start":
+            return self._block_started(event)
+        if kind == "content_block_delta":
+            return self._block_delta(event)
+        return []
+
+    def fail(self, message: str) -> list[dict[str, Any]]:
+        """Stream ``message`` as the end of the answer text; ``finish`` then closes the stream.
+
+        The stop reason stays unset (a refusal never reaches ``self.message``), so it finishes as ``stop``.
+        """
+        return [self._chunk({"content": ("\n\n" if self.message.text() else "") + message})]
+
+    def finish(self) -> list[dict[str, Any]]:
+        chunk = self._chunk({}, finish_reason=_chat_finish_reason(self.message.stop_reason))
+        chunk["usage"] = openai_chat_usage_from_anthropic(self.message.usage)
+        return [chunk]
+
+    def _block_started(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        block = event.get("content_block") or {}
+        if block.get("type") == "thinking":
+            # A later thinking block's summary is set apart, as in the non-streaming reply.
+            self._separate_thinking = self._thinking_streamed
+        elif block.get("type") == "tool_use":
+            tool_index = len(self._tool_index)
+            self._tool_index[_block_index(event)] = tool_index
+            call = {
+                "index": tool_index,
+                "id": str(block.get("id") or ""),
+                "type": "function",
+                "function": {"name": str(block.get("name") or ""), "arguments": ""},
+            }
+            return [self._chunk({"tool_calls": [call]})]
+        return []
+
+    def _block_delta(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        delta = event.get("delta") or {}
+        if delta.get("type") == "thinking_delta" and delta.get("thinking"):
+            text = str(delta["thinking"])
+            if self._separate_thinking:
+                text = _CHAT_THINKING_SEPARATOR + text
+                self._separate_thinking = False
+            self._thinking_streamed = True
+            return [self._chunk({"reasoning_content": text})]
+        if delta.get("type") == "text_delta" and delta.get("text"):
+            return [self._chunk({"content": str(delta["text"])})]
+        tool_index = self._tool_index.get(_block_index(event))
+        if delta.get("type") == "input_json_delta" and delta.get("partial_json") and tool_index is not None:
+            call = {"index": tool_index, "function": {"arguments": str(delta["partial_json"])}}
+            return [self._chunk({"tool_calls": [call]})]
+        return []
+
+    def _chunk(self, delta: dict[str, Any], *, finish_reason: str | None = None) -> dict[str, Any]:
+        return {
+            "id": self.message.item_id("chatcmpl"),
+            "object": "chat.completion.chunk",
+            "created": self._created,
+            "model": self.model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+        }
+
+
+def _encode_chat_chunk(chunk: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8")
