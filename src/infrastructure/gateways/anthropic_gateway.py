@@ -33,7 +33,7 @@ from src.domain.errors import (
     UpstreamTransportError,
     extract_upstream_error_text,
 )
-from src.domain.extra_usage import DEFAULT_EXTRA_USAGE_MESSAGE, is_key_failover_exhaustion
+from src.domain.extra_usage import is_anthropic_credit_exhaustion
 from src.infrastructure.config import ProviderSettings, resolve_provider_api_keys
 from src.infrastructure.gateways.slot_policy import wait_for_pool_slot
 from src.infrastructure.gateways.upstream_key_pool import NoSelectableUpstreamKeyError, UpstreamKeyPool
@@ -45,6 +45,8 @@ DEFAULT_MAX_TOKENS = 32000
 _MESSAGES_PATH = "/messages"
 _MODELS_PATH = "/models"
 _MODELS_PARAMS = {"lifecycle": "active", "limit": "1000"}
+DEFAULT_CREDIT_EXHAUSTION_MESSAGE = "Anthropic credit is exhausted or a spend limit was reached"
+REFUSAL_MESSAGE = "Claude 拒絕回應這個請求，請換個說法再試"
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +127,28 @@ class AnthropicGateway:
         return responses_reply_from_message(message, model=str(body.get("model") or message.model))
 
     async def responses_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        raise self._refusal("Claude 目前只支援非串流的 /v1/responses")
-        yield b""  # pragma: no cover - makes this an async generator
+        payload = messages_request_from_responses(body)
+        stream = ResponsesStream(model=str(body.get("model") or ""))
+        try:
+            async for event in self._message_events(payload):
+                for out in stream.feed(event):
+                    yield _encode_responses_event(out)
+        except (UpstreamServiceError, ServiceUnavailableError) as exc:
+            if not stream.started:
+                raise  # nothing sent yet: the router's error handling and vcr-auto still apply
+            # Mid-stream (a refusal stop, or an in-stream error event): end this same response with
+            # a Readable Upstream Error, as the router's own stream error handling would.
+            message = exc.user_facing_message() if isinstance(exc, UpstreamServiceError) else exc.message
+            logger.warning(
+                "anthropic_stream_ended_by_error provider=%s status=%s message=%s",
+                self.provider.name,
+                exc.status_code,
+                message,
+            )
+            for out in stream.fail(message):
+                yield _encode_responses_event(out)
+        for out in stream.finish():
+            yield _encode_responses_event(out)
 
     async def chat_completions_nonstream(self, req: ChatCompletionRequest) -> dict[str, Any]:
         raise self._refusal("Claude 目前不支援 /v1/chat/completions")
@@ -260,7 +282,7 @@ class AnthropicGateway:
                     ) as response:
                         if response.status_code >= 400:
                             text = (await response.aread()).decode("utf-8", errors="replace")
-                            if not is_key_failover_exhaustion(response.status_code, text):
+                            if not is_anthropic_credit_exhaustion(response.status_code, text):
                                 raise UpstreamServiceError(
                                     status_code=response.status_code,
                                     backend=self.provider.name,
@@ -286,6 +308,8 @@ class AnthropicGateway:
                             async for event in _sse_events(response):
                                 if event.get("type") == "error":
                                     raise self._stream_error(event)
+                                if _stop_reason(event) == "refusal":
+                                    raise self._refusal_stop_error()
                                 yield event
                             return
                 except httpx.RequestError as exc:
@@ -304,17 +328,41 @@ class AnthropicGateway:
         }
 
     def _exhausted_keys_error(self, pool: UpstreamKeyPool) -> UpstreamServiceError:
-        body = {"error": pool.last_extra_usage_message or DEFAULT_EXTRA_USAGE_MESSAGE}
-        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+        return self._credit_exhaustion_error(pool.last_extra_usage_message or DEFAULT_CREDIT_EXHAUSTION_MESSAGE)
 
     def _quarantine_exhausted_key(self, pool: UpstreamKeyPool, index: int, text: str) -> UpstreamServiceError:
-        pool.quarantine(index, extract_upstream_error_text(text) or DEFAULT_EXTRA_USAGE_MESSAGE)
-        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=_json_or_text(text))
+        message = extract_upstream_error_text(text) or DEFAULT_CREDIT_EXHAUSTION_MESSAGE
+        pool.quarantine(index, message)
+        return self._credit_exhaustion_error(message, upstream=_json_or_text(text))
+
+    def _credit_exhaustion_error(self, message: str, *, upstream: Any = None) -> UpstreamServiceError:
+        # Anthropic's exhaustion bodies carry no OpenRouter or Ollama marker, so the router's
+        # provider-agnostic checks (vcr-auto, operator alerts) would miss them. Re-shape them as
+        # a 402 Credit Exhaustion; the student still reads Anthropic's own message.
+        body: dict[str, Any] = {"error": {"type": "payment_required", "message": message}}
+        if upstream is not None:
+            body["upstream"] = upstream
+        return UpstreamServiceError(status_code=402, backend=self.provider.name, body=body)
+
+    def _refusal_stop_error(self) -> UpstreamServiceError:
+        # A refusal is Claude's answer, not a failing key or Model ID: no quarantine, vcr-auto stops.
+        return UpstreamServiceError(
+            status_code=400,
+            backend=self.provider.name,
+            body={"error": {"type": "refusal", "message": REFUSAL_MESSAGE}},
+        )
 
     def _stream_error(self, event: dict[str, Any]) -> UpstreamServiceError:
         error = event.get("error") if isinstance(event.get("error"), dict) else {}
         status = _STREAM_ERROR_STATUS.get(str(error.get("type")), 502)
         return UpstreamServiceError(status_code=status, backend=self.provider.name, body=event)
+
+
+def _stop_reason(event: dict[str, Any]) -> str | None:
+    if event.get("type") != "message_delta":
+        return None
+    delta = event.get("delta")
+    return str(delta["stop_reason"]) if isinstance(delta, dict) and delta.get("stop_reason") else None
 
 
 _STREAM_ERROR_STATUS = {
@@ -418,6 +466,8 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
         "stream": True,
         # Automatic prompt caching: Anthropic places the breakpoint on the last cacheable block.
         "cache_control": {"type": "ephemeral"},
+        # The summary text becomes the Responses reasoning summary (Responses Reasoning Projection).
+        "thinking": {"type": "adaptive", "display": "summarized"},
     }
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
@@ -425,11 +475,29 @@ def messages_request_from_responses(body: dict[str, Any]) -> dict[str, Any]:
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = _anthropic_tool_choice(body.get("tool_choice"), body.get("parallel_tool_calls"))
+    reasoning = body.get("reasoning")
+    effort = _claude_effort(reasoning.get("effort") if isinstance(reasoning, dict) else None)
+    if effort:
+        payload.setdefault("output_config", {})["effort"] = effort
     output_format = _structured_output_format(body.get("text"))
     if output_format:
-        # output_config also carries effort; merge so neither setting overwrites the other.
         payload.setdefault("output_config", {})["format"] = output_format
     return payload
+
+
+# Claude has no `minimal`; every other level keeps its name. Anything else sends no effort.
+_CLAUDE_EFFORT = {
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+}
+
+
+def _claude_effort(value: Any) -> str | None:
+    return _CLAUDE_EFFORT.get(value) if isinstance(value, str) else None
 
 
 def _structured_output_format(text: Any) -> dict[str, Any] | None:
@@ -594,9 +662,11 @@ class AnthropicMessage:
     content: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str | None = None
     usage: dict[str, int] = field(default_factory=dict)
-    # Tool input arrives as JSON text in pieces; it is parsed into the block's `input` on block stop,
-    # so `content` always holds plain Anthropic content blocks.
-    _partial_json: dict[int, str] = field(default_factory=dict, repr=False)
+    _id_suffix: str = ""
+    # Tool input arrives as JSON text in pieces, kept per block index. It is parsed into the block's
+    # `input` on block stop, so `content` always holds plain Anthropic content blocks; the raw text
+    # stays the Responses `arguments`, so streamed deltas add up to the finished arguments.
+    _tool_json: dict[int, str] = field(default_factory=dict, repr=False)
 
     def apply(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
@@ -609,15 +679,21 @@ class AnthropicMessage:
             self._block_at(event).update(dict(event.get("content_block") or {}))
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
-            if delta.get("type") == "text_delta":
+            delta_type = delta.get("type")
+            if delta_type == "text_delta":
                 block = self._block_at(event)
                 block["text"] = str(block.get("text") or "") + str(delta.get("text") or "")
-            elif delta.get("type") == "input_json_delta":
-                index = _event_index(event)
-                self._partial_json[index] = self._partial_json.get(index, "") + str(delta.get("partial_json") or "")
+            elif delta_type == "thinking_delta":
+                block = self._block_at(event)
+                block["thinking"] = str(block.get("thinking") or "") + str(delta.get("thinking") or "")
+            elif delta_type == "signature_delta":
+                block = self._block_at(event)
+                block["signature"] = str(block.get("signature") or "") + str(delta.get("signature") or "")
+            elif delta_type == "input_json_delta":
+                index = _block_index(event)
+                self._tool_json[index] = self._tool_json.get(index, "") + str(delta.get("partial_json") or "")
         elif kind == "content_block_stop":
-            index = _event_index(event)
-            raw = self._partial_json.pop(index, "")
+            raw = self._tool_json.get(_block_index(event), "")
             if raw:
                 block = self._block_at(event)
                 try:
@@ -634,11 +710,26 @@ class AnthropicMessage:
     def text(self) -> str:
         return "".join(str(block.get("text") or "") for block in self.content if block.get("type") == "text")
 
-    def tool_uses(self) -> list[dict[str, Any]]:
-        return [block for block in self.content if block.get("type") == "tool_use"]
+    def thinking_summaries(self) -> list[str]:
+        """The summarized text of each thinking block, in order (``display: "summarized"``)."""
+        return [str(block.get("thinking") or "") for block in self.content if block.get("type") == "thinking"]
+
+    def item_id(self, prefix: str) -> str:
+        """A stable output item id for this message, so streamed items match the completed reply."""
+        if not self._id_suffix:
+            self._id_suffix = self.id.removeprefix("msg_") or uuid.uuid4().hex
+        return f"{prefix}_{self._id_suffix}"
+
+    def tool_arguments(self, index: int) -> str:
+        """The Responses `arguments` for the tool_use block at ``index``: Claude's own JSON text."""
+        raw = self._tool_json.get(index)
+        if raw:
+            return raw
+        tool_input = self.content[index].get("input")
+        return json.dumps(tool_input if isinstance(tool_input, dict) else {}, ensure_ascii=False)
 
     def _block_at(self, event: dict[str, Any]) -> dict[str, Any]:
-        index = _event_index(event)
+        index = _block_index(event)
         while len(self.content) <= index:
             self.content.append({})
         return self.content[index]
@@ -649,10 +740,6 @@ class AnthropicMessage:
         for key, value in usage.items():
             if isinstance(value, int) and not isinstance(value, bool):
                 self.usage[key] = value
-
-
-def _event_index(event: dict[str, Any]) -> int:
-    return int(event.get("index") or 0)
 
 
 async def _assemble_message(events: AsyncGenerator[dict[str, Any], None]) -> AnthropicMessage:
@@ -677,48 +764,300 @@ def openai_usage_from_anthropic(usage: dict[str, int]) -> dict[str, Any]:
     }
 
 
-def function_call_item_from_tool_use(block: dict[str, Any]) -> dict[str, Any]:
-    """A Responses function_call for one Anthropic tool_use block; the tool-use id is the call id."""
-    call_id = str(block.get("id") or "")
-    tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
-    return {
-        "type": "function_call",
-        "id": f"fc_{call_id}",
-        "call_id": call_id,
-        "name": str(block.get("name") or ""),
-        "arguments": json.dumps(tool_input, ensure_ascii=False),
-        "status": "completed",
-    }
-
-
-def responses_output_from_message(message: AnthropicMessage) -> list[dict[str, Any]]:
-    """Output items: one assistant message with the text, then one function_call per tool use."""
+def responses_reply_from_message(
+    message: AnthropicMessage, *, model: str, created_at: int | None = None
+) -> dict[str, Any]:
+    """The completed Responses reply. Output items follow the order their first block arrived,
+    which is also the order the stream announced them in."""
     output: list[dict[str, Any]] = []
-    tool_uses = message.tool_uses()
-    text = message.text()
-    if text or not tool_uses:
-        output.append(
-            {
-                "type": "message",
-                "id": f"msg_{uuid.uuid4().hex}",
-                "status": "completed",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": text, "annotations": []}],
-            }
-        )
-    output.extend(function_call_item_from_tool_use(block) for block in tool_uses)
-    return output
-
-
-def responses_reply_from_message(message: AnthropicMessage, *, model: str) -> dict[str, Any]:
+    for kind in _output_kinds(message):
+        if kind == "thinking":
+            output.append(_responses_reasoning_item(message))
+        elif kind == "text":
+            output.append(_responses_message_item(message))
+        else:
+            output.append(_responses_function_call_item(message, _tool_block_index(kind)))
+    if not output:
+        output.append(_responses_message_item(message))
     incomplete = message.stop_reason == "max_tokens"
     return {
-        "id": f"resp_{message.id or uuid.uuid4().hex}",
+        "id": message.item_id("resp"),
         "object": "response",
-        "created_at": int(time.time()),
+        "created_at": created_at if created_at is not None else int(time.time()),
         "status": "incomplete" if incomplete else "completed",
         "incomplete_details": {"reason": "max_output_tokens"} if incomplete else None,
         "model": model,
-        "output": responses_output_from_message(message),
+        "output": output,
         "usage": openai_usage_from_anthropic(message.usage),
+    }
+
+
+class ResponsesStream:
+    """Turns Anthropic stream events into Responses stream events, as they arrive.
+
+    Thinking streams as reasoning summary events on one reasoning item (one summary part per
+    thinking block); text streams as output text on one assistant message item; each tool use
+    streams as function call arguments on its own function_call item. Items are
+    finished at the end, from ``responses_reply_from_message``, so the done items and
+    ``response.completed`` always equal the non-streaming reply.
+    """
+
+    def __init__(self, *, model: str):
+        self.model = model
+        self.message = AnthropicMessage()
+        self._created_at = int(time.time())
+        self._sequence = 0
+        self._item_index: dict[str, int] = {}  # "thinking" | "text" -> output_index
+        self._summary_index: dict[int, int] = {}  # Anthropic block index -> summary_index
+        self._notice = ""  # a Readable Upstream Error that ended the stream early
+
+    def feed(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        self.message.apply(event)
+        kind = event.get("type")
+        if kind == "message_start":
+            return [self._event("response.created", response=self._response_shell())]
+        if kind == "content_block_start":
+            return self._block_started(event)
+        if kind == "content_block_delta":
+            return self._block_delta(event)
+        if kind == "content_block_stop":
+            return self._block_stopped(event)
+        return []
+
+    @property
+    def started(self) -> bool:
+        return self._sequence > 0
+
+    def fail(self, message: str) -> list[dict[str, Any]]:
+        """Stream ``message`` as the end of the answer text; ``finish`` then closes the response.
+
+        The notice stays out of ``self.message``: it is the router's text, not Claude's.
+        """
+        self._notice = ("\n\n" if self.message.text() else "") + message
+        out = self._open_item("text") if "text" not in self._item_index else []
+        out.append(
+            self._event(
+                "response.output_text.delta",
+                item_id=self.message.item_id("msg"),
+                output_index=self._item_index["text"],
+                content_index=0,
+                delta=self._notice,
+            )
+        )
+        return out
+
+    def finish(self) -> list[dict[str, Any]]:
+        reply = responses_reply_from_message(self.message, model=self.model, created_at=self._created_at)
+        if self._notice:
+            messages = [item for item in reply["output"] if item["type"] == "message"]
+            if not messages:
+                messages = [_responses_message_item(self.message)]
+                reply["output"].extend(messages)
+            messages[0]["content"][0]["text"] += self._notice
+        out: list[dict[str, Any]] = []
+        for output_index, item in enumerate(reply["output"]):
+            kind = self._kind_of(item)
+            if kind not in self._item_index:
+                out.extend(self._open_item(kind))
+            if kind == "text":
+                part = item["content"][0]
+                common = {"item_id": item["id"], "output_index": output_index, "content_index": 0}
+                out.append(self._event("response.output_text.done", **common, text=part["text"]))
+                out.append(self._event("response.content_part.done", **common, part=part))
+            out.append(self._event("response.output_item.done", output_index=output_index, item=item))
+        out.append(self._event("response.completed", response=reply))
+        return out
+
+    def _block_started(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        kind = (event.get("content_block") or {}).get("type")
+        if kind == "thinking":
+            out = self._open_item("thinking") if "thinking" not in self._item_index else []
+            summary_index = len(self._summary_index)
+            self._summary_index[_block_index(event)] = summary_index
+            out.append(
+                self._event(
+                    "response.reasoning_summary_part.added",
+                    **self._summary_common(summary_index),
+                    part={"type": "summary_text", "text": ""},
+                )
+            )
+            return out
+        if kind == "text" and "text" not in self._item_index:
+            return self._open_item("text")
+        if kind == "tool_use":
+            return self._open_item(_tool_kind(_block_index(event)))
+        return []
+
+    def _block_delta(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        delta = event.get("delta") or {}
+        if delta.get("type") == "thinking_delta" and _block_index(event) in self._summary_index:
+            return [
+                self._event(
+                    "response.reasoning_summary_text.delta",
+                    **self._summary_common(self._summary_index[_block_index(event)]),
+                    delta=str(delta.get("thinking") or ""),
+                )
+            ]
+        if delta.get("type") == "text_delta" and "text" in self._item_index:
+            return [
+                self._event(
+                    "response.output_text.delta",
+                    item_id=self.message.item_id("msg"),
+                    output_index=self._item_index["text"],
+                    content_index=0,
+                    delta=str(delta.get("text") or ""),
+                )
+            ]
+        tool_kind = _tool_kind(_block_index(event))
+        if delta.get("type") == "input_json_delta" and tool_kind in self._item_index:
+            return [
+                self._event(
+                    "response.function_call_arguments.delta",
+                    **self._tool_common(tool_kind),
+                    delta=str(delta.get("partial_json") or ""),
+                )
+            ]
+        return []
+
+    def _block_stopped(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        tool_kind = _tool_kind(_block_index(event))
+        if tool_kind in self._item_index:
+            arguments = self.message.tool_arguments(_block_index(event))
+            return [
+                self._event(
+                    "response.function_call_arguments.done", **self._tool_common(tool_kind), arguments=arguments
+                )
+            ]
+        summary_index = self._summary_index.get(_block_index(event))
+        if summary_index is None:
+            return []
+        text = str(self.message.content[_block_index(event)].get("thinking") or "")
+        common = self._summary_common(summary_index)
+        return [
+            self._event("response.reasoning_summary_text.done", **common, text=text),
+            self._event("response.reasoning_summary_part.done", **common, part={"type": "summary_text", "text": text}),
+        ]
+
+    def _open_item(self, kind: str) -> list[dict[str, Any]]:
+        output_index = len(self._item_index)
+        self._item_index[kind] = output_index
+        if kind == "thinking":
+            item = {"type": "reasoning", "id": self.message.item_id("rs"), "summary": []}
+            return [self._event("response.output_item.added", output_index=output_index, item=item)]
+        if kind.startswith("tool:"):
+            item = _responses_function_call_item(self.message, _tool_block_index(kind), status="in_progress")
+            return [self._event("response.output_item.added", output_index=output_index, item=item)]
+        item_id = self.message.item_id("msg")
+        item = {"type": "message", "id": item_id, "status": "in_progress", "role": "assistant", "content": []}
+        return [
+            self._event("response.output_item.added", output_index=output_index, item=item),
+            self._event(
+                "response.content_part.added",
+                item_id=item_id,
+                output_index=output_index,
+                content_index=0,
+                part={"type": "output_text", "text": "", "annotations": []},
+            ),
+        ]
+
+    def _tool_common(self, tool_kind: str) -> dict[str, Any]:
+        block = self.message.content[_tool_block_index(tool_kind)]
+        return {"item_id": _function_call_id(block), "output_index": self._item_index[tool_kind]}
+
+    def _kind_of(self, item: dict[str, Any]) -> str:
+        if item["type"] == "reasoning":
+            return "thinking"
+        if item["type"] == "function_call":
+            for index, block in enumerate(self.message.content):
+                if block.get("type") == "tool_use" and _function_call_id(block) == item["id"]:
+                    return _tool_kind(index)
+        return "text"
+
+    def _summary_common(self, summary_index: int) -> dict[str, Any]:
+        return {
+            "item_id": self.message.item_id("rs"),
+            "output_index": self._item_index["thinking"],
+            "summary_index": summary_index,
+        }
+
+    def _response_shell(self) -> dict[str, Any]:
+        return {
+            "id": self.message.item_id("resp"),
+            "object": "response",
+            "created_at": self._created_at,
+            "status": "in_progress",
+            "model": self.model,
+            "output": [],
+        }
+
+    def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        event = {"type": kind, "sequence_number": self._sequence, **fields}
+        self._sequence += 1
+        return event
+
+
+def _block_index(event: dict[str, Any]) -> int:
+    return int(event.get("index") or 0)
+
+
+def _encode_responses_event(event: dict[str, Any]) -> bytes:
+    return f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def _output_kinds(message: AnthropicMessage) -> list[str]:
+    """Output item kinds in first-arrival order. All thinking blocks share one reasoning item
+    (one summary part each); all text blocks share one assistant message item; each tool_use
+    block is its own function_call item, keyed ``tool:<block index>``."""
+    kinds: list[str] = []
+    for index, block in enumerate(message.content):
+        kind = block.get("type")
+        if kind in ("thinking", "text") and kind not in kinds:
+            kinds.append(kind)
+        elif kind == "tool_use":
+            kinds.append(_tool_kind(index))
+    return kinds
+
+
+def _tool_kind(block_index: int) -> str:
+    return f"tool:{block_index}"
+
+
+def _tool_block_index(kind: str) -> int:
+    return int(kind.removeprefix("tool:"))
+
+
+def _function_call_id(block: dict[str, Any]) -> str:
+    return f"fc_{block.get('id') or ''}"
+
+
+def _responses_function_call_item(
+    message: AnthropicMessage, index: int, *, status: str = "completed"
+) -> dict[str, Any]:
+    """A Responses function_call for one tool_use block. The Anthropic tool-use id is the call id."""
+    block = message.content[index]
+    return {
+        "type": "function_call",
+        "id": _function_call_id(block),
+        "call_id": str(block.get("id") or ""),
+        "name": str(block.get("name") or ""),
+        "arguments": message.tool_arguments(index) if status == "completed" else "",
+        "status": status,
+    }
+
+
+def _responses_reasoning_item(message: AnthropicMessage) -> dict[str, Any]:
+    return {
+        "type": "reasoning",
+        "id": message.item_id("rs"),
+        "summary": [{"type": "summary_text", "text": text} for text in message.thinking_summaries()],
+    }
+
+
+def _responses_message_item(message: AnthropicMessage) -> dict[str, Any]:
+    return {
+        "type": "message",
+        "id": message.item_id("msg"),
+        "status": "completed",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": message.text(), "annotations": []}],
     }
