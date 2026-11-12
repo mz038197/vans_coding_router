@@ -3950,12 +3950,18 @@ snippets:
     }
 
     // What the add list offers for one kind: the kind-split providers' list for it, plus the
-    // All Models providers' whole lists where that kind can take them.
+    // All Models providers' whole lists where that kind can take them. Anthropic is an All
+    // Models provider whose models only answer text, so it stays on the text shelf (#124).
     function modelWizardExtraCatalog(shelf, catalogs) {
+      const textOnlyProviders = ['anthropic'];
       const kind = MODEL_WIZARD_EXTRA_KINDS.find((item) => item.shelf === shelf);
       if (!kind) return [];
       const own = (catalogs && catalogs[shelf]) || [];
-      const whole = kind.allModels ? ((catalogs && catalogs.all) || []) : [];
+      const whole = kind.allModels
+        ? ((catalogs && catalogs.all) || []).filter(
+          (item) => item && !textOnlyProviders.includes(modelIdPrefix(item.id)),
+        )
+        : [];
       return [...own, ...whole].filter((item) => item && item.id);
     }
 
