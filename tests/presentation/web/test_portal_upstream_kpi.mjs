@@ -365,3 +365,45 @@ test("the dashboard has no pool-wide concurrency tile", () => {
   assert.doesNotMatch(html, /<svg|無排隊|排隊 3|\/ 14/);
 });
 
+
+function anthropicKey(overrides = {}) {
+  return {
+    index: 0,
+    label: "ANTHROPIC 1",
+    cap: 10,
+    in_flight: 2,
+    quarantined: false,
+    quarantine_remaining_sec: null,
+    ...overrides,
+  };
+}
+
+test("each Anthropic key gets a tile with its in-flight light and no money meter", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const html = upstreamKpiTilesHtml({
+    anthropic: { pool: { capacity: 20, in_flight_total: 2, waiting: 0, keys: [anthropicKey(), anthropicKey({ index: 1, in_flight: 0 })] } },
+  });
+  const [busy, idle] = tiles(html);
+
+  assert.equal(tiles(html).length, 2);
+  assert.match(busy, /anthropic/);
+  assert.match(busy, /<span>#0<\/span>/);
+  assert.match(busy, /<span aria-hidden="true">2\/10<\/span>/);
+  assert.match(idle, /<span>#1<\/span>/);
+  for (const tile of [busy, idle]) {
+    assert.doesNotMatch(tile, /class="meter|\$|餘額|月上限|月用量|NaN|null|undefined/);
+    assert.deepEqual(statuses(tile), []);
+    assert.deepEqual(releaseButtons(tile), []);
+  }
+});
+
+test("a quarantined Anthropic key shows 隔離中 N 分 and a Quarantine Release button", () => {
+  const { upstreamKpiTilesHtml } = loadKpi();
+  const html = upstreamKpiTilesHtml({
+    anthropic: { pool: { keys: [anthropicKey({ index: 1, in_flight: 0, quarantined: true, quarantine_remaining_sec: 120 })] } },
+  });
+  const [tile] = tiles(html);
+
+  assert.deepEqual(statuses(tile), ["隔離中 2 分"]);
+  assert.deepEqual(releaseButtons(tile), ["anthropic|1"]);
+});
