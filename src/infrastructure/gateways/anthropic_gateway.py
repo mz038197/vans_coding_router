@@ -25,6 +25,8 @@ import httpx
 
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.errors import (
+    DecisionNotSupportedError,
+    EmbeddingsNotSupportedError,
     ImageGenerationNotSupportedError,
     ServiceUnavailableError,
     SpeechTranscriptionNotSupportedError,
@@ -198,7 +200,7 @@ class AnthropicGateway:
         return {"data": []}
 
     async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        raise self._refusal("Claude 不支援 /v1/embeddings")
+        raise EmbeddingsNotSupportedError("Claude 不支援 /v1/embeddings")
 
     async def embeddings_models(self) -> dict[str, Any]:
         return {"data": []}
@@ -223,7 +225,7 @@ class AnthropicGateway:
         yield b""  # pragma: no cover
 
     async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        raise self._refusal("Claude 不支援 /v1/decisions")
+        raise DecisionNotSupportedError("Claude 不支援 /v1/decisions")
 
     # Optional methods the routing gateway and Portal call through getattr.
     # The money overlays (attach_*) are deliberately absent: Anthropic has no balance API.
@@ -268,13 +270,6 @@ class AnthropicGateway:
         if self._pool is None:
             raise KeyError(f"provider「{self.provider.name}」has no upstream key pool")
         return self._pool
-
-    def _refusal(self, message: str) -> UpstreamServiceError:
-        return UpstreamServiceError(
-            status_code=400,
-            backend=self.provider.name,
-            body={"error": {"type": "invalid_request_error", "message": message}},
-        )
 
     # -----------------------------------------------------------------------
     # 2. Upstream transport: key pool, Key Failover, Anthropic SSE events

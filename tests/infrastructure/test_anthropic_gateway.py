@@ -493,9 +493,10 @@ async def test_an_upstream_error_is_raised_before_any_reply(monkeypatch):
 @pytest.mark.asyncio
 async def test_unsupported_capabilities_are_refused_without_calling_anthropic(monkeypatch):
     from src.domain.errors import (
+        DecisionNotSupportedError,
+        EmbeddingsNotSupportedError,
         ImageGenerationNotSupportedError,
         SpeechTranscriptionNotSupportedError,
-        UpstreamServiceError,
     )
 
     fake = _FakeAnthropic()
@@ -503,10 +504,14 @@ async def test_unsupported_capabilities_are_refused_without_calling_anthropic(mo
 
     with pytest.raises(ImageGenerationNotSupportedError):
         await gateway.images_create({"prompt": "cat"})
-    with pytest.raises(UpstreamServiceError):
+    with pytest.raises(EmbeddingsNotSupportedError) as embeddings:
         await gateway.embeddings_create({"input": "x"})
     with pytest.raises(SpeechTranscriptionNotSupportedError):
         await gateway.audio_transcriptions_create({}, ("a.wav", b"", None))
+    with pytest.raises(DecisionNotSupportedError) as decisions:
+        await gateway.decisions_create({"model": "claude-opus-5-5", "state": "x", "questions": []})
+    assert (embeddings.value.status_code, embeddings.value.code) == (400, "embeddings_not_supported")
+    assert (decisions.value.status_code, decisions.value.code) == (400, "decision_not_supported")
     assert fake.requests == []
 
 
