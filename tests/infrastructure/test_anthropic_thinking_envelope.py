@@ -5,6 +5,7 @@ import json
 import httpx
 import pytest
 
+from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.infrastructure.config import ProviderSettings
 from src.infrastructure.gateways.anthropic_gateway import AnthropicGateway
 
@@ -84,7 +85,11 @@ async def test_every_request_asks_anthropic_to_drop_invalid_thinking_under_the_b
 
     await gateway.responses_create({"model": MODEL, "input": "hi"})
     [_ async for _ in gateway.responses_create_stream({"model": MODEL, "input": "hi", "stream": True})]
+    chat = [ChatMessage(role="user", content="hi")]
+    await gateway.chat_completions_nonstream(ChatCompletionRequest(model=MODEL, messages=chat))
+    [_ async for _ in gateway.chat_completions_stream(ChatCompletionRequest(model=MODEL, messages=chat, stream=True))]
 
+    assert len(fake.requests) == 4
     for request in fake.requests:
         body = json.loads(request.content)
         assert request.headers["anthropic-beta"] == "thinking-binding-controls-2026-08-01"
