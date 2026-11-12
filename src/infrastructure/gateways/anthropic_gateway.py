@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_VERSION = "2026-10-21"
 DEFAULT_MAX_TOKENS = 32000
 _MESSAGES_PATH = "/messages"
+_MODELS_PATH = "/models"
+_MODELS_PARAMS = {"lifecycle": "active", "limit": "1000"}
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +80,43 @@ class AnthropicGateway:
         return {"ok": True, "pool": self.pool_status()}
 
     async def models(self) -> dict[str, Any]:
-        return {"data": []}
+        """Active models in one call; the Upstream Model Catalog lists them under All Models."""
+        await self.startup()
+        assert self._client is not None
+        if not self.provider.base_url:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: missing base_url")
+        pool = self._pool
+        if pool is None:
+            raise ServiceUnavailableError(f"{self.provider.name} unavailable: no API key configured")
+        # A listing takes no concurrency slot; any key that is not quarantined will do.
+        index = next((i for i in range(pool.key_count) if not pool.is_quarantined(i)), 0)
+        headers = {
+            **self.provider.extra_headers,
+            "x-api-key": pool.key_at(index),
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
+        try:
+            response = await self._client.get(
+                f"{self.provider.base_url.rstrip('/')}{_MODELS_PATH}",
+                headers=headers,
+                params=_MODELS_PARAMS,
+            )
+        except httpx.RequestError as exc:
+            raise UpstreamTransportError(f"{self.provider.name} unavailable: {exc}") from exc
+        if response.status_code >= 400:
+            raise UpstreamServiceError(
+                status_code=response.status_code,
+                backend=self.provider.name,
+                body=_json_or_text(response.text),
+            )
+        listed = response.json()
+        return {
+            "data": [
+                {"id": item["id"], "name": item.get("display_name") or item["id"]}
+                for item in ((listed.get("data") if isinstance(listed, dict) else None) or [])
+                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+            ]
+        }
 
     async def responses_create(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = messages_request_from_responses(body)
