@@ -208,3 +208,15 @@ async def test_an_input_transformation_on_a_chat_request_is_logged_with_its_reas
 
     logged = [r.getMessage() for r in caplog.records if "anthropic_input_transformation" in r.getMessage()]
     assert len(logged) == 1 and "reason=prefix_mismatch" in logged[0] and f"model={MODEL}" in logged[0]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_cut_short_by_a_refusal_carries_no_envelope(monkeypatch):
+    fake = _FakeAnthropic(_reply(_thought(1), stop="refusal"))
+    gateway = _gateway(monkeypatch, fake)
+
+    chunks = await _stream_chunks(gateway, _chat(ChatMessage(role="user", content="q1"), stream=True))
+
+    final = chunks[-1]["choices"][0]
+    assert final["finish_reason"] == "stop"
+    assert all("reasoning_opaque" not in chunk["choices"][0]["delta"] for chunk in chunks)

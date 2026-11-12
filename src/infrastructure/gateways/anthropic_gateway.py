@@ -1345,6 +1345,7 @@ class ChatStream:
         self._thinking_streamed = False
         self._separate_thinking = False
         self._tool_index: dict[int, int] = {}  # Anthropic block index -> chat tool call index
+        self._failed = False  # a Readable Upstream Error ended the stream early
 
     @property
     def started(self) -> bool:
@@ -1367,13 +1368,15 @@ class ChatStream:
 
         The stop reason stays unset (a refusal never reaches ``self.message``), so it finishes as ``stop``.
         """
+        self._failed = True
         return [self._chunk({"content": ("\n\n" if self.message.text() else "") + message})]
 
     def finish(self) -> list[dict[str, Any]]:
         """The last chunk: finish reason, usage, and the round's envelope in ``reasoning_opaque``
         (ADR 0093), which Copilot sends back as ``cot_id``."""
         delta: dict[str, Any] = {}
-        envelope = encode_thinking_envelope(self.message.content, model=self.model)
+        # A round cut short is not one Claude can continue from: no envelope for it, as on Responses.
+        envelope = None if self._failed else encode_thinking_envelope(self.message.content, model=self.model)
         if envelope:
             delta["reasoning_opaque"] = envelope
         chunk = self._chunk(delta, finish_reason=_chat_finish_reason(self.message.stop_reason))
