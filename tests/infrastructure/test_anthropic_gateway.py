@@ -225,7 +225,9 @@ async def test_unsupported_capabilities_are_refused_without_calling_anthropic(mo
 async def test_an_exhausted_key_is_quarantined_and_the_next_key_answers(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.headers["x-api-key"] == "key-a":
-            return httpx.Response(402, json={"error": {"message": "Insufficient credits"}})
+            return httpx.Response(
+                402, json={"type": "error", "error": {"type": "billing_error", "message": "Billing problem"}}
+            )
         return httpx.Response(200, content=_text_reply("From key b"))
 
     monkeypatch.setenv("ANTHROPIC_API_KEY_2", "key-b")

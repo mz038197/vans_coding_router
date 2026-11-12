@@ -44,6 +44,45 @@ def is_credit_exhaustion(status_code: int, body: Any) -> bool:
     return "insufficient credits" in blob or "payment_required" in blob
 
 
+_ANTHROPIC_SPEND_LIMIT_PREFIXES = (
+    "you have reached your specified api usage limits",
+    "you have reached your specified workspace api usage limits",
+)
+
+
+def is_anthropic_credit_exhaustion(status_code: int, body: Any) -> bool:
+    """True when an Anthropic response is Credit Exhaustion (ADR 0092, #129).
+
+    Anthropic signals it four ways: 402 ``billing_error``; a 400 owner-set spend limit; a 429
+    whose ``error.details.error_code`` is ``enforced_spend_limit_reached``; and a "credit
+    balance is too low" message at any status. A plain 429 and a 529 are busy, not exhaustion.
+    """
+    message = (extract_upstream_error_text(body) or "").strip().lower()
+    if "credit balance is too low" in message:
+        return True
+    error = _anthropic_error_object(body)
+    if status_code == 402:
+        return error.get("type") == "billing_error"
+    if status_code == 400:
+        return message.startswith(_ANTHROPIC_SPEND_LIMIT_PREFIXES)
+    if status_code == 429:
+        details = error.get("details")
+        return isinstance(details, dict) and details.get("error_code") == "enforced_spend_limit_reached"
+    return False
+
+
+def _anthropic_error_object(body: Any) -> dict[str, Any]:
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            return {}
+    error = body.get("error") if isinstance(body, dict) else None
+    return error if isinstance(error, dict) else {}
+
+
 def is_key_failover_exhaustion(status_code: int, body: Any) -> bool:
     """True when Key Failover should run (Extra Usage Exhaustion or Credit Exhaustion)."""
     return is_extra_usage_exhaustion(status_code, body) or is_credit_exhaustion(status_code, body)
