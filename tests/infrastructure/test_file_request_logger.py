@@ -110,6 +110,20 @@ def test_build_message_preview_extracts_user_query_for_cursor():
     assert preview == "學生真正的問題"
 
 
+def test_build_message_preview_drops_the_client_datetime_tag():
+    stamped = "<current_datetime>2026-11-13T12:34:32.618+08:00</current_datetime>\n幫我解釋這段程式"
+    preview = build_message_preview([{"role": "user", "content": stamped}])
+    assert preview == "幫我解釋這段程式"
+
+
+def test_build_message_preview_skips_a_datetime_only_message_for_the_real_question():
+    messages = [
+        {"role": "user", "content": "幫我解釋這段程式"},
+        {"role": "user", "content": "<current_datetime>2026-11-13T12:34:32.618+08:00</current_datetime>"},
+    ]
+    assert build_message_preview(messages) == "幫我解釋這段程式"
+
+
 def test_build_message_preview_without_tags_uses_raw_user_text():
     preview = build_message_preview([{"role": "user", "content": "hello from langchain"}])
     assert preview == "hello from langchain"

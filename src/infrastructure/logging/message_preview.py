@@ -12,6 +12,8 @@ _NOISE_TAG_PATTERNS = (
     _ATTACHMENT_TAG_PATTERN,
     re.compile(r"<context>.*?</context>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<reminderInstructions>.*?</reminderInstructions>", re.DOTALL | re.IGNORECASE),
+    # Clients stamp the user turn with the local time; it is not the student's question.
+    re.compile(r"<current_datetime>.*?</current_datetime>", re.DOTALL | re.IGNORECASE),
 )
 _ATTACHMENT_ID_PATTERN = re.compile(r"""id=["'](?:prompt:)?([^"']+)["']""", re.IGNORECASE)
 _ATTACHMENT_PATH_PATTERN = re.compile(r"""filePath=["']([^"']+)["']""", re.IGNORECASE)
