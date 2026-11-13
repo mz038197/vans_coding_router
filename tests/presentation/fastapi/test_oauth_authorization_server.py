@@ -345,6 +345,23 @@ def test_teacher_page_offers_google_only(h):
     assert 'name="invite_code"' not in response.text
 
 
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        _authorize_params(),
+        _authorize_params(client_id="club-booking-admin", redirect_uri=BOOKING_CALLBACK, scope="openid teacher"),
+    ],
+    ids=["classroom", "teacher"],
+)
+def test_page_wordmark_is_the_portals_pixel_v(h, params):
+    """The Authorization Page carries the Portal nav's wordmark: the pixel V with its magenta node, then CRouter."""
+    response = h.client.get("/oauth/authorize", params=params)
+
+    assert '<span class="sr-only">V</span><svg class="wordmark-v"' in response.text
+    assert 'fill="#ff3d9a"' in response.text
+    assert "</svg>CRouter</p>" in response.text
+
 # Classroom scope: Nickname Redeem through the page, then the token
 
 

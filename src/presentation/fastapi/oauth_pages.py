@@ -9,6 +9,11 @@ from html import escape
 
 from src.application.use_cases.oauth_use_case import AuthorizationRequest
 
+# The Portal nav wordmark's pixel V (portal.html), so both surfaces carry the same brand.
+_WORDMARK_V = (
+    '<svg class="wordmark-v" viewBox="0 0 12 14" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="9" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="1" fill="currentColor"/><rect x="9" y="4" width="3" height="1" fill="currentColor"/><rect x="1" y="5" width="3" height="1" fill="currentColor"/><rect x="8" y="5" width="3" height="1" fill="currentColor"/><rect x="1" y="6" width="3" height="1" fill="currentColor"/><rect x="8" y="6" width="3" height="1" fill="currentColor"/><rect x="2" y="7" width="3" height="1" fill="currentColor"/><rect x="7" y="7" width="3" height="1" fill="currentColor"/><rect x="2" y="8" width="3" height="1" fill="currentColor"/><rect x="7" y="8" width="3" height="1" fill="currentColor"/><rect x="3" y="9" width="3" height="1" fill="currentColor"/><rect x="6" y="9" width="3" height="1" fill="currentColor"/><path d="M4 10h4v4h-4zM5 11v2h2v-2z" fill="#ff3d9a" fill-rule="evenodd"/></svg>'
+)
+
 _STYLE = """
 :root {
   --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
@@ -39,7 +44,11 @@ body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify
   font-family: var(--font-ui); line-height: 1.5; }
 main { width: 100%; max-width: 400px; background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 12px; padding: 32px 28px; }
-.wordmark { font-family: var(--font-wordmark); font-weight: 700; letter-spacing: -0.01em; font-size: 15px; margin: 0 0 24px; }
+.wordmark { font-family: var(--font-wordmark); font-weight: 700; font-size: 20px; line-height: 1.2; white-space: nowrap; margin: 0 0 24px; }
+/* The Portal nav's pixel V (ADR 0084): a 12x14 grid sized to the top of the C. */
+.wordmark-v { width: calc(0.72em * 12 / 14); height: 0.72em; margin-right: -1px; vertical-align: baseline; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 h1 { font-size: 22px; font-weight: 650; margin: 0 0 8px; }
 p { margin: 0 0 16px; }
 .muted { color: var(--text-muted); font-size: 14px; }
@@ -75,7 +84,7 @@ def _page(title: str, body: str) -> str:
 </head>
 <body>
   <main>
-    <p class="wordmark">VCRouter</p>
+    <p class="wordmark"><span class="sr-only">V</span>{_WORDMARK_V}CRouter</p>
 {body}
   </main>
 </body>
