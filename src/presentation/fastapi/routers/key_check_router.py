@@ -1,4 +1,5 @@
-"""`POST /internal/key-check`, called by a Partner Service with its Service Credential (ADR 0076, 0077).
+"""`POST /internal/key-check` and `POST /internal/teacher-classes`, called by a Partner
+Service with its Service Credential (ADR 0076, 0077, 0094).
 
 The body is read by hand, not by a Pydantic model: FastAPI's default 422 repeats the
 input, and the input is the key.
@@ -33,6 +34,13 @@ BAD_REQUEST_BODY = {
     }
 }
 
+TEACHER_CLASSES_BAD_REQUEST_BODY = {
+    "error": {
+        "code": "invalid_teacher_classes_body",
+        "message": 'The body must be a JSON object with an integer "user_id".',
+    }
+}
+
 RATE_LIMITED_BODY = {
     "error": {
         "code": "key_check_rate_limited",
@@ -62,6 +70,20 @@ async def _api_key_from_body(request: Request) -> str | None:
     return api_key if isinstance(api_key, str) else None
 
 
+async def _user_id_from_body(request: Request) -> int | None:
+    """The integer `user_id` of the body, or None when the body cannot be read."""
+    try:
+        body = json.loads(await request.body())
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    user_id = body.get("user_id")
+    if isinstance(user_id, bool) or not isinstance(user_id, int):
+        return None
+    return user_id
+
+
 def create_key_check_router(
     key_check: KeyCheckUseCase,
     service_tokens: Mapping[str, str],
@@ -87,5 +109,15 @@ def create_key_check_router(
         if api_key is None:
             return JSONResponse(BAD_REQUEST_BODY, status_code=400)
         return JSONResponse(key_check.check(api_key))
+
+    @router.post("/internal/teacher-classes")
+    async def teacher_classes_endpoint(request: Request) -> JSONResponse:
+        # Not counted by the Key Check rate limit: it names a user id, not a key to guess.
+        if _partner_service(request, service_tokens) is None:
+            return JSONResponse(UNAUTHORIZED_BODY, status_code=401)
+        user_id = await _user_id_from_body(request)
+        if user_id is None:
+            return JSONResponse(TEACHER_CLASSES_BAD_REQUEST_BODY, status_code=400)
+        return JSONResponse(key_check.teacher_classes(user_id))
 
     return router

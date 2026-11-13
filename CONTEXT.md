@@ -209,12 +209,16 @@ A separately deployed service registered with this router that accepts `vcr_sk_`
 _Avoid_: shared DB auth, a shared auth package, downstream app, both MCP services as the name of the set, calling vans-mcp-server Remote MCP
 
 **Service Credential**:
-The secret one Partner Service presents to call the Key Check. Each Partner Service has its own. It is not a Classroom API Key or a Personal API Key and grants no `/v1` call.
+The secret one Partner Service presents to call the Key Check or Teacher Classes. Each Partner Service has its own. It is not a Classroom API Key or a Personal API Key and grants no `/v1` call.
 _Avoid_: one secret shared by every Partner Service, a student bearer, a public read, a database connection string
 
 **Key Check**:
 A Partner Service's question to this router about one Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, Class Session, and Display Name. An accepted Personal API Key answers with its holder, that holder's Display Name, whether that holder is an admin, and the Classes that holder may manage, by id and name: every Class for an admin, otherwise the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
 _Avoid_: legacy-key check, auth API, 驗證中心, an answer with an email, a Google subject, or the key id, identity decided by Display Name
+
+**Teacher Classes**:
+A Partner Service's question to this router about one user id: which Classes that user may manage. It is answered the way the Key Check answers a Personal API Key (whether the user is an admin, and the Classes by id and name) when the user is active and holds the teacher or admin role in the role table; otherwise it is refused as not a teacher. A teacher surface that signed in with `openid teacher` asks this instead of holding the teacher's key.
+_Avoid_: class roster, a teacher's key held by a Partner Service, standing from `users.role`
 
 **Display Name**:
 The name the router shows for a user: the Classroom Nickname for a nickname student, the Google name for a Google user. A Partner Service may store it beside the integer id for display only.
