@@ -6,6 +6,7 @@ from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.per_minute_rate_limit import PerMinuteRateLimiter
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
+from src.application.use_cases.oauth_use_case import OAuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
 from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.infrastructure.logging.file_request_logger import FileRequestLogger
@@ -29,3 +30,5 @@ class AppContainer:
     # SHA-256 hex of each Partner Service's Service Credential -> service name (ADR 0076).
     service_tokens: dict[str, str] = field(default_factory=dict)
     key_check_rate_limiter: PerMinuteRateLimiter | None = None
+    # The OAuth authorization server (ADR 0094); None when no signing key is configured.
+    oauth_use_case: OAuthUseCase | None = None

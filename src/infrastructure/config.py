@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
 import os
+import re
 from pathlib import Path
 from ipaddress import ip_address
 from urllib.parse import urlparse
@@ -63,6 +64,73 @@ def _parse_key_check_settings(raw: dict[str, Any] | None) -> KeyCheckSettings:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError("key_check.calls_per_minute_per_service must be a positive whole number")
     return KeyCheckSettings(calls_per_minute_per_service=value)
+
+
+OAUTH_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
+
+
+@dataclass(frozen=True)
+class OAuthClientSettings:
+    """One OAuth Client of the Authorization Page (ADR 0094).
+
+    A client with a secret names either the secret's SHA-256 hex (`client_secret_sha256`)
+    or the env var that holds it (`client_secret_env`), never the secret itself. A client
+    with neither is a public client and proves itself by PKCE alone.
+    """
+
+    client_id: str
+    redirect_uris: tuple[str, ...] = ()
+    scopes: tuple[str, ...] = ()
+    name: str = ""
+    client_secret_sha256: str = ""
+    client_secret_env: str = ""
+
+    @property
+    def has_secret(self) -> bool:
+        return bool(self.client_secret_sha256 or self.client_secret_env)
+
+
+@dataclass(frozen=True)
+class OAuthSettings:
+    clients: dict[str, OAuthClientSettings] = field(default_factory=dict)
+
+
+def _parse_oauth_settings(raw: dict[str, Any] | None) -> OAuthSettings:
+    data = raw or {}
+    raw_clients = data.get("clients") or {}
+    if not isinstance(raw_clients, dict):
+        raise ValueError("oauth.clients must map each client id to its settings")
+    clients: dict[str, OAuthClientSettings] = {}
+    for raw_id, item in raw_clients.items():
+        client_id = str(raw_id).strip()
+        if not client_id or not isinstance(item, dict):
+            raise ValueError("oauth.clients entries need a client id and a mapping")
+        redirect_uris = item.get("redirect_uris") or []
+        if not isinstance(redirect_uris, list) or not redirect_uris:
+            raise ValueError(f"oauth.clients.{client_id}.redirect_uris must be a non-empty list")
+        raw_scopes = item.get("scopes") or []
+        if isinstance(raw_scopes, str):
+            raw_scopes = [raw_scopes]
+        scopes = tuple(token for value in raw_scopes for token in str(value).split())
+        if not scopes or any(OAUTH_SCOPE_TOKEN.fullmatch(token) is None for token in scopes):
+            raise ValueError(f"oauth.clients.{client_id}.scopes must list scope tokens")
+        secret_sha256 = str(item.get("client_secret_sha256") or "").strip().lower()
+        if secret_sha256 and re.fullmatch(r"[0-9a-f]{64}", secret_sha256) is None:
+            raise ValueError(f"oauth.clients.{client_id}.client_secret_sha256 must be 64 hex")
+        secret_env = str(item.get("client_secret_env") or "").strip()
+        if secret_sha256 and secret_env:
+            raise ValueError(
+                f"oauth.clients.{client_id}: set client_secret_sha256 or client_secret_env, not both"
+            )
+        clients[client_id] = OAuthClientSettings(
+            client_id=client_id,
+            redirect_uris=tuple(str(uri).strip() for uri in redirect_uris),
+            scopes=scopes,
+            name=str(item.get("name") or ""),
+            client_secret_sha256=secret_sha256,
+            client_secret_env=secret_env,
+        )
+    return OAuthSettings(clients=clients)
 
 
 CAPABILITY_AUDIO_SPEECH = "audio_speech"
@@ -163,6 +231,7 @@ class RouterSettings:
     routing: RoutingSettings = field(default_factory=RoutingSettings)
     web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
     key_check: KeyCheckSettings = field(default_factory=KeyCheckSettings)
+    oauth: OAuthSettings = field(default_factory=OAuthSettings)
 
 
 def is_loopback_url(url: str) -> bool:
@@ -237,6 +306,7 @@ def load_router_settings(path: str | None = None) -> RouterSettings:
             api_key_env=str(web_search.get("api_key_env", "")),
         ),
         key_check=_parse_key_check_settings(data.get("key_check")),
+        oauth=_parse_oauth_settings(data.get("oauth")),
     ))
 
 
@@ -303,6 +373,7 @@ def _apply_env_overrides(settings: RouterSettings) -> RouterSettings:
         routing=settings.routing,
         web_search=settings.web_search,
         key_check=settings.key_check,
+        oauth=settings.oauth,
     )
 
 
@@ -334,6 +405,7 @@ def apply_runtime_settings(base: RouterSettings, overrides: dict[str, str]) -> R
         routing=base.routing,
         web_search=base.web_search,
         key_check=base.key_check,
+        oauth=base.oauth,
     )
 
 

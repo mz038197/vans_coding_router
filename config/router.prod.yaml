@@ -71,3 +71,20 @@ routing:
 # Web Search (Tavily). One key, held as a secret. Without it POST /v1/search answers 503.
 web_search:
   api_key_env: "TAVILY_API_KEY"
+
+# OAuth Clients (ADR 0094). Uncomment only after VCR_OAUTH_SIGNING_KEY is set as a Fly secret:
+# with a client registered and no signing key, production refuses to start.
+# See guide/DEPLOYMENT.md (OAuth authorization server).
+# oauth:
+#   clients:
+#     agent-builder:
+#       name: "MiTAC Agent Builder"
+#       redirect_uris:
+#         - "<the Agent Builder callback, once the platform shows a reachable one>"
+#       scopes: [classroom]
+#       client_secret_env: "VCR_OAUTH_AGENT_BUILDER_SECRET"
+#     club-booking-admin:
+#       name: "社團預約板"
+#       redirect_uris:
+#         - "https://<club-booking-board host>/auth/callback"
+#       scopes: [openid, teacher]

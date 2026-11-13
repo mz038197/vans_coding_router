@@ -11,6 +11,7 @@ from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddlew
 from src.presentation.fastapi.routers.api_router import create_api_router
 from src.presentation.fastapi.routers.key_check_router import create_key_check_router
 from src.presentation.fastapi.routers.lobby_router import create_lobby_router
+from src.presentation.fastapi.routers.oauth_router import create_oauth_router
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 from src.infrastructure.jobs.log_archive_job import run_daily_archive_job
 from src.infrastructure.jobs.upstream_model_catalog_job import (
@@ -95,6 +96,8 @@ if container.key_check_use_case is not None and container.key_check_rate_limiter
     )
 if container.portal_use_case is not None and container.router_settings is not None:
     app.include_router(create_portal_router(container.portal_use_case, container.router_settings))
+if container.oauth_use_case is not None and container.router_settings is not None:
+    app.include_router(create_oauth_router(container.oauth_use_case, container.router_settings))
 if (
     container.lobby_use_case is not None
     and container.portal_use_case is not None

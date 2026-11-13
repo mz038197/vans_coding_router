@@ -5,9 +5,15 @@ from src.application.use_cases.api_use_case import ApiUseCase
 from src.application.use_cases.auth_use_case import AuthUseCase
 from src.application.use_cases.key_check_use_case import KeyCheckUseCase
 from src.application.use_cases.lobby_use_case import LobbyHostUseCase
+from src.application.use_cases.oauth_use_case import OAuthUseCase
 from src.application.use_cases.portal_use_case import PortalUseCase
+from src.infrastructure.auth.oauth_signing import (
+    OAUTH_SIGNING_KEY_ENV,
+    oauth_signing_key_from_environment,
+)
 from src.infrastructure.config import (
     apply_runtime_settings,
+    is_loopback_url,
     load_router_settings,
     resolve_web_search_api_key,
     validate_portal_auth_settings,
@@ -39,6 +45,11 @@ def build_container(
         os.getenv(SERVICE_TOKENS_ENV),
         production=bool(os.getenv("FLY_APP_NAME")),
     )
+    oauth_signing_key = oauth_signing_key_from_environment(
+        os.getenv(OAUTH_SIGNING_KEY_ENV),
+        production=bool(os.getenv("FLY_APP_NAME")) or not is_loopback_url(settings.public_url),
+        clients_registered=bool(settings.oauth.clients),
+    )
     api_key_repo = build_router_repository(settings)
     effective_settings = apply_runtime_settings(settings, api_key_repo.get_runtime_settings())
     api_key_repo.settings = effective_settings
@@ -60,6 +71,11 @@ def build_container(
         web_search_backend=web_search_backend,
     )
     portal_use_case = PortalUseCase(api_key_repo, settings, llm_gateway=llm_gateway)
+    oauth_use_case = (
+        OAuthUseCase(api_key_repo, portal_use_case, effective_settings, oauth_signing_key)
+        if oauth_signing_key is not None
+        else None
+    )
 
     lobby_workspace = resolve_lobby_workspace()
     lobby_registry = RoomRegistry(lobby_workspace)
@@ -82,4 +98,5 @@ def build_container(
         key_check_use_case=KeyCheckUseCase(api_key_repo),
         service_tokens=service_tokens,
         key_check_rate_limiter=PerMinuteRateLimiter(settings.key_check.calls_per_minute_per_service),
+        oauth_use_case=oauth_use_case,
     )

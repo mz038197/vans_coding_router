@@ -141,6 +141,10 @@ class RouterRepositoryPort(Protocol):
     def issue_long_lived_key(self, user_id: int) -> str:
         ...
 
+    def classroom_api_key(self, user_id: int, session_id: int) -> str:
+        """The Classroom API Key a redeem of this student into this sitting returns. Writes nothing."""
+        ...
+
     def get_active_keys(self, user_id: int) -> list[dict[str, Any]]:
         ...
 
