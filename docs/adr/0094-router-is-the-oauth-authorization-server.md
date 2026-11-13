@@ -1,6 +1,6 @@
 # The router is the OAuth authorization server for Partner Service surfaces
 
-Status: accepted for the authorization server (`/oauth/authorize`, `/oauth/token`, discovery, JWKS, OAuth Client registry); proposed for the Partner Service class lookup, which is not built yet. Amends ADR 0004 (Nickname Redeem is no longer extension-only).
+Status: accepted (authorization server: `/oauth/authorize`, `/oauth/token`, discovery, JWKS, OAuth Client registry; Partner Service class lookup: `POST /internal/teacher-classes`). Amends ADR 0004 (Nickname Redeem is no longer extension-only).
 
 MiTAC Agent Builder lets a whole class share one space, but an API tool or MCP Server there holds one setting for everyone, so a single key would make every student the same person. Both kinds of tool accept "OAuth 2.0 (user authorization)": each platform user links once and the platform keeps that user's token. The router becomes that authorization server, so club-booking-board and vans-mcp-server learn who the student is without either one running its own login.
 
