@@ -87,5 +87,6 @@ oauth:
     club-booking-admin:
       name: "社團預約板"
       redirect_uris:
+        - "https://club.vanscoding.com/auth/callback"
         - "https://club-booking-board.vercel.app/auth/callback"
       scopes: [openid, teacher]
