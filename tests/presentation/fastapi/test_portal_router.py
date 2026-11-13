@@ -2552,7 +2552,7 @@ def test_portal_css_spacing_sits_on_the_spacing_scale(tmp_path):
 
 def test_portal_serves_upstream_logos_as_svg(tmp_path):
     client, _, _ = _client(tmp_path)
-    for name in ("ollama", "openrouter", "anthropic"):
+    for name in ("ollama", "openrouter", "anthropic", "openai"):
         response = client.get(f"/portal/static/provider-{name}.svg")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("image/svg+xml")

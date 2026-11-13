@@ -84,10 +84,23 @@ test("a teacher-given name is shown as written", () => {
   assert.deepEqual(rows(html).map(([, name]) => name), ["anthropic/claude 備用"]);
 });
 
+test("OpenAI and Anthropic models show their upstream logo", () => {
+  const { sessionModelListHtml } = load();
+  const html = sessionModelListHtml([
+    { id: "openai@gpt-image-1", name: "gpt-image-1" },
+    { id: "anthropic@claude-haiku-5-5", name: "Claude Haiku 5.5" },
+  ]);
+  assert.deepEqual(rows(html), [
+    ["OpenAI", "gpt-image-1", "openai@gpt-image-1"],
+    ["Anthropic", "Claude Haiku 5.5", "anthropic@claude-haiku-5-5"],
+  ]);
+  assert.match(html, /class="upstream-logo upstream-logo-openai"/);
+});
+
 test("an upstream without a logo is named in text", () => {
   const { sessionModelListHtml } = load();
-  const html = sessionModelListHtml([{ id: "openai@gpt-image-1", name: "gpt-image-1" }]);
-  assert.deepEqual(rows(html), [["openai", "gpt-image-1", "openai@gpt-image-1"]]);
+  const html = sessionModelListHtml([{ id: "someprovider@model-x", name: "model-x" }]);
+  assert.deepEqual(rows(html), [["someprovider", "model-x", "someprovider@model-x"]]);
 });
 
 test("a model id without an upstream is grouped under 其他", () => {

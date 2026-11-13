@@ -39,7 +39,7 @@ PORTAL_SESSION_LAYOUT_PROTOTYPE_JS = WEB_DIR / "session_layout_prototype.js"
 PORTAL_SESSION_LAYOUT_PROTOTYPE_HTML = WEB_DIR / "session_layout_prototype.html"
 PORTAL_BRAND_ICON_PATH = WEB_DIR / "brand-icon.svg"
 # Upstream logos (from @lobehub/icons-static-svg, MIT), drawn in the text colour via CSS mask.
-PORTAL_UPSTREAM_LOGO_PATHS = {name: WEB_DIR / f"provider-{name}.svg" for name in ("ollama", "openrouter", "anthropic")}
+PORTAL_UPSTREAM_LOGO_PATHS = {name: WEB_DIR / f"provider-{name}.svg" for name in ("ollama", "openrouter", "anthropic", "openai")}
 WEBMCP_INVOCATION_CHANNEL_HEADER = "X-Vans-Invocation-Channel"
 logger = logging.getLogger(__name__)
 
