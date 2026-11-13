@@ -17,6 +17,7 @@ from src.infrastructure.jobs.upstream_model_catalog_job import (
     fill_catalog_round,
     run_upstream_model_catalog_refresh,
 )
+from src.infrastructure.logging.console_logging import start_console_logging, stop_console_logging
 from src.infrastructure.logging.signal_forwarder import start_signal_forwarding
 
 REQUEST_TIMEOUT = 900.0
@@ -29,6 +30,7 @@ container = build_container(
 
 @asynccontextmanager
 async def application_lifespan(app_container):
+    start_console_logging()
     forwarder = start_signal_forwarding()
     archive_stop_event = asyncio.Event()
     catalog_stop_event = asyncio.Event()
@@ -64,6 +66,7 @@ async def application_lifespan(app_container):
     finally:
         if forwarder is not None:
             forwarder.close()
+        stop_console_logging()
 
 
 @asynccontextmanager
