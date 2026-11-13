@@ -77,3 +77,25 @@ web_search:
 # Key Check (POST /internal/key-check): calls each Partner Service may make a minute. Over it: 429.
 key_check:
   calls_per_minute_per_service: 600
+
+# OAuth Clients of the Authorization Page (ADR 0094). Discovery is
+# /.well-known/openid-configuration. redirect_uris match exactly (scheme, host, port, path, query).
+# scopes: what the client may ask for, as scope tokens. `classroom` returns the student's
+# Classroom API Key; `openid teacher` returns an ID token for a teacher or admin.
+# A secret is optional: name its SHA-256 hex (client_secret_sha256) or the env var holding it
+# (client_secret_env), never the secret itself. Without one the client is public (PKCE only).
+# ID tokens are signed with VCR_OAUTH_SIGNING_KEY; on a loopback public_url a key is made at start.
+oauth:
+  clients:
+    agent-builder:
+      name: "MiTAC Agent Builder"
+      redirect_uris:
+        # Replace with the callback the Agent Builder platform shows for this tool.
+        - "https://agent-builder.example/oauth/callback"
+      scopes: [classroom]
+      client_secret_env: "VCR_OAUTH_AGENT_BUILDER_SECRET"
+    club-booking-admin:
+      name: "社團預約板"
+      redirect_uris:
+        - "http://localhost:3000/auth/callback"
+      scopes: [openid, teacher]

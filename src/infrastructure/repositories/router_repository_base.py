@@ -861,6 +861,10 @@ class RouterRepositoryBase(ABC):
             )
         return raw
 
+    def classroom_api_key(self, user_id: int, session_id: int) -> str:
+        """The Classroom API Key a redeem of this student into this sitting returns. Writes nothing."""
+        return self._make_key("session", session_id, user_id)
+
     def issue_session_key(self, user_id: int, session_id: int) -> str:
         raw = self._make_key("session", session_id, user_id)
         now = dt(utc_now())

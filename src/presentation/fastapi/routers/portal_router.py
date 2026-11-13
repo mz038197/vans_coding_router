@@ -178,6 +178,19 @@ class QuarantineReleaseRequest(BaseModel):
     reason: str | None = None
 
 
+def portal_session_cookie_name(public_url: str) -> str:
+    """The Portal Session cookie; `__Host-` on HTTPS."""
+    if public_url.lower().startswith("https://"):
+        return "__Host-vcr_portal_session"
+    return "vcr_portal_session"
+
+
+# Google login clients whose callback goes somewhere other than the Portal.
+_GOOGLE_LOGIN_CLIENTS = frozenset({"extension", "authorize"})
+# The Authorization Page (ADR 0094) picks up after Google login here.
+OAUTH_AUTHORIZE_RESUME_PATH = "/oauth/authorize/resume"
+
+
 def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSettings) -> APIRouter:
     router = APIRouter(tags=["Portal"])
     oauth = GoogleOAuthService(
@@ -187,9 +200,7 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         session_secret=settings.auth.session_secret,
     )
     secure_cookie = settings.public_url.lower().startswith("https://")
-    portal_session_cookie = (
-        "__Host-vcr_portal_session" if secure_cookie else "vcr_portal_session"
-    )
+    portal_session_cookie = portal_session_cookie_name(settings.public_url)
 
     def portal_call(fn):
         try:
@@ -345,10 +356,11 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
             max_age=600,
             secure=secure_cookie,
         )
-        if (client or "").strip().lower() == "extension":
+        login_client = (client or "").strip().lower()
+        if login_client in _GOOGLE_LOGIN_CLIENTS:
             redirect.set_cookie(
                 "oauth_client",
-                "extension",
+                login_client,
                 httponly=True,
                 samesite="lax",
                 max_age=600,
@@ -367,20 +379,39 @@ def create_portal_router(portal_use_case: PortalUseCase, settings: RouterSetting
         oauth_state: str | None = Cookie(default=None),
         oauth_client: str | None = Cookie(default=None),
     ):
+        for_authorize = (oauth_client or "").strip().lower() == "authorize"
+
+        def failed(message: str) -> RedirectResponse:
+            if not for_authorize:
+                return _portal_redirect(message)
+            redirect = RedirectResponse(
+                url=f"{OAUTH_AUTHORIZE_RESUME_PATH}?login_error={quote(message)}",
+                status_code=302,
+            )
+            redirect.delete_cookie("oauth_client")
+            return redirect
+
         if error:
-            return _portal_redirect("Google 登入已取消")
+            return failed("Google 登入已取消")
         if not code or not state or not oauth_state:
-            return _portal_redirect("Google 登入參數不完整")
+            return failed("Google 登入參數不完整")
         if state != oauth_state or not oauth.verify_state(state):
-            return _portal_redirect("Google 登入狀態驗證失敗")
+            return failed("Google 登入狀態驗證失敗")
         try:
             claims = await oauth.exchange_code(code)
             user = portal_use_case.google_login(claims.email, claims.name, claims.google_sub)
         except ValueError as exc:
-            return _portal_redirect(str(exc))
+            return failed(str(exc))
         except Exception:
             logger.exception("Google login callback failed")
-            return _portal_redirect("Google 登入失敗，請稍後再試")
+            return failed("Google 登入失敗，請稍後再試")
+
+        if for_authorize:
+            redirect = RedirectResponse(url=OAUTH_AUTHORIZE_RESUME_PATH, status_code=302)
+            redirect.delete_cookie("oauth_state")
+            redirect.delete_cookie("oauth_client")
+            _set_session(redirect, user["id"], request)
+            return redirect
 
         if (oauth_client or "").strip().lower() == "extension":
             token = portal_use_case.issue_extension_handoff(int(user["id"]))

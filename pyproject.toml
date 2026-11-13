@@ -21,4 +21,5 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "websockets>=16.0",
     "python-multipart>=0.0.20",
+    "cryptography>=49.0.0",
 ]
