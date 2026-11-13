@@ -60,7 +60,8 @@ ANTHROPIC_VERSION = "2026-10-21"
 THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 _MESSAGES_PATH = "/messages"
 _MODELS_PATH = "/models"
-_MODELS_PARAMS = {"lifecycle": "active", "limit": "1000"}
+# `lifecycle[]` is an array filter; Anthropic answers a bare `lifecycle` with a 400.
+_MODELS_PARAMS = {"lifecycle[]": "active", "limit": "1000"}
 DEFAULT_CREDIT_EXHAUSTION_MESSAGE = "Anthropic credit is exhausted or a spend limit was reached"
 CONTENT_REFUSAL_MESSAGE = "Claude 拒絕回應這個請求，請換個說法再試"
 

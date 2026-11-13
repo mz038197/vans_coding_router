@@ -71,7 +71,8 @@ async def test_models_lists_active_models_in_one_call(monkeypatch):
     request = fake.requests[0]
     assert request.method == "GET"
     assert request.url.path == "/v1/models"
-    assert dict(request.url.params) == {"lifecycle": "active", "limit": "1000"}
+    # Anthropic's lifecycle filter is an array parameter; a bare `lifecycle` is a 400.
+    assert dict(request.url.params) == {"lifecycle[]": "active", "limit": "1000"}
     assert request.headers["x-api-key"] == "key-a"
     assert request.headers["anthropic-version"]
     await gateway.shutdown()
