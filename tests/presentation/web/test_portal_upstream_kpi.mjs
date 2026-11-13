@@ -386,7 +386,8 @@ test("each Anthropic key gets a tile with its in-flight light and no money meter
   const [busy, idle] = tiles(html);
 
   assert.equal(tiles(html).length, 2);
-  assert.match(busy, /anthropic/);
+  assert.match(busy, /class="upstream-logo upstream-logo-anthropic" role="img" aria-label="Anthropic"/);
+  assert.doesNotMatch(busy, /session-model-upstream/);
   assert.match(busy, /<span>#0<\/span>/);
   assert.match(busy, /<span aria-hidden="true">2\/10<\/span>/);
   assert.match(idle, /<span>#1<\/span>/);

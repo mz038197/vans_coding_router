@@ -2678,6 +2678,7 @@
     }
     .upstream-logo-ollama { --logo: url("/portal/static/provider-ollama.svg"); }
     .upstream-logo-openrouter { --logo: url("/portal/static/provider-openrouter.svg"); }
+    .upstream-logo-anthropic { --logo: url("/portal/static/provider-anthropic.svg"); }
 
     .session-auto-badge {
       display: inline-flex;
