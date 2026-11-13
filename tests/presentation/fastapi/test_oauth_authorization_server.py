@@ -304,6 +304,35 @@ def test_classroom_page_asks_invite_code_then_nickname_or_google(h):
     assert response.headers["cache-control"] == "no-store"
 
 
+def _form_action(response) -> set[str]:
+    for directive in response.headers["content-security-policy"].split(";"):
+        name, _, sources = directive.strip().partition(" ")
+        if name == "form-action":
+            return set(sources.split())
+    raise AssertionError("no form-action directive")
+
+
+def test_page_lets_its_form_end_at_google_and_at_the_clients_callback(tmp_path):
+    # Chrome applies form-action to every redirect after a submit, so the
+    # page must allow Google's login and the client's own callback origin.
+    h = Harness(tmp_path, google=True)
+    for client_id, redirect_uri, scope, origin in [
+        ("agent-builder", AGENT_CALLBACK, "classroom", "https://agent.example"),
+        ("club-booking-admin", BOOKING_CALLBACK, "openid teacher", "https://booking.example"),
+    ]:
+        response = h.client.get(
+            "/oauth/authorize",
+            params=_authorize_params(client_id=client_id, redirect_uri=redirect_uri, scope=scope),
+        )
+        assert _form_action(response) == {"'self'", "https://accounts.google.com", origin}
+
+
+def test_page_without_google_allows_only_itself_and_the_callback(h):
+    response = h.client.get("/oauth/authorize", params=_authorize_params())
+
+    assert _form_action(response) == {"'self'", "https://agent.example"}
+
+
 def test_teacher_page_offers_google_only(h):
     response = h.client.get(
         "/oauth/authorize",

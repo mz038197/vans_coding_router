@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -34,8 +35,33 @@ _PAGE_HEADERS = {
 _TOKEN_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 
-def _html(content: str, status_code: int = 200) -> HTMLResponse:
-    return HTMLResponse(content, status_code=status_code, headers=_PAGE_HEADERS)
+GOOGLE_LOGIN_ORIGIN = "https://accounts.google.com"
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _form_page_headers(request: AuthorizationRequest, *, google: bool) -> dict[str, str]:
+    """Headers for a page whose form starts a redirect chain.
+
+    Chrome enforces ``form-action`` on every redirect after a submit, so the
+    page must allow where the chain legitimately ends: Google's login (when
+    configured) and the client's own, already-validated redirect URI origin.
+    """
+    sources = ["'self'"]
+    if google:
+        sources.append(GOOGLE_LOGIN_ORIGIN)
+    sources.append(_origin(request.redirect_uri))
+    return {
+        **_PAGE_HEADERS,
+        "Content-Security-Policy": f"frame-ancestors 'none'; form-action {' '.join(sources)}",
+    }
+
+
+def _html(content: str, status_code: int = 200, headers: dict[str, str] | None = None) -> HTMLResponse:
+    return HTMLResponse(content, status_code=status_code, headers=headers or _PAGE_HEADERS)
 
 
 def _redirect(url: str, status_code: int = 302) -> RedirectResponse:
@@ -55,9 +81,12 @@ def create_oauth_router(oauth: OAuthUseCase, settings: RouterSettings) -> APIRou
         return _redirect(oauth.error_redirect(error))
 
     def page(request: AuthorizationRequest, *, error: str | None = None, status_code: int = 200, **fields) -> HTMLResponse:
+        headers = _form_page_headers(request, google=google_configured)
         if request.is_classroom:
-            return _html(oauth_pages.classroom_page(request, error=error, **fields), status_code=status_code)
-        return _html(oauth_pages.teacher_page(request, error=error), status_code=status_code)
+            content = oauth_pages.classroom_page(request, error=error, **fields)
+        else:
+            content = oauth_pages.teacher_page(request, error=error)
+        return _html(content, status_code=status_code, headers=headers)
 
     def portal_user_id(http_request: Request) -> int | None:
         token = http_request.cookies.get(portal_cookie, "")

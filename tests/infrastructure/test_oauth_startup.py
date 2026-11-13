@@ -86,7 +86,12 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert clients["agent-builder"].client_secret_env == "VCR_OAUTH_AGENT_BUILDER_SECRET"
     assert clients["club-booking-admin"].scopes == ("openid", "teacher")
     assert clients["club-booking-admin"].redirect_uris == ("http://localhost:3000/auth/callback",)
-    assert not load_router_settings("config/router.prod.yaml").oauth.clients
+    # Production registers the club-booking teacher admin only; agent-builder waits
+    # for MiTAC to replace its localhost callback.
+    prod = load_router_settings("config/router.prod.yaml").oauth.clients
+    assert set(prod) == {"club-booking-admin"}
+    assert prod["club-booking-admin"].redirect_uris == ("https://club-booking-board.vercel.app/auth/callback",)
+    assert prod["club-booking-admin"].scopes == ("openid", "teacher")
 
 
 @pytest.mark.parametrize(
