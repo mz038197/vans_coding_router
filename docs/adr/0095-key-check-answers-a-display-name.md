@@ -1,6 +1,6 @@
 # The key check answers a Display Name
 
-Status: proposed. Amends ADR 0077 (which rejected returning the Classroom Nickname).
+Status: accepted. Amends ADR 0077 (which rejected returning the Classroom Nickname).
 
 club-booking-board projects who booked which room, and students open a shared read-only page to see whether their own booking landed. Integer ids alone mean nothing on that screen. An accepted key now also returns `display_name`, taken from the holder's user name: the Classroom Nickname for a nickname student, the Google name for a Google student, and the holder's name for a Personal API Key.
 
