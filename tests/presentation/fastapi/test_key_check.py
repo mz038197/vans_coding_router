@@ -81,6 +81,7 @@ def test_accepted_classroom_api_key_names_student_class_and_class_session(tmp_pa
         "student_id": student_id,
         "class_id": klass["id"],
         "class_session_id": session["id"],
+        "display_name": "Ada",
     }
 
 
@@ -99,7 +100,23 @@ def test_admin_holding_a_classroom_api_key_is_answered_as_a_student(tmp_path):
         "student_id": admin["id"],
         "class_id": klass["id"],
         "class_session_id": session["id"],
+        "display_name": "Admin",
     }
+
+
+def test_google_student_classroom_answer_carries_the_google_name_as_display_name(tmp_path):
+    client, repo = _client(tmp_path)
+    api_key, _, _, _ = _redeemed_key(repo)
+
+    assert _key_check(client, {"api_key": api_key}).json()["display_name"] == "Student"
+
+
+def test_display_name_follows_the_current_user_name(tmp_path):
+    client, repo = _client(tmp_path)
+    api_key, _, _, _ = _redeemed_key(repo)
+    repo.upsert_google_user("student@gmail.com", "Renamed Student")
+
+    assert _key_check(client, {"api_key": api_key}).json()["display_name"] == "Renamed Student"
 
 
 INVALID = {"accepted": False, "reason": "invalid", "message": "無效的 API 金鑰"}
@@ -346,6 +363,7 @@ def test_accepted_personal_api_key_names_user_and_the_classes_they_own(tmp_path)
         "accepted": True,
         "kind": "personal",
         "user_id": teacher["id"],
+        "display_name": "Teacher",
         "is_admin": False,
         "classes": [
             {"id": classes[0]["id"], "name": "Mon AM"},
@@ -382,6 +400,7 @@ def test_personal_api_key_of_someone_who_owns_no_class_is_accepted_with_no_class
         "accepted": True,
         "kind": "personal",
         "user_id": student["id"],
+        "display_name": "Student",
         "is_admin": False,
         "classes": [],
     }
