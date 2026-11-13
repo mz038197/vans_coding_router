@@ -1601,7 +1601,17 @@
         const sub = `${alerts}<span>${escapeHtml([cap, resets].filter(Boolean).join(' · '))}</span>`;
         return tile(creditText, credit == null, upstreamKpiMeterHtml(fraction, warn), sub);
       };
-      return ollamaKeys.map(ollamaTile).join('') + openrouterKeys.map(openrouterTile).join('');
+      // Anthropic has no balance API, so its tile shows only the in-flight light and Key
+      // Quarantine: no Account Credit Remaining, Key Monthly Limit or Included Monthly Usage.
+      const anthropicKeys = providers?.anthropic?.pool?.keys || [];
+      const anthropicTile = (key) => `<div class="upstream-kpi">
+          <div class="lbl"><span class="upstream-kpi-name">${upstreamLogoHtml('anthropic')}<span>#${Number(key.index)}</span></span>${upstreamKpiLightHtml(key)}</div>
+          <div class="val val-muted">${key.quarantined ? '暫停使用' : '可用'}</div>
+          <div class="sub">${key.quarantined ? quarantine('anthropic', key) : ''}</div>
+        </div>`;
+      return ollamaKeys.map(ollamaTile).join('')
+        + openrouterKeys.map(openrouterTile).join('')
+        + anthropicKeys.map(anthropicTile).join('');
     }
 
     async function loadUpstreamPools() {
@@ -3940,12 +3950,18 @@ snippets:
     }
 
     // What the add list offers for one kind: the kind-split providers' list for it, plus the
-    // All Models providers' whole lists where that kind can take them.
+    // All Models providers' whole lists where that kind can take them. Anthropic is an All
+    // Models provider whose models only answer text, so it stays on the text shelf (#124).
     function modelWizardExtraCatalog(shelf, catalogs) {
+      const textOnlyProviders = ['anthropic'];
       const kind = MODEL_WIZARD_EXTRA_KINDS.find((item) => item.shelf === shelf);
       if (!kind) return [];
       const own = (catalogs && catalogs[shelf]) || [];
-      const whole = kind.allModels ? ((catalogs && catalogs.all) || []) : [];
+      const whole = kind.allModels
+        ? ((catalogs && catalogs.all) || []).filter(
+          (item) => item && !textOnlyProviders.includes(modelIdPrefix(item.id)),
+        )
+        : [];
       return [...own, ...whole].filter((item) => item && item.id);
     }
 

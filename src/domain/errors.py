@@ -266,6 +266,24 @@ class ImageGenerationDisabledError(AppError):
         )
 
 
+class EmbeddingsNotSupportedError(AppError):
+    def __init__(self, message: str = "此 provider 不支援 /v1/embeddings"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="embeddings_not_supported",
+        )
+
+
+class DecisionNotSupportedError(AppError):
+    def __init__(self, message: str = "此 provider 不支援 /v1/decisions"):
+        super().__init__(
+            message=message,
+            status_code=400,
+            code="decision_not_supported",
+        )
+
+
 class EmbeddingsDisabledError(AppError):
     def __init__(self, message: str = "此課堂未開放嵌入"):
         super().__init__(

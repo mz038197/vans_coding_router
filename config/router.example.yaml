@@ -57,6 +57,19 @@ providers:
     api_key_env: "OPENAI_API_KEY"
     enabled: true
 
+  anthropic:
+    type: anthropic
+    base_url: "https://api.anthropic.com/v1"
+    # Messages API behind a router translation layer (ADR 0092); second env optional.
+    api_key_envs:
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_API_KEY_2
+    max_concurrent_per_key: 10
+    queue_timeout_sec: 120
+    acquire_delay_ms: 200
+    quarantine_ttl_sec: 3600
+    enabled: true
+
 # Web Search (Tavily). One key, held as a secret. Without it POST /v1/search answers 503.
 web_search:
   api_key_env: "TAVILY_API_KEY"

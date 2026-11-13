@@ -13,6 +13,7 @@ from src.infrastructure.config import (
     validate_portal_auth_settings,
 )
 from src.infrastructure.auth.service_credentials import SERVICE_TOKENS_ENV, service_tokens_from_environment
+from src.infrastructure.gateways.anthropic_gateway import AnthropicGateway
 from src.infrastructure.gateways.openai_compatible_gateway import OpenAICompatibleGateway
 from src.infrastructure.gateways.routing_gateway import RoutingGateway
 from src.infrastructure.lobby.paths import resolve_lobby_workspace
@@ -21,6 +22,11 @@ from src.infrastructure.logging.file_request_logger import FileRequestLogger
 from src.infrastructure.repositories.factory import build_router_repository
 from src.infrastructure.search.tavily_web_search import TavilyWebSearch
 from src.presentation.fastapi.dependencies import AppContainer
+
+_GATEWAYS_BY_PROVIDER_TYPE = {
+    "openai_compatible": OpenAICompatibleGateway,
+    "anthropic": AnthropicGateway,
+}
 
 
 def build_container(
@@ -38,9 +44,9 @@ def build_container(
     api_key_repo.settings = effective_settings
     request_logger = FileRequestLogger()
     provider_gateways = {
-        name: OpenAICompatibleGateway(provider, timeout=request_timeout)
+        name: _GATEWAYS_BY_PROVIDER_TYPE[provider.type](provider, timeout=request_timeout)
         for name, provider in settings.providers.items()
-        if provider.enabled and provider.type == "openai_compatible" and provider.base_url
+        if provider.enabled and provider.type in _GATEWAYS_BY_PROVIDER_TYPE and provider.base_url
     }
     llm_gateway = RoutingGateway(provider_gateways)
     web_search_key = resolve_web_search_api_key(settings.web_search)
