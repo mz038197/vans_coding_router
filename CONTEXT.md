@@ -173,7 +173,7 @@ The student identity string typed at Nickname Redeem, unique within one Class. C
 _Avoid_: Guest, Guest User, login name, email as identity, 學號 as a separate identity, auto-merge with Google, 拆開撞名, folding case or inner whitespace
 
 **Nickname Redeem**:
-The exchange of an Invite Code plus a Classroom Nickname for a Classroom API Key bound to that Class Session. It is offered only in the Vans classroom extension Router Lane on VS Code, not on the Portal website and not for Cursor. Every Class Session on this router allows it, up to the Session Seat Limit; the gate is a valid Invite Code, not Portal open registration. It does not use Google or Sign-in Handoff. It does not exist on `pegasi_router`.
+The exchange of an Invite Code plus a Classroom Nickname for a Classroom API Key bound to that Class Session. It is offered in the Vans classroom extension Router Lane on VS Code and on the Authorization Page, not on the Portal website and not for Cursor. Every Class Session on this router allows it, up to the Session Seat Limit; the gate is a valid Invite Code, not Portal open registration. It does not use Google or Sign-in Handoff. It does not exist on `pegasi_router`.
 _Avoid_: Guest redeem, shared class-wide API key, teacher long-lived key, dev login, 連線登入 as the name of this path, Pegasi parity for this path, Portal web Nickname Redeem, Cursor Nickname Redeem
 
 **Session Seat Limit** (Portal: 課堂座位):
@@ -192,8 +192,16 @@ _Avoid_: session cookie, login cookie, Class Session, Sign-in Handoff
 A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_…`). In the Vans VS Code extension the default redeem is Nickname Redeem; Google users may still redeem with Sign-in Handoff (extension, secondary) or a Portal session (website). Portal web redeem stays Google-only. The hint under that code on Portal stays「若遺失 API Key，可再次輸入同一邀請碼取回（課堂未過期前）」.
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname, rewriting that hint
 
+**Authorization Page**:
+The router page an OAuth Client sends a person to. For the `classroom` scope it takes an Invite Code, then Nickname Redeem or Google, and hands the client that student's Classroom API Key for the sitting. For the `openid teacher` scope it takes Google only, admits only a teacher or an admin, and hands back an ID token, never a key. It is not the Portal.
+_Avoid_: login page, Portal redeem, consent screen as the name
+
+**OAuth Client**:
+A registered caller of the Authorization Page, such as MiTAC Agent Builder or a Partner Service's teacher surface, with its own redirect URIs and the scopes it may ask for. It is not a Partner Service's Service Credential.
+_Avoid_: app, integration, Partner Service as the client
+
 **Classroom API Key**:
-A per-student credential the router issues for one Class Session. It is an opaque `vcr_sk_` secret that only the router verifies, and the router stores only its hash. One student has one key for that sitting; redeeming again with the same identity returns it. It expires at that sitting's expiry; a later change to the sitting's start or expiry applies to it without a new redeem. Before that expiry it also ends when that student is disabled, or when its Class is not active or past the Class end. The Class being active with its end still ahead accepts an unexpired key again without a new redeem; enabling a disabled student does not, and the student redeems again. No Partner Service opens this router's database to accept it; each asks the Key Check, which answers an accepted key with its student, Class, and Class Session integer ids, and not with an email, a name, or the key id. It answers as a student of its Class even when its holder is a teacher or an admin. It does not carry a nickname, an email, or a personal name. It is distinct from a Personal API Key.
+A per-student credential the router issues for one Class Session. It is an opaque `vcr_sk_` secret that only the router verifies, and the router stores only its hash. One student has one key for that sitting; redeeming again with the same identity returns it. It expires at that sitting's expiry; a later change to the sitting's start or expiry applies to it without a new redeem. Before that expiry it also ends when that student is disabled, or when its Class is not active or past the Class end. The Class being active with its end still ahead accepts an unexpired key again without a new redeem; enabling a disabled student does not, and the student redeems again. No Partner Service opens this router's database to accept it; each asks the Key Check, which answers an accepted key with its student, Class, and Class Session integer ids and the student's Display Name, and not with an email or the key id. It answers as a student of its Class even when its holder is a teacher or an admin. It does not carry a nickname, an email, or a personal name. It is distinct from a Personal API Key.
 _Avoid_: Personal API Key, Portal Session, Sign-in Handoff, class-wide shared key, a secret another service resolves by reading the router's key table, a Partner Service opening this router's database, teacher or admin standing from a Classroom API Key, an expiry fixed at issuance, a signed key, a nickname, an email, or a personal name carried on the key, a separate public id for the student, the sitting, the class, or the key
 
 **Partner Service**:
@@ -205,8 +213,12 @@ The secret one Partner Service presents to call the Key Check. Each Partner Serv
 _Avoid_: one secret shared by every Partner Service, a student bearer, a public read, a database connection string
 
 **Key Check**:
-A Partner Service's question to this router about one Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, and Class Session. An accepted Personal API Key answers with its holder, whether that holder is an admin, and the Classes that holder may manage, by id and name: every Class for an admin, otherwise the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
-_Avoid_: legacy-key check, auth API, 驗證中心, an answer with an email, a name, or the key id
+A Partner Service's question to this router about one Classroom API Key or one Personal API Key: whether it is usable now, and if so whose it is. The key is the request body, not the credential. An accepted Classroom API Key answers with its student, Class, Class Session, and Display Name. An accepted Personal API Key answers with its holder, that holder's Display Name, whether that holder is an admin, and the Classes that holder may manage, by id and name: every Class for an admin, otherwise the Classes that holder owns. A refusal answers with its cause and the notice for that cause.
+_Avoid_: legacy-key check, auth API, 驗證中心, an answer with an email, a Google subject, or the key id, identity decided by Display Name
+
+**Display Name**:
+The name the router shows for a user: the Classroom Nickname for a nickname student, the Google name for a Google user. A Partner Service may store it beside the integer id for display only.
+_Avoid_: identity, email, login name
 
 **Personal API Key** (Portal: 個人 API Key):
 A long-lived key held by one teacher or admin and bound to no Class Session. It has no Classroom Model Choice. A call may name `vcr-auto` or a Model ID on that call's shelf in the holder's Router Model Template. Any other id is refused. An empty shelf refuses that call. When that shelf has at least one Model ID, its list names `vcr-auto` once, first, then those ids in document order. An empty shelf's list names nothing. Only the router checks it; a Partner Service accepts it through the Key Check. It is the only key that carries teacher or admin standing. It is distinct from a Classroom API Key.
