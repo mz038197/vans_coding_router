@@ -371,7 +371,7 @@ class OAuthUseCase:
         client = self._authenticate_client(form, authorization)
         grant_type = form.get("grant_type")
         if grant_type == "refresh_token":
-            return self._refresh(client, form)
+            return self._refresh_classroom_token(client, form)
         if grant_type != "authorization_code":
             raise TokenRequestError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         code = form.get("code") or ""
@@ -394,13 +394,15 @@ class OAuthUseCase:
             return self._classroom_token(client, int(grant["u"]), int(grant["k"]))
         return self._teacher_token(client, int(grant["u"]), grant.get("o"))
 
-    def _refresh(self, client: OAuthClientSettings, form: Mapping[str, str]) -> dict[str, Any]:
+    def _refresh_classroom_token(self, client: OAuthClientSettings, form: Mapping[str, str]) -> dict[str, Any]:
         refresh_token = form.get("refresh_token") or ""
         if not refresh_token:
             raise TokenRequestError("invalid_request", "refresh_token is required")
         grant = self._open(self._refresh_key, refresh_token)
         if grant is None or grant.get("c") != client.client_id:
             raise TokenRequestError("invalid_grant", "the refresh token is invalid or expired")
+        if SCOPE_CLASSROOM not in client.scopes:
+            raise TokenRequestError("invalid_grant", "the client may no longer ask for classroom")
         return self._classroom_token(client, int(grant["u"]), int(grant["k"]))
 
     def _classroom_token(self, client: OAuthClientSettings, user_id: int, session_id: int) -> dict[str, Any]:

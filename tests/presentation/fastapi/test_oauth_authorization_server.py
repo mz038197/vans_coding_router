@@ -525,6 +525,62 @@ def test_unsupported_grant_type(h):
     assert response.status_code == 400
     assert response.json()["error"] == "unsupported_grant_type"
 
+def test_nickname_redeem_respects_the_session_seat_limit(h):
+    _, _, session = h.live_session(seat_limit=1)
+    _nickname_code(h, session["invite_code"], "Ada")
+
+    full = _nickname_post(h, session["invite_code"], "Bob")
+    rejoin = _nickname_post(h, session["invite_code"], "Ada")
+
+    assert full.status_code == 400
+    assert "location" not in full.headers
+    assert "此課堂座位已滿" in full.text
+    assert rejoin.status_code == 303
+
+
+def test_sitting_not_started_shows_its_notice(h):
+    starts = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    ends = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
+    _, _, session = h.live_session(session_at=starts, expires_at=ends)
+
+    response = _nickname_post(h, session["invite_code"])
+
+    assert response.status_code == 400
+    assert "課堂尚未開始" in response.text
+
+
+def test_ended_sitting_and_bad_invite_show_chinese_notices(h):
+    _, klass, session = h.live_session()
+    h.repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+        expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+    )
+
+    ended = _nickname_post(h, session["invite_code"])
+    bad = _nickname_post(h, "NOPE1234")
+
+    assert "這堂課已結束" in ended.text
+    assert "邀請碼無效" in bad.text
+
+
+def test_page_keeps_what_was_typed_after_a_refusal(h):
+    response = _nickname_post(h, "NOPE1234", "Ada<script>")
+
+    assert 'value="NOPE1234"' in response.text
+    assert "Ada&lt;script&gt;" in response.text
+    assert "<script>" not in response.text
+
+
+def test_form_post_from_another_origin_is_refused(h):
+    _, _, session = h.live_session()
+    form = {**_authorize_params(), "invite_code": session["invite_code"], "nickname": "Ada", "method": "nickname"}
+
+    response = h.client.post("/oauth/authorize", data=form, headers={"Origin": "https://evil.example"})
+
+    assert response.status_code == 403
+    assert "location" not in response.headers
 
 
 # Classroom refresh token (ADR 0096): lives as long as the sitting, renews the same key.
@@ -615,64 +671,43 @@ def test_an_authorization_code_is_not_a_refresh_token(h):
 
     response = _refresh(h, code)
 
+    assert response.status_code == 400
     assert response.json()["error"] == "invalid_grant"
 
-def test_nickname_redeem_respects_the_session_seat_limit(h):
-    _, _, session = h.live_session(seat_limit=1)
-    _nickname_code(h, session["invite_code"], "Ada")
 
-    full = _nickname_post(h, session["invite_code"], "Bob")
-    rejoin = _nickname_post(h, session["invite_code"], "Ada")
+def test_refresh_token_with_a_changed_payload_is_refused(h):
+    tokens, _, _ = _classroom_tokens(h)
+    body, _, signature = tokens["refresh_token"].partition(".")
+    payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    payload["u"] += 1
+    forged_body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).rstrip(b"=").decode()
 
-    assert full.status_code == 400
-    assert "location" not in full.headers
-    assert "此課堂座位已滿" in full.text
-    assert rejoin.status_code == 303
-
-
-def test_sitting_not_started_shows_its_notice(h):
-    starts = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    ends = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
-    _, _, session = h.live_session(session_at=starts, expires_at=ends)
-
-    response = _nickname_post(h, session["invite_code"])
+    response = _refresh(h, f"{forged_body}.{signature}")
 
     assert response.status_code == 400
-    assert "課堂尚未開始" in response.text
+    assert response.json()["error"] == "invalid_grant"
 
 
-def test_ended_sitting_and_bad_invite_show_chinese_notices(h):
-    _, klass, session = h.live_session()
-    h.repo.update_class_session(
-        klass["id"],
-        session["id"],
-        session_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat(),
-        expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
-    )
+def test_refresh_token_stops_when_the_student_is_disabled(h):
+    tokens, _, _ = _classroom_tokens(h)
+    student_id = h.repo.verify_api_key_context(tokens["access_token"]).user_id
+    h.repo.update_user(student_id, status="inactive")
 
-    ended = _nickname_post(h, session["invite_code"])
-    bad = _nickname_post(h, "NOPE1234")
+    response = _refresh(h, tokens["refresh_token"])
 
-    assert "這堂課已結束" in ended.text
-    assert "邀請碼無效" in bad.text
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
 
 
-def test_page_keeps_what_was_typed_after_a_refusal(h):
-    response = _nickname_post(h, "NOPE1234", "Ada<script>")
+def test_refresh_stops_once_the_client_may_no_longer_ask_for_classroom(h):
+    tokens, _, _ = _classroom_tokens(h)
+    clients = h.settings.oauth.clients
+    clients["agent-builder"] = replace(clients["agent-builder"], scopes=("openid", "teacher"))
 
-    assert 'value="NOPE1234"' in response.text
-    assert "Ada&lt;script&gt;" in response.text
-    assert "<script>" not in response.text
+    response = _refresh(h, tokens["refresh_token"])
 
-
-def test_form_post_from_another_origin_is_refused(h):
-    _, _, session = h.live_session()
-    form = {**_authorize_params(), "invite_code": session["invite_code"], "nickname": "Ada", "method": "nickname"}
-
-    response = h.client.post("/oauth/authorize", data=form, headers={"Origin": "https://evil.example"})
-
-    assert response.status_code == 403
-    assert "location" not in response.headers
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
 
 
 # The Google path: the page hands off to Google login and resumes afterwards
