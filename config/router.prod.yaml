@@ -85,6 +85,10 @@ oauth:
       redirect_uris:
         - "http://172.16.36.62/api/v1/identity/oauth/callback"
         - "http://192.168.7.97/api/v1/identity/oauth/callback"
+        # TEMPORARY: the platform still sends its default localhost callback. Lets the
+        # operator finish a test consent by editing localhost to the instance address in
+        # the browser. Remove once MiTAC sets the platform's public URL.
+        - "http://localhost/api/v1/identity/oauth/callback"
       scopes: [classroom]
       client_secret_sha256: "ff03203dc209d5a04483a98b8241f461db62455bb28b219aaf66759aaa17bf6a"
     club-booking-admin:
