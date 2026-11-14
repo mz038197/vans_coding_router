@@ -98,6 +98,7 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert prod["agent-builder"].redirect_uris == (
         "http://172.16.36.62/api/v1/identity/oauth/callback",
         "http://192.168.7.97/api/v1/identity/oauth/callback",
+        "http://localhost/api/v1/identity/oauth/callback",  # temporary, see router.prod.yaml
     )
     assert len(prod["agent-builder"].client_secret_sha256) == 64
     assert prod["agent-builder"].client_secret_env == ""
