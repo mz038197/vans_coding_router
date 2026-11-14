@@ -86,12 +86,21 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert clients["agent-builder"].client_secret_env == "VCR_OAUTH_AGENT_BUILDER_SECRET"
     assert clients["club-booking-admin"].scopes == ("openid", "teacher")
     assert clients["club-booking-admin"].redirect_uris == ("http://localhost:3000/auth/callback",)
-    # Production registers the club-booking teacher admin only; agent-builder waits
-    # for MiTAC to replace its localhost callback.
     prod = load_router_settings("config/router.prod.yaml").oauth.clients
-    assert set(prod) == {"club-booking-admin"}
-    assert prod["club-booking-admin"].redirect_uris == ("https://club-booking-board.vercel.app/auth/callback",)
+    assert set(prod) == {"agent-builder", "club-booking-admin"}
+    assert prod["club-booking-admin"].redirect_uris == (
+        "https://club.vanscoding.com/auth/callback",
+        "https://club-booking-board.vercel.app/auth/callback",
+    )
     assert prod["club-booking-admin"].scopes == ("openid", "teacher")
+    # Agent Builder's test instances: only the secret's SHA-256 is in the repo.
+    assert prod["agent-builder"].scopes == ("classroom",)
+    assert prod["agent-builder"].redirect_uris == (
+        "http://172.16.36.62/api/v1/identity/oauth/callback",
+        "http://192.168.7.97/api/v1/identity/oauth/callback",
+    )
+    assert len(prod["agent-builder"].client_secret_sha256) == 64
+    assert prod["agent-builder"].client_secret_env == ""
 
 
 @pytest.mark.parametrize(
