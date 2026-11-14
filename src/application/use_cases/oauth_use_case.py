@@ -5,7 +5,9 @@ endpoint returns:
 
 - `classroom`: an Invite Code, then Nickname Redeem or a Google redeem. The access token
   is that student's Classroom API Key for the sitting, the same key a second redeem
-  returns, with `expires_in` up to the sitting's expiry and no refresh token.
+  returns, with `expires_in` up to the sitting's expiry. A refresh token (ADR 0096)
+  lasts the sitting too and renews that same key; it is signed, names the client, the
+  student and the sitting by id, and never carries a key.
 - `openid teacher`: Google only, a teacher or an admin only. The answer is an ID token
   naming the user id and Display Name, and no key.
 
@@ -184,6 +186,7 @@ class OAuthUseCase:
         secret = settings.auth.session_secret.encode("utf-8")
         self._code_key = hmac.new(secret, b"vcr-oauth-authorization-code", hashlib.sha256).digest()
         self._pending_key = hmac.new(secret, b"vcr-oauth-pending-authorization", hashlib.sha256).digest()
+        self._refresh_key = hmac.new(secret, b"vcr-oauth-classroom-refresh", hashlib.sha256).digest()
 
     # Discovery
 
@@ -196,7 +199,7 @@ class OAuthUseCase:
             "scopes_supported": list(SUPPORTED_SCOPES),
             "response_types_supported": ["code"],
             "response_modes_supported": ["query"],
-            "grant_types_supported": ["authorization_code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
             "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": [
                 "none",
@@ -366,8 +369,11 @@ class OAuthUseCase:
 
     def exchange(self, form: Mapping[str, str], authorization: str | None) -> dict[str, Any]:
         client = self._authenticate_client(form, authorization)
-        if form.get("grant_type") != "authorization_code":
-            raise TokenRequestError("unsupported_grant_type", "grant_type must be authorization_code")
+        grant_type = form.get("grant_type")
+        if grant_type == "refresh_token":
+            return self._refresh(client, form)
+        if grant_type != "authorization_code":
+            raise TokenRequestError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         code = form.get("code") or ""
         if not code:
             raise TokenRequestError("invalid_request", "code is required")
@@ -385,10 +391,19 @@ class OAuthUseCase:
         if _PKCE_VALUE.fullmatch(verifier) is None or not hmac.compare_digest(challenge, str(grant.get("p"))):
             raise TokenRequestError("invalid_grant", "code_verifier does not match the code_challenge")
         if grant.get("s") == SCOPE_CLASSROOM:
-            return self._classroom_token(int(grant["u"]), int(grant["k"]))
+            return self._classroom_token(client, int(grant["u"]), int(grant["k"]))
         return self._teacher_token(client, int(grant["u"]), grant.get("o"))
 
-    def _classroom_token(self, user_id: int, session_id: int) -> dict[str, Any]:
+    def _refresh(self, client: OAuthClientSettings, form: Mapping[str, str]) -> dict[str, Any]:
+        refresh_token = form.get("refresh_token") or ""
+        if not refresh_token:
+            raise TokenRequestError("invalid_request", "refresh_token is required")
+        grant = self._open(self._refresh_key, refresh_token)
+        if grant is None or grant.get("c") != client.client_id:
+            raise TokenRequestError("invalid_grant", "the refresh token is invalid or expired")
+        return self._classroom_token(client, int(grant["u"]), int(grant["k"]))
+
+    def _classroom_token(self, client: OAuthClientSettings, user_id: int, session_id: int) -> dict[str, Any]:
         api_key = self.repo.classroom_api_key(user_id, session_id)
         now = self.clock()
         context, _reason = self.repo.verify_api_key_with_reason(
@@ -403,11 +418,16 @@ class OAuthUseCase:
         expires_at = parse_dt(sitting["expires_at"]) if sitting else None
         if expires_at is None:
             raise TokenRequestError("invalid_grant", "the sitting has no expiry")
+        refresh_token = self._seal(
+            self._refresh_key,
+            {"c": client.client_id, "u": int(user_id), "k": int(session_id), "e": int(expires_at.timestamp())},
+        )
         return {
             "access_token": api_key,
             "token_type": "Bearer",
             "expires_in": max(0, int((expires_at - now).total_seconds())),
             "scope": SCOPE_CLASSROOM,
+            "refresh_token": refresh_token,
         }
 
     def _teacher_token(self, client: OAuthClientSettings, user_id: int, nonce: Any) -> dict[str, Any]:

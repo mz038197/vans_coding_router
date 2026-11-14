@@ -213,7 +213,7 @@ def test_discovery_names_the_endpoints_and_s256(h, path):
     assert set(doc["token_endpoint_auth_methods_supported"]) == {"none", "client_secret_post", "client_secret_basic"}
     assert {"classroom", "openid", "teacher"} <= set(doc["scopes_supported"])
     assert doc["response_types_supported"] == ["code"]
-    assert doc["grant_types_supported"] == ["authorization_code"]
+    assert doc["grant_types_supported"] == ["authorization_code", "refresh_token"]
     assert doc["id_token_signing_alg_values_supported"] == ["RS256"]
 
 
@@ -375,9 +375,10 @@ def test_nickname_redeem_issues_the_students_classroom_key(h):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     body = response.json()
-    assert set(body) == {"access_token", "token_type", "expires_in", "scope"}
+    assert set(body) == {"access_token", "token_type", "expires_in", "scope", "refresh_token"}
     assert body["token_type"] == "Bearer"
     assert body["scope"] == "classroom"
+    assert "vcr_sk_" not in body["refresh_token"]
     assert body["access_token"].startswith("vcr_sk_")
     second_redeem = h.client.post(
         "/extension/sessions/nickname-redeem",
@@ -517,13 +518,104 @@ def test_a_code_for_one_client_cannot_be_redeemed_by_another(h):
 def test_unsupported_grant_type(h):
     response = h.client.post(
         "/oauth/token",
-        data={"grant_type": "refresh_token", "refresh_token": "x"},
+        data={"grant_type": "password", "username": "x", "password": "x"},
         auth=("agent-builder", AGENT_SECRET),
     )
 
     assert response.status_code == 400
     assert response.json()["error"] == "unsupported_grant_type"
 
+
+
+# Classroom refresh token (ADR 0096): lives as long as the sitting, renews the same key.
+
+
+def _refresh(h: "Harness", refresh_token: str, *, auth=("agent-builder", AGENT_SECRET), **extra):
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    data.update(extra)
+    return h.client.post("/oauth/token", data=data, auth=auth)
+
+
+def _classroom_tokens(h: "Harness") -> tuple[dict, dict, dict]:
+    _, klass, session = h.live_session()
+    response = _token(h, _nickname_code(h, session["invite_code"], "Ada"))
+    assert response.status_code == 200, response.text
+    return response.json(), klass, session
+
+
+def test_refresh_token_renews_the_same_classroom_key(h):
+    first, _, _ = _classroom_tokens(h)
+
+    response = _refresh(h, first["refresh_token"])
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["access_token"] == first["access_token"]
+    assert body["token_type"] == "Bearer"
+    assert body["scope"] == "classroom"
+    assert abs(body["expires_in"] - first["expires_in"]) <= 2
+    assert body["refresh_token"]
+
+
+def test_refresh_token_stops_when_the_teacher_ends_the_sitting(h):
+    tokens, klass, session = _classroom_tokens(h)
+    h.repo.update_class_session(
+        klass["id"],
+        session["id"],
+        session_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+        expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+    )
+
+    response = _refresh(h, tokens["refresh_token"])
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
+def test_refresh_token_expires_with_the_sitting(h):
+    tokens, _, _ = _classroom_tokens(h)
+    h.clock_offset = timedelta(seconds=tokens["expires_in"] + 5)
+
+    response = _refresh(h, tokens["refresh_token"])
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
+def test_refresh_token_belongs_to_the_client_it_was_issued_to(h):
+    tokens, _, _ = _classroom_tokens(h)
+
+    response = _refresh(h, tokens["refresh_token"], auth=None, client_id="club-booking-admin")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
+def test_refresh_needs_the_clients_secret(h):
+    tokens, _, _ = _classroom_tokens(h)
+
+    response = _refresh(h, tokens["refresh_token"], auth=("agent-builder", "wrong"))
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_client"
+
+
+@pytest.mark.parametrize("refresh_token", ["", "not-a-token", "eyJ9.c2ln"])
+def test_missing_or_forged_refresh_token_is_refused(h, refresh_token):
+    response = _refresh(h, refresh_token)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == ("invalid_request" if not refresh_token else "invalid_grant")
+
+
+def test_an_authorization_code_is_not_a_refresh_token(h):
+    _, _, session = h.live_session()
+    code = _nickname_code(h, session["invite_code"])
+
+    response = _refresh(h, code)
+
+    assert response.json()["error"] == "invalid_grant"
 
 def test_nickname_redeem_respects_the_session_seat_limit(h):
     _, _, session = h.live_session(seat_limit=1)

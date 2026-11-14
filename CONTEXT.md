@@ -193,7 +193,7 @@ A teacher-issued class-session code redeemed for a Classroom API Key (`vcr_sk_â€
 _Avoid_: handoff token, Google OAuth code, Classroom Nickname, rewriting that hint
 
 **Authorization Page**:
-The router page an OAuth Client sends a person to. For the `classroom` scope it takes an Invite Code, then Nickname Redeem or Google, and hands the client that student's Classroom API Key for the sitting. For the `openid teacher` scope it takes Google only, admits only a teacher or an admin, and hands back an ID token, never a key. It is not the Portal.
+The router page an OAuth Client sends a person to. For the `classroom` scope it takes an Invite Code, then Nickname Redeem or Google, and hands the client that student's Classroom API Key for the sitting, with a refresh token that renews the same key until the sitting ends. For the `openid teacher` scope it takes Google only, admits only a teacher or an admin, and hands back an ID token, never a key. It is not the Portal.
 _Avoid_: login page, Portal redeem, consent screen as the name
 
 **OAuth Client**:
