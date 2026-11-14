@@ -77,13 +77,16 @@ web_search:
 # See guide/DEPLOYMENT.md (OAuth authorization server).
 oauth:
   clients:
-    # agent-builder: register once MiTAC replaces its localhost callback.
-    # agent-builder:
-    #   name: "MiTAC Agent Builder"
-    #   redirect_uris:
-    #     - "<the Agent Builder callback, once the platform shows a reachable one>"
-    #   scopes: [classroom]
-    #   client_secret_env: "VCR_OAUTH_AGENT_BUILDER_SECRET"
+    # MiTAC Agent Builder test instances on MiTAC's internal network (reached over VPN).
+    # Their platform shows http://localhost/api/v1/identity/oauth/callback; the host is
+    # the instance's address. Add the public address once MiTAC names one for classes.
+    agent-builder:
+      name: "MiTAC Agent Builder"
+      redirect_uris:
+        - "http://172.16.36.62/api/v1/identity/oauth/callback"
+        - "http://192.168.7.97/api/v1/identity/oauth/callback"
+      scopes: [classroom]
+      client_secret_sha256: "ff03203dc209d5a04483a98b8241f461db62455bb28b219aaf66759aaa17bf6a"
     club-booking-admin:
       name: "社團預約板"
       redirect_uris:
