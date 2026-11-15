@@ -99,6 +99,10 @@ def test_example_config_registers_agent_builder_and_club_booking():
         "http://172.16.36.62/api/v1/identity/oauth/callback",
         "http://192.168.7.97/api/v1/identity/oauth/callback",
         "http://localhost/api/v1/identity/oauth/callback",  # temporary, see router.prod.yaml
+        # MCP Server connections call back on their own path.
+        "http://172.16.36.62/api/v1/identity/mcp/oauth/callback",
+        "http://192.168.7.97/api/v1/identity/mcp/oauth/callback",
+        "http://localhost/api/v1/identity/mcp/oauth/callback",  # temporary
     )
     assert len(prod["agent-builder"].client_secret_sha256) == 64
     assert prod["agent-builder"].client_secret_env == ""
