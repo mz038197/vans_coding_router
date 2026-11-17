@@ -45,6 +45,11 @@ def _aware(value: datetime | None) -> datetime | None:
     return value
 
 
+def _without_nul(text: str) -> str:
+    """Postgres TEXT rejects NUL (0x00), and a prompt can carry one; U+FFFD marks where it was."""
+    return text.replace("\x00", "�")
+
+
 def _check_session_window(start: datetime, end: datetime) -> None:
     """A Class Session is a start-to-end window; either end may lie in the past (ADR 0091)."""
     if end <= start:
@@ -1711,6 +1716,10 @@ class RouterRepositoryBase(ABC):
         response_preview: str = "",
         tier: TierSelection | None = None,
     ) -> None:
+        raw_prompt, final_prompt, message_preview, messages_json, response_preview = (
+            _without_nul(text)
+            for text in (raw_prompt, final_prompt, message_preview, messages_json, response_preview)
+        )
         with self._connect() as conn:
             conn.execute(
                 self._sql(

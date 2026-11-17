@@ -156,6 +156,30 @@ def test_postgres_prompt_log_keeps_tier_name_and_confidence(postgres_repo):
     ]
 
 
+def test_postgres_prompt_log_stores_text_that_holds_nul_bytes(postgres_repo):
+    # Postgres TEXT rejects NUL (0x00); a coding agent's prompt can carry one.
+    repo = postgres_repo
+    teacher, klass, context = _student_context(repo)
+
+    repo.log_prompt(
+        context,
+        "user: before\x00after",
+        "user: before\x00after",
+        "openrouter@vendor/model",
+        "ok",
+        None,
+        message_preview="before\x00after",
+        response_preview="reply\x00tail",
+    )
+
+    [log] = repo.list_prompt_logs(teacher["id"], klass["id"])
+    assert (log["raw_prompt"], log["message_preview"], log["response_preview"]) == (
+        "user: before�after",
+        "before�after",
+        "reply�tail",
+    )
+
+
 def test_postgres_archive_keeps_tier_name_and_confidence(postgres_repo):
     repo = postgres_repo
     _, _, context = _student_context(repo)

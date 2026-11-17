@@ -41,7 +41,15 @@ from src.presentation.fastapi.schemas.api import (
 from src.presentation.fastapi.streaming import AclosingStreamingResponse
 
 
-def _client_ip(request: Request) -> str | None:
+def _client_ip(request: Request | WebSocket) -> str | None:
+    """The caller's IP, for logs only.
+
+    On Fly the socket peer is Fly's proxy, which overwrites Fly-Client-IP with the caller's
+    address. Off Fly any caller can set that header, so never use this for access control.
+    """
+    fly_client_ip = request.headers.get("fly-client-ip", "").strip()
+    if fly_client_ip:
+        return fly_client_ip
     if request.client is None:
         return None
     return request.client.host
@@ -524,7 +532,7 @@ def create_api_router(
             return
 
         await ws.accept()
-        client_ip = ws.client.host if ws.client else None
+        client_ip = _client_ip(ws)
         transcript_text = ""
         try:
             transcript_text = await proxy_realtime_session(ws, target, connect=connect)

@@ -10,6 +10,11 @@ from src.presentation.fastapi.middleware.api_key_middleware import ApiKeyMiddlew
 from src.presentation.fastapi.routers.api_router import create_api_router
 from fakes import FakeLLMGateway, FakeRequestLogger
 
+CHAT_BODY = {
+    "model": "ollama_cloud@minimax-m3:cloud",
+    "messages": [{"role": "user", "content": "hello"}],
+}
+
 
 def _sqlite_api_client(tmp_path) -> tuple[TestClient, SqliteRouterRepository, FakeLLMGateway]:
     settings = RouterSettings(
@@ -45,8 +50,8 @@ def _prompt_log_count(repo: SqliteRouterRepository, teacher_id: int, class_id: i
     )
 
 
-def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
-    client, repo, _gateway = _sqlite_api_client(tmp_path)
+def _student_in_session(repo: SqliteRouterRepository) -> tuple[dict, dict, dict, dict, dict[str, str]]:
+    """A teacher's class with one sitting open to any model, and a student who joined it."""
     teacher = repo.upsert_google_user("teacher@school.edu", "Teacher")
     repo.update_user(teacher["id"], roles=["teacher"])
     klass = repo.create_class(teacher["id"], "AI 素養", None)
@@ -58,15 +63,16 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
         )
     student = repo.upsert_google_user("student@school.edu", "Student")
     student_key = repo.redeem_invite(session["invite_code"], student["id"])["api_key"]
-    headers = {"Authorization": f"Bearer {student_key}"}
-    body = {
-        "model": "ollama_cloud@minimax-m3:cloud",
-        "messages": [{"role": "user", "content": "hello"}],
-    }
+    return teacher, klass, session, student, {"Authorization": f"Bearer {student_key}"}
+
+
+def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
+    client, repo, _gateway = _sqlite_api_client(tmp_path)
+    teacher, klass, session, student, headers = _student_in_session(repo)
 
     assert repo.is_prompt_logging_enabled(session["id"]) is True
 
-    enabled = client.post("/v1/chat/completions", headers=headers, json=body)
+    enabled = client.post("/v1/chat/completions", headers=headers, json=CHAT_BODY)
     assert enabled.status_code == 200
     assert _prompt_log_count(repo, teacher["id"], klass["id"], session["id"]) == 1
     logs = repo.list_prompt_logs(teacher["id"], klass["id"], session_id=session["id"], limit=1)
@@ -76,7 +82,7 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
     repo.update_class_session(klass["id"], session["id"], prompt_logging_enabled=False)
     assert repo.is_prompt_logging_enabled(session["id"]) is False
 
-    disabled = client.post("/v1/chat/completions", headers=headers, json=body)
+    disabled = client.post("/v1/chat/completions", headers=headers, json=CHAT_BODY)
     assert disabled.status_code == 200
     assert _prompt_log_count(repo, teacher["id"], klass["id"], session["id"]) == 1
 
@@ -87,6 +93,44 @@ def test_session_prompt_logging_skips_db_when_disabled(tmp_path):
 
     repo.update_class_session(klass["id"], session["id"], prompt_logging_enabled=True)
 
-    reenabled = client.post("/v1/chat/completions", headers=headers, json=body)
+    reenabled = client.post("/v1/chat/completions", headers=headers, json=CHAT_BODY)
     assert reenabled.status_code == 200
     assert _prompt_log_count(repo, teacher["id"], klass["id"], session["id"]) == 2
+
+
+def test_prompt_log_records_the_caller_ip_fly_reports(tmp_path):
+    client, repo, _gateway = _sqlite_api_client(tmp_path)
+    teacher, klass, session, _student, headers = _student_in_session(repo)
+
+    behind_fly = client.post(
+        "/v1/chat/completions",
+        headers={**headers, "Fly-Client-IP": "203.0.113.7"},
+        json=CHAT_BODY,
+    )
+    direct = client.post("/v1/chat/completions", headers=headers, json=CHAT_BODY)
+
+    assert behind_fly.status_code == 200
+    assert direct.status_code == 200
+    logs = repo.list_prompt_logs(teacher["id"], klass["id"], session_id=session["id"], limit=10)
+    assert sorted(log["client_ip"] for log in logs) == ["203.0.113.7", "testclient"]
+
+
+def test_stream_still_completes_when_the_prompt_log_cannot_be_written(tmp_path, monkeypatch, caplog):
+    client, repo, gateway = _sqlite_api_client(tmp_path)
+    teacher, klass, _session, student, headers = _student_in_session(repo)
+
+    def broken_log_prompt(**_kwargs):
+        raise RuntimeError("prompt_logs is unavailable")
+
+    monkeypatch.setattr(repo, "log_prompt", broken_log_prompt)
+
+    response = client.post("/v1/chat/completions", headers=headers, json={**CHAT_BODY, "stream": True})
+
+    assert response.status_code == 200
+    assert response.content == b"".join(gateway.stream_chunks)
+    assert any(
+        record.levelname == "ERROR" and "prompt log" in record.getMessage().lower() for record in caplog.records
+    )
+    # Token Usage is written before the Prompt Log, so the failure loses only the log.
+    student_usage = next(row for row in repo.class_usage(teacher["id"], klass["id"]) if row["user_id"] == student["id"])
+    assert student_usage["request_count"] == 1

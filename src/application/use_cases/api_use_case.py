@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import aclosing
 from dataclasses import replace
 from typing import Any, AsyncGenerator, Awaitable, Callable
@@ -68,6 +69,7 @@ from src.domain.ports.llm_gateway import LLMGatewayPort
 from src.domain.ports.request_log import RequestLogPort
 from src.domain.ports.web_search import WebSearchPort
 
+_logger = logging.getLogger(__name__)
 
 class ApiUseCase:
     def __init__(
@@ -1304,9 +1306,31 @@ class ApiUseCase:
         """selection: the Auto Tier a vcr-auto selector chose; None leaves the tier empty.
 
         Token Usage is recorded first and independently of whether a Prompt Log is stored.
+        A Prompt Log that cannot be stored is reported to the server log; the reply has
+        already reached the caller, so it must not turn into an error.
         """
         if status == "ok":
             self._record_token_usage(auth_context, model, usage, api_endpoint)
+        try:
+            self._store_prompt_log(
+                auth_context, messages, model, status, client_ip, usage,
+                assistant_messages, api_endpoint, selection,
+            )
+        except Exception:
+            _logger.exception("Prompt log write failed for %s on %s", model, api_endpoint)
+
+    def _store_prompt_log(
+        self,
+        auth_context: AuthContext | None,
+        messages: list[dict[str, Any]],
+        model: str,
+        status: str,
+        client_ip: str | None,
+        usage: dict[str, int] | None,
+        assistant_messages: list[dict[str, Any]] | None,
+        api_endpoint: str,
+        selection: TierSelection | None,
+    ) -> None:
         if not hasattr(self.api_key_repo, "log_prompt"):
             return
         if auth_context and auth_context.session_id and hasattr(
