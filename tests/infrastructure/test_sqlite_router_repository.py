@@ -198,6 +198,34 @@ def test_sqlite_session_key_redeem_verify_and_prompt_log(tmp_path):
     assert logs[0]["raw_prompt"] == "user: hello"
 
 
+def test_prompt_log_stores_text_that_holds_nul_bytes_as_postgres_would(tmp_path):
+    repo = SqliteRouterRepository(str(tmp_path / "router.db"), _settings(tmp_path))
+    teacher = repo.upsert_google_user("teacher@example.com", "Teacher")
+    repo.update_user(teacher["id"], role="teacher")
+    student = repo.upsert_google_user("student@example.com", "Student")
+    klass = repo.create_class(teacher["id"], "NUL", None)
+    session = repo.create_class_session(klass["id"], teacher["id"], "Session")
+    context = repo.verify_api_key_context(repo.redeem_invite(session["invite_code"], student["id"])["api_key"])
+
+    repo.log_prompt(
+        context,
+        "user: before\x00after",
+        "user: before\x00after",
+        "fake-model",
+        "ok",
+        None,
+        message_preview="before\x00after",
+        response_preview="reply\x00tail",
+    )
+
+    [log] = repo.list_prompt_logs(teacher["id"], klass["id"])
+    assert (log["raw_prompt"], log["message_preview"], log["response_preview"]) == (
+        "user: before�after",
+        "before�after",
+        "reply�tail",
+    )
+
+
 def test_prompt_logs_can_be_filtered_by_time_range(tmp_path):
     settings = RouterSettings(database=DatabaseSettings(path=str(tmp_path / "router.db"), archive_dir=str(tmp_path / "archive")))
     repo = SqliteRouterRepository(str(tmp_path / "router.db"), settings)
