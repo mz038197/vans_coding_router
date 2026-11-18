@@ -97,10 +97,10 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert prod["agent-builder"].scopes == ("classroom",)
     assert prod["agent-builder"].redirect_uris == (
         "http://172.16.36.62/api/v1/identity/oauth/callback",
-        "http://192.168.7.97/api/v1/identity/oauth/callback",
+        "http://210.70.137.97/api/v1/identity/oauth/callback",
         # MCP Server connections call back on their own path.
         "http://172.16.36.62/api/v1/identity/mcp/oauth/callback",
-        "http://192.168.7.97/api/v1/identity/mcp/oauth/callback",
+        "http://210.70.137.97/api/v1/identity/mcp/oauth/callback",
     )
     assert len(prod["agent-builder"].client_secret_sha256) == 64
     assert prod["agent-builder"].client_secret_env == ""
