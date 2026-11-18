@@ -78,8 +78,9 @@ web_search:
 oauth:
   clients:
     # MiTAC Agent Builder instances: 172.16.36.62 is MiTAC's test instance (reached over
-    # VPN); 210.70.137.97 is the public address of the 台南一中 instance (internal
-    # 192.168.7.97), used in class. API Server connections call back on
+    # VPN); the 台南一中 instance is 192.168.7.97 on the school network and
+    # 210.70.137.97 from outside it (the school network cannot reach its own public
+    # address), so both are registered. API Server connections call back on
     # /api/v1/identity/oauth/callback, MCP Server connections on
     # /api/v1/identity/mcp/oauth/callback, at the address the platform is set to.
     agent-builder:
@@ -87,9 +88,11 @@ oauth:
       redirect_uris:
         - "http://172.16.36.62/api/v1/identity/oauth/callback"
         - "http://210.70.137.97/api/v1/identity/oauth/callback"
+        - "http://192.168.7.97/api/v1/identity/oauth/callback"
         # MCP Server connections (vans-mcp-server /mcp-oauth) call back on their own path.
         - "http://172.16.36.62/api/v1/identity/mcp/oauth/callback"
         - "http://210.70.137.97/api/v1/identity/mcp/oauth/callback"
+        - "http://192.168.7.97/api/v1/identity/mcp/oauth/callback"
       scopes: [classroom]
       client_secret_sha256: "ff03203dc209d5a04483a98b8241f461db62455bb28b219aaf66759aaa17bf6a"
     club-booking-admin:
