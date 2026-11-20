@@ -21,7 +21,7 @@ from src.infrastructure.logging.message_preview import (
 )
 
 from src.application.vcr_auto_selection_memory import VcrAutoSelectionMemory
-from src.application.vcr_auto_selector import VcrAutoSelector
+from src.application.vcr_auto_selector import SelectorAnswer, VcrAutoSelector
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.auto_tier import (
     AutoTier,
@@ -43,7 +43,7 @@ from src.domain.model_shelf import (
     shelf_model_ids,
 )
 from src.domain.classroom_model_choice import AUTOMATIC_MODELS, choice_accepts_model, student_list_ids
-from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT, VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import allowlist_from_document, is_model_allowed
@@ -703,10 +703,27 @@ class ApiUseCase:
             remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, all_tiers)
             if remembered is not None:
                 return remembered
-        selection = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        answer = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        self._record_selector_usage(auth_context, answer)
+        selection = answer.selection
         if selection is not None and memory_key is not None:
             self.vcr_auto_selection_memory.remember(memory_key, last_user_text, all_tiers, selection)
         return selection
+
+    def _record_selector_usage(self, auth_context: AuthContext | None, answer: SelectorAnswer) -> None:
+        """One Selector Usage per selector reply that reports tokens (ADR-0097).
+
+        Written at selection time, so a walk with no output does not lose it. Never a
+        Prompt Log. A record that cannot be stored must not fail the call it serves.
+        """
+        if answer.model_id is None or answer.usage is None:
+            return
+        try:
+            self._record_token_usage(
+                auth_context, answer.model_id, _usage_from_raw_usage(answer.usage), SELECTOR_USAGE_ENDPOINT
+            )
+        except Exception:
+            _logger.exception("Selector Usage write failed for %s", answer.model_id)
 
     def _selection_document(
         self, auth_context: AuthContext | None

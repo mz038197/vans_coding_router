@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from src.application.vcr_auto_walk import VcrAutoWalk
@@ -20,6 +21,22 @@ logger = logging.getLogger(__name__)
 SELECTOR_TIMEOUT_SECONDS = 1.5
 
 
+@dataclass(frozen=True)
+class SelectorAnswer:
+    """What one selector question produced.
+
+    selection: the chosen tier, or None when the selector errs, refuses, is too slow,
+    or answers unreadably.
+    model_id / usage: the Selector Model ID that replied and the reply's raw usage
+    block, set whenever a reply arrived, even an unreadable one (ADR-0097). A timeout
+    or an upstream failure leaves them None.
+    """
+
+    selection: TierSelection | None
+    model_id: str | None = None
+    usage: dict[str, Any] | None = None
+
+
 class VcrAutoSelector:
     def __init__(self, gateway: LLMGatewayPort, *, timeout: float = SELECTOR_TIMEOUT_SECONDS):
         self.gateway = gateway
@@ -30,10 +47,10 @@ class VcrAutoSelector:
         selector_ids: list[str],
         tiers: list[AutoTier],
         state: str,
-    ) -> TierSelection | None:
-        """The chosen tier, or None when the selector errs, refuses, or is too slow.
+    ) -> SelectorAnswer:
+        """The chosen tier and the reply's spend; failure only means document order.
 
-        A failure only means document order: it is logged at INFO, never raised.
+        A failure is logged at INFO, never raised.
         """
         walker = VcrAutoWalk()
 
@@ -42,12 +59,14 @@ class VcrAutoSelector:
 
         try:
             hit = await asyncio.wait_for(walker.run(selector_ids, call), self.timeout)
-            selection = strongest_plausible(tiers, hit.value)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - selection only reorders a walk that works without it
             logger.info("vcr_auto_selector_failed: %s", type(exc).__name__)
-            return None
+            return SelectorAnswer(selection=None)
+        reply = hit.value if isinstance(hit.value, dict) else {}
+        usage = reply.get("usage") if isinstance(reply.get("usage"), dict) else None
+        selection = strongest_plausible(tiers, hit.value)
         if selection is None:
             logger.info("vcr_auto_selector_failed: unreadable answer")
-        return selection
+        return SelectorAnswer(selection=selection, model_id=hit.model_id, usage=usage)

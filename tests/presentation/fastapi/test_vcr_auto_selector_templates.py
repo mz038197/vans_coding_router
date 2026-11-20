@@ -295,3 +295,21 @@ def _set_document_raw(harness: _Harness, document: list[dict]) -> None:
         harness.session["id"],
         session_chat_language_models=document,
     )
+
+
+def test_personal_api_key_vcr_auto_records_selector_usage_with_no_class(tmp_path):
+    from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT
+
+    harness = _Harness(tmp_path)
+    harness.repo.save_router_model_template(harness.teacher["id"], _selector_document())
+    personal = harness.repo.issue_long_lived_key(harness.teacher["id"])
+    _Upstream(harness, _json_response(200, _decision({"輕量": 0.05, "一般": 0.9, "困難": 0.05})))
+
+    assert _personal_chat(harness, personal).status_code == 200
+
+    with harness.repo._connect() as conn:
+        rows = conn.execute(
+            "SELECT user_id, class_id, session_id, model, total_tokens FROM token_usage WHERE api_endpoint = ?",
+            (SELECTOR_USAGE_ENDPOINT,),
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [(harness.teacher["id"], None, None, SELECTOR, 2)]

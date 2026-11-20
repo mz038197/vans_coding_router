@@ -23,6 +23,7 @@ from src.domain.classroom_model_choice import (
     PICKED_MODELS,
     normalize_classroom_model_choice,
 )
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -1775,7 +1776,7 @@ class RouterRepositoryBase(ABC):
                            COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                            COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                            COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                           COUNT(t.id) AS request_count
+                           COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count
                     FROM class_members m
                     JOIN users u ON u.id = m.user_id
                     JOIN classes c ON c.id = m.class_id
@@ -1785,7 +1786,7 @@ class RouterRepositoryBase(ABC):
                     ORDER BY total_tokens DESC, u.name
                     """
                 ),
-                (class_id, teacher_id),
+                (SELECTOR_USAGE_ENDPOINT, class_id, teacher_id),
             ).fetchall()
             result = []
             for row in rows:
@@ -1797,7 +1798,7 @@ class RouterRepositoryBase(ABC):
                                COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                                COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                               COUNT(t.id) AS request_count
+                               COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count
                         FROM class_sessions s
                         LEFT JOIN token_usage t ON t.session_id = s.id AND t.user_id = ?
                         WHERE s.class_id = ?
@@ -1805,7 +1806,7 @@ class RouterRepositoryBase(ABC):
                         ORDER BY s.created_at DESC
                         """
                     ),
-                    (item["user_id"], class_id),
+                    (SELECTOR_USAGE_ENDPOINT, item["user_id"], class_id),
                 ).fetchall()
                 item["sessions"] = [_usage_ints(dict(session)) for session in sessions]
                 result.append(item)
