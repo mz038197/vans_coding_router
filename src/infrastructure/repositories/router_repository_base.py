@@ -13,7 +13,6 @@ from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.decision_model import (
     DECISION_MODEL_UNCHANGED,
-    decision_model_ids,
     normalize_decision_model,
 )
 from src.domain.auto_tier import TierSelection, without_auto_tiers
@@ -1403,21 +1402,6 @@ class RouterRepositoryBase(ABC):
                 return ""
             value = row["decision_model"] if "decision_model" in row.keys() else ""
             return value if isinstance(value, str) else ""
-
-    def get_decision_model_ids(self, session_id: int) -> list[str]:
-        with self._connect() as conn:
-            row = conn.execute(
-                self._sql(
-                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
-                ),
-                (session_id,),
-            ).fetchone()
-            if not row:
-                return []
-            document = parse_session_chat_language_models_json(
-                row["session_chat_language_models_json"]
-            )
-            return decision_model_ids(document)
 
     def get_session_chat_language_models(self, session_id: int) -> list[Any] | None:
         """The stored Session Chat Language Models document, as saved (router-only fields kept)."""

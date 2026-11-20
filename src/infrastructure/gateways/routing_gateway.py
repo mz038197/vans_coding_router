@@ -175,7 +175,7 @@ class RoutingGateway:
                 yield chunk
 
     async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        gateway, payload = self._resolve_decision_body(body)
+        gateway, payload = self._resolve_images_body(body)
         return await gateway.decisions_create(payload)
 
     async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -293,15 +293,6 @@ class RoutingGateway:
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
         payload = _without_models_field(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
-        return self.gateways[provider_name], payload
-
-    def _resolve_decision_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
-        provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        payload = {
-            "model": self._normalize_upstream_model(provider_name, upstream_model),
-            "state": body.get("state"),
-            "questions": body.get("questions"),
-        }
         return self.gateways[provider_name], payload
 
     def _resolve_images_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:

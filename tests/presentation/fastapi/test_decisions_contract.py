@@ -100,6 +100,7 @@ def test_decision_off_refuses_before_upstream(tmp_path):
     )
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "decision_disabled"
+    assert blocked.json()["error"]["type"] == "invalid_request_error"
     assert gateway.last_decision_body is None
 
 
@@ -170,6 +171,31 @@ def test_allowed_decision_forwards_state_and_questions_only(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == openrouter.decision_response
+    assert openrouter.last_decision_body == {
+        "model": "typesafe/jev-1.13",
+        "state": "付款失敗三天了",
+        "questions": _DECISION_BODY["questions"],
+    }
+
+
+def test_vcr_auto_decision_forwards_state_and_questions_only(tmp_path):
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={
+            **_DECISION_BODY,
+            "model": "vcr-auto",
+            "provider": {"order": ["somewhere"]},
+            "user": "student",
+            "trace": {"trace_id": "t-1"},
+        },
+    )
+
+    assert response.status_code == 200
     assert openrouter.last_decision_body == {
         "model": "typesafe/jev-1.13",
         "state": "付款失敗三天了",
