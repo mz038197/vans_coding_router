@@ -8,6 +8,7 @@ from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
     AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
+    DECISIONS_PATH,
     EMBEDDINGS_PATH,
     IMAGE_ONLY_LABEL,
     IMAGES_PATH,
@@ -1006,14 +1007,14 @@ class ApiUseCase:
         self,
         body: dict[str, Any],
         auth_context: AuthContext | None,
-    ) -> dict[str, Any]:
+    ) -> tuple[str, dict[str, Any]]:
         walker = VcrAutoWalk()
 
         async def call(model_id: str) -> dict[str, Any]:
             return await self.gateway.decisions_create({**body, "model": model_id})
 
         hit = await walker.run(self._shelf_model_ids(auth_context, DECISION_SHELF_KEY), call)
-        return hit.value
+        return hit.model_id, hit.value
 
     async def decisions_create(
         self,
@@ -1022,7 +1023,6 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        del api_key, client_ip
         # The one place a Decision Request is cut down; every later step only replaces model.
         decision_body = {
             "model": body.get("model"),
@@ -1032,8 +1032,13 @@ class ApiUseCase:
         model_id = decision_body["model"]
         self._assert_shelf_allowed(auth_context, DECISION_SHELF_KEY, model_id, DecisionDisabledError)
         if self._use_vcr_auto_walk(model_id, auth_context):
-            return await self._decisions_vcr_auto(decision_body, auth_context)
-        return await self.gateway.decisions_create(decision_body)
+            model_id, response = await self._decisions_vcr_auto(decision_body, auth_context)
+        else:
+            response = await self.gateway.decisions_create(decision_body)
+        self._log_decision_request(
+            {**decision_body, "model": model_id}, response, api_key, client_ip, auth_context
+        )
+        return response
 
     def _is_personal_api_key(self, auth_context: AuthContext | None) -> bool:
         return auth_context is not None and auth_context.session_id is None
@@ -1413,6 +1418,40 @@ class ApiUseCase:
             api_endpoint=EMBEDDINGS_PATH,
         )
 
+    def _log_decision_request(
+        self,
+        body: dict[str, Any],
+        response: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> None:
+        """A Decision Prompt Log holds a summary of the call, never the raw body."""
+        model = body.get("model")
+        model_name = model if isinstance(model, str) else "N/A"
+        request_text, _ = truncate_log_text(_decision_request_summary(body))
+        messages = [{"role": "user", "content": request_text}]
+        assistant_messages = [{"role": "assistant", "content": _decision_reply_summary(response)}]
+        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
+        self.logger.log_validation_result(
+            teacher_name=teacher_name,
+            api_key=api_key or "未提供",
+            model=model_name,
+            messages=messages,
+            is_valid=is_valid,
+            client_ip=client_ip,
+        )
+        self._log_prompt(
+            auth_context,
+            messages,
+            model_name,
+            "ok" if is_valid else "rejected",
+            client_ip,
+            _usage_from_response(response),
+            assistant_messages=assistant_messages,
+            api_endpoint=DECISIONS_PATH,
+        )
+
     def _log_tts_request(
         self,
         body: dict[str, Any],
@@ -1545,6 +1584,61 @@ def _embeddings_log_input(raw: Any) -> str:
     if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
         return "\n".join(raw)
     return "［非文字嵌入輸入］"
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _decision_state_part_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if isinstance(part, dict):
+        part_type = part.get("type")
+        if part_type == "text" and isinstance(part.get("text"), str):
+            return part["text"]
+        if isinstance(part_type, str) and "image" in part_type:
+            return IMAGE_ONLY_LABEL
+    return _compact_json(part)
+
+
+def _decision_state_text(state: Any) -> str:
+    """Text is kept, each image part becomes a stand-in, any other shape is compact JSON."""
+    if isinstance(state, str):
+        return state
+    if isinstance(state, list):
+        return "\n".join(_decision_state_part_text(part) for part in state)
+    if state is None:
+        return ""
+    return _compact_json(state)
+
+
+def _decision_request_summary(body: dict[str, Any]) -> str:
+    lines = [_decision_state_text(body.get("state"))]
+    questions = body.get("questions")
+    if isinstance(questions, dict):
+        for name, question in questions.items():
+            instructions = question.get("instructions") if isinstance(question, dict) else question
+            text = instructions if isinstance(instructions, str) else _compact_json(instructions)
+            lines.append(f"{name}：{text}")
+    elif questions is not None:
+        lines.append(_compact_json(questions))
+    return "\n".join(line for line in lines if line)
+
+
+def _decision_answer_value(answer: Any) -> str:
+    if isinstance(answer, dict) and isinstance(answer.get("type"), str) and answer["type"] in answer:
+        value = answer[answer["type"]]
+    else:
+        value = answer
+    return value if isinstance(value, str) else _compact_json(value)
+
+
+def _decision_reply_summary(response: dict[str, Any]) -> str:
+    answers = response.get("answers")
+    if not isinstance(answers, dict):
+        return ""
+    return "\n".join(f"{name}：{_decision_answer_value(answer)}" for name, answer in answers.items())
 
 
 def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:

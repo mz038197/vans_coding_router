@@ -597,7 +597,7 @@ def test_decision_vcr_auto_keeps_the_upstream_model_string(harness: _Harness):
     assert response.json()["model"] == "typesafe/jev-1.13"
     assert harness.ollama._client.request.await_count == 0
     assert harness.openrouter._client.request.await_args.kwargs["json"]["model"] == "typesafe/jev-1.13"
-    assert harness.logs() == []
+    assert [log["model"] for log in harness.logs()] == [decision]
 
 
 @pytest.mark.asyncio

@@ -207,6 +207,7 @@ IMAGES_PATH = "/v1/images"
 EMBEDDINGS_PATH = "/v1/embeddings"
 AUDIO_SPEECH_PATH = "/v1/audio/speech"
 AUDIO_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
+DECISIONS_PATH = "/v1/decisions"
 RESPONSE_LOG_MAX_CHARS = 131_072
 LOG_TRUNCATED_SUFFIX = "...[log truncated]"
 TOOL_CALLS_ONLY_LABEL = "[僅 tool_calls]"

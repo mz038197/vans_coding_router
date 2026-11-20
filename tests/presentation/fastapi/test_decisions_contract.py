@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from fastapi import FastAPI
@@ -447,3 +449,163 @@ def test_decision_refusal_type_follows_who_is_at_fault(tmp_path, status_code, er
 
     assert response.status_code == status_code
     assert response.json()["error"]["type"] == error_type
+
+
+def _teacher_of(repo) -> dict:
+    return repo.upsert_google_user("teacher@school.edu", "Teacher")
+
+
+def _usage_row(repo, klass, user_email: str) -> dict:
+    user = repo.upsert_google_user(user_email, user_email.split("@")[0])
+    return next(r for r in repo.class_usage(_teacher_of(repo)["id"], klass["id"]) if r["user_id"] == user["id"])
+
+
+def test_successful_decision_stores_a_summary_prompt_log_and_token_usage(tmp_path):
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    openrouter.decision_response = {
+        "id": "gen-dec-1",
+        "model": "typesafe/jev-1.13-20260917",
+        "answers": {"urgent": {"type": "noul", "noul": 0.91}},
+        "usage": {"input_tokens": 275, "output_tokens": 20, "cost": 0.00003},
+    }
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json=_DECISION_BODY,
+    )
+
+    assert response.status_code == 200
+    logs = repo.list_prompt_logs(_teacher_of(repo)["id"], klass["id"])
+    assert len(logs) == 1
+    assert logs[0]["model"] == "openrouter@typesafe/jev-1.13"
+    assert "付款失敗三天了" in logs[0]["raw_prompt"]
+    assert "urgent：這則訊息急迫嗎？" in logs[0]["raw_prompt"]
+    assert "noul" not in logs[0]["raw_prompt"]
+    assert logs[0]["response_preview"] == "urgent：0.91"
+    row = _usage_row(repo, klass, "student@school.edu")
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"], row["request_count"]) == (
+        275,
+        20,
+        295,
+        1,
+    )
+
+
+def test_decision_with_prompt_logging_off_records_usage_and_no_prompt_log(tmp_path):
+    client, repo, _openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    repo.update_class_session(klass["id"], session["id"], prompt_logging_enabled=False)
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json=_DECISION_BODY,
+    )
+
+    assert response.status_code == 200
+    assert repo.list_prompt_logs(_teacher_of(repo)["id"], klass["id"]) == []
+    row = _usage_row(repo, klass, "student@school.edu")
+    assert (row["total_tokens"], row["request_count"]) == (2, 1)
+
+
+def test_decision_state_images_become_a_stand_in_and_objects_compact_json(tmp_path):
+    client, repo, _openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    headers = {"Authorization": f"Bearer {student_key}"}
+
+    with_image = client.post(
+        "/v1/decisions",
+        headers=headers,
+        json={
+            **_DECISION_BODY,
+            "state": [
+                "學生上傳的商品照片",
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAA"}},
+            ],
+        },
+    )
+    assert with_image.status_code == 200
+    with_object = client.post(
+        "/v1/decisions",
+        headers=headers,
+        json={**_DECISION_BODY, "state": {"訂單": 42, "狀態": "失敗"}},
+    )
+    assert with_object.status_code == 200
+
+    logs = repo.list_prompt_logs(_teacher_of(repo)["id"], klass["id"])
+    assert len(logs) == 2
+    raw_prompts = "\n".join(log["raw_prompt"] for log in logs)
+    details = [repo.get_prompt_log(_teacher_of(repo)["id"], klass["id"], log["id"]) for log in logs]
+    stored = json.dumps([logs, details], ensure_ascii=False, default=str)
+    assert "學生上傳的商品照片\n[圖片]" in raw_prompts
+    assert '{"訂單":42,"狀態":"失敗"}' in raw_prompts
+    assert "base64" not in stored
+    assert "iVBORw0KGgo" not in stored
+
+
+def test_vcr_auto_decision_records_the_model_id_that_produced_output(tmp_path):
+    client, repo, _openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={**_DECISION_BODY, "model": "vcr-auto"},
+    )
+
+    assert response.status_code == 200
+    logs = repo.list_prompt_logs(_teacher_of(repo)["id"], klass["id"])
+    assert [log["model"] for log in logs] == ["openrouter@typesafe/jev-1.13"]
+
+
+def test_refused_decisions_record_nothing(tmp_path):
+    from src.domain.errors import UpstreamServiceError
+
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    headers = {"Authorization": f"Bearer {student_key}"}
+
+    decision_off = client.post("/v1/decisions", headers=headers, json=_DECISION_BODY)
+    assert decision_off.status_code == 403
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    not_allowed = client.post(
+        "/v1/decisions", headers=headers, json={**_DECISION_BODY, "model": "openrouter@other/model"}
+    )
+    assert not_allowed.status_code == 403
+    openrouter.decision_error = UpstreamServiceError(
+        status_code=400,
+        backend="openrouter",
+        body={"error": {"message": "questions must include type"}},
+    )
+    provider_refusal = client.post("/v1/decisions", headers=headers, json=_DECISION_BODY)
+    assert provider_refusal.status_code == 400
+
+    assert repo.list_prompt_logs(_teacher_of(repo)["id"], klass["id"]) == []
+    row = _usage_row(repo, klass, "student@school.edu")
+    assert (row["total_tokens"], row["request_count"]) == (0, 0)
+
+
+def test_personal_api_key_decision_records_usage_without_a_class(tmp_path):
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    teacher = _teacher_of(repo)
+    repo.update_user(teacher["id"], roles=["teacher"])
+    repo.save_router_model_template(
+        teacher["id"],
+        _openrouter_document("openrouter@typesafe/jev-9.9", decision_ids=("openrouter@typesafe/jev-9.9",)),
+    )
+    personal = repo.issue_long_lived_key(teacher["id"])
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {personal}"},
+        json={**_DECISION_BODY, "model": "openrouter@typesafe/jev-9.9"},
+    )
+
+    assert response.status_code == 200
+    assert repo.delete_prompt_logs_for_users([teacher["id"]])["deleted_token_usage"] == 1
