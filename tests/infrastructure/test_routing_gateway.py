@@ -227,6 +227,22 @@ async def test_routing_gateway_images_create_strips_provider_prefix(gateway: Rou
 
 
 @pytest.mark.asyncio
+async def test_routing_gateway_decisions_only_rewrites_the_model(gateway: RoutingGateway):
+    openrouter = gateway.gateways["openrouter"]
+    body = {"model": "openrouter@typesafe/jev-1.13", "state": "s", "questions": {}, "user": "u"}
+
+    await gateway.decisions_create(body)
+
+    assert openrouter.last_decision_body == {
+        "model": "typesafe/jev-1.13",
+        "state": "s",
+        "questions": {},
+        "user": "u",
+    }
+    assert body["model"] == "openrouter@typesafe/jev-1.13"
+
+
+@pytest.mark.asyncio
 async def test_routing_gateway_images_models_prefix_ids(gateway: RoutingGateway):
     models = await gateway.images_models()
 
