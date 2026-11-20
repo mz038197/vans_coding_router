@@ -724,6 +724,22 @@ def test_selector_usage_is_recorded_when_the_answer_cannot_be_read(harness: _Har
 
 
 @pytest.mark.parametrize(
+    "usage",
+    [{}, {"input_tokens": 0, "output_tokens": 0, "cost": 0}, {"total_tokens": 0}],
+    ids=["empty", "zero-input-and-output", "zero-total"],
+)
+def test_a_selector_reply_that_reports_no_tokens_adds_no_selector_usage(harness: _Harness, usage):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, {**_decision(STRONG_DECISION), "usage": usage}))
+
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert _selector_records(harness) == []
+    assert _student_usage(harness)["request_count"] == 1
+
+
+@pytest.mark.parametrize(
     "selector_reply",
     [_json_response(500, {"error": {"message": "boom"}}), _too_slow],
     ids=["upstream-error", "timeout"],

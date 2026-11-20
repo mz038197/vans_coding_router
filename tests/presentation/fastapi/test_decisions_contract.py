@@ -609,3 +609,32 @@ def test_personal_api_key_decision_records_usage_without_a_class(tmp_path):
 
     assert response.status_code == 200
     assert repo.delete_prompt_logs_for_users([teacher["id"]])["deleted_token_usage"] == 1
+
+
+def test_a_long_decision_summary_is_cut_short_on_both_sides(tmp_path):
+    from src.infrastructure.logging.message_preview import LOG_TRUNCATED_SUFFIX, RESPONSE_LOG_MAX_CHARS
+
+    client, repo, openrouter, _ollama = _sqlite_routing_client(tmp_path)
+    klass, session, student_key = _student_key(repo)
+    _set_decision_model(repo, klass, session, "openrouter@typesafe/jev-1.13")
+    long_text = "長" * (RESPONSE_LOG_MAX_CHARS + 50)
+    openrouter.decision_response = {
+        "model": "typesafe/jev-1.13-20260917",
+        "answers": {"urgent": {"type": "text", "text": long_text}},
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+    response = client.post(
+        "/v1/decisions",
+        headers={"Authorization": f"Bearer {student_key}"},
+        json={**_DECISION_BODY, "state": long_text},
+    )
+
+    assert response.status_code == 200
+    teacher_id = _teacher_of(repo)["id"]
+    [log] = repo.list_prompt_logs(teacher_id, klass["id"])
+    messages = repo.get_prompt_log(teacher_id, klass["id"], log["id"])["messages"]
+    by_role = {message["role"]: message["content"] for message in messages}
+    for side in ("user", "assistant"):
+        assert len(by_role[side]) == RESPONSE_LOG_MAX_CHARS
+        assert by_role[side].endswith(LOG_TRUNCATED_SUFFIX)

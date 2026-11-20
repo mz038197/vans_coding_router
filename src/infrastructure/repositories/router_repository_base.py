@@ -37,6 +37,11 @@ from src.infrastructure.repositories.router_repository_helpers import dt, parse_
 
 _ARCHIVE_BATCH_SIZE = 20
 _DEFAULT_SESSION_LENGTH = timedelta(hours=2)
+# A Selector Usage record counts toward token totals but is not a request (ADR-0097).
+# Its one placeholder takes SELECTOR_USAGE_ENDPOINT.
+_REQUEST_COUNT_COLUMN = (
+    "COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count"
+)
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -1771,12 +1776,12 @@ class RouterRepositoryBase(ABC):
         with self._connect() as conn:
             rows = conn.execute(
                 self._sql(
-                    """
+                    f"""
                     SELECT u.id AS user_id, u.name, u.email,
                            COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                            COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                            COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                           COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count
+                           {_REQUEST_COUNT_COLUMN}
                     FROM class_members m
                     JOIN users u ON u.id = m.user_id
                     JOIN classes c ON c.id = m.class_id
@@ -1793,12 +1798,12 @@ class RouterRepositoryBase(ABC):
                 item = _usage_ints(dict(row))
                 sessions = conn.execute(
                     self._sql(
-                        """
+                        f"""
                         SELECT s.id AS session_id, s.invite_code,
                                COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                                COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                               COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count
+                               {_REQUEST_COUNT_COLUMN}
                         FROM class_sessions s
                         LEFT JOIN token_usage t ON t.session_id = s.id AND t.user_id = ?
                         WHERE s.class_id = ?

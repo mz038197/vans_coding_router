@@ -386,14 +386,15 @@ class ApiUseCase:
         empty_error: type[Exception],
     ) -> dict[str, Any]:
         """The shared shelf list, except that a Classroom API Key with an empty shelf is refused."""
-        if not self._is_personal_api_key(auth_context) and not self._shelf_model_ids(
-            auth_context, shelf_key
-        ):
+        ids = self._shelf_model_ids(auth_context, shelf_key)
+        if not ids and not self._is_personal_api_key(auth_context):
             raise empty_error()
-        return self._shelf_student_list(auth_context, shelf_key)
+        return self._student_list_from_shelf(auth_context, ids)
 
     def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
-        ids = self._shelf_model_ids(auth_context, shelf_key)
+        return self._student_list_from_shelf(auth_context, self._shelf_model_ids(auth_context, shelf_key))
+
+    def _student_list_from_shelf(self, auth_context: AuthContext | None, ids: list[str]) -> dict[str, Any]:
         if self._held_personal_key(auth_context):
             return self._openai_model_list(self._personal_list_ids(ids))
         if self._is_personal_api_key(auth_context):
@@ -714,15 +715,18 @@ class ApiUseCase:
     def _record_selector_usage(self, auth_context: AuthContext | None, answer: SelectorAnswer) -> None:
         """One Selector Usage per selector reply that reports tokens (ADR-0097).
 
+        An empty usage block, or one whose total is zero, reports no tokens and adds nothing.
+
         Written at selection time, so a walk with no output does not lose it. Never a
         Prompt Log. A record that cannot be stored must not fail the call it serves.
         """
         if answer.model_id is None or answer.usage is None:
             return
+        usage = _usage_from_raw_usage(answer.usage)
+        if usage["total_tokens"] <= 0:
+            return
         try:
-            self._record_token_usage(
-                auth_context, answer.model_id, _usage_from_raw_usage(answer.usage), SELECTOR_USAGE_ENDPOINT
-            )
+            self._record_token_usage(auth_context, answer.model_id, usage, SELECTOR_USAGE_ENDPOINT)
         except Exception:
             _logger.exception("Selector Usage write failed for %s", answer.model_id)
 
@@ -1345,27 +1349,19 @@ class ApiUseCase:
             **_token_counts(usage),
         )
 
-    def _log_images_request(
+    def _log_one_call(
         self,
-        body: dict[str, Any],
+        model: Any,
+        messages: list[dict[str, Any]],
+        assistant_messages: list[dict[str, Any]],
+        usage: dict[str, int] | None,
+        api_endpoint: str,
         api_key: str | None,
         client_ip: str | None,
         auth_context: AuthContext | None,
-        usage: dict[str, int] | None,
-        response: dict[str, Any] | None,
-        api_endpoint: str = IMAGES_PATH,
     ) -> None:
-        model = body.get("model")
+        """One non-chat call's validation line and Prompt Log, from its already-summarised sides."""
         model_name = model if isinstance(model, str) else "N/A"
-        prompt = body.get("prompt")
-        prompt_text = prompt if isinstance(prompt, str) else ""
-        messages = [{"role": "user", "content": prompt_text}] if prompt_text else []
-        image_count = _image_count_from_response(response)
-        assistant_messages = (
-            [{"role": "assistant", "content": f"[image: {image_count} generated]"}]
-            if image_count
-            else []
-        )
         is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
         self.logger.log_validation_result(
             teacher_name=teacher_name,
@@ -1386,6 +1382,30 @@ class ApiUseCase:
             api_endpoint=api_endpoint,
         )
 
+    def _log_images_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        usage: dict[str, int] | None,
+        response: dict[str, Any] | None,
+        api_endpoint: str = IMAGES_PATH,
+    ) -> None:
+        prompt = body.get("prompt")
+        prompt_text = prompt if isinstance(prompt, str) else ""
+        messages = [{"role": "user", "content": prompt_text}] if prompt_text else []
+        image_count = _image_count_from_response(response)
+        assistant_messages = (
+            [{"role": "assistant", "content": f"[image: {image_count} generated]"}]
+            if image_count
+            else []
+        )
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, usage, api_endpoint,
+            api_key, client_ip, auth_context,
+        )
+
     def _log_embeddings_request(
         self,
         body: dict[str, Any],
@@ -1394,28 +1414,11 @@ class ApiUseCase:
         auth_context: AuthContext | None,
         usage: dict[str, int] | None,
     ) -> None:
-        model = body.get("model")
-        model_name = model if isinstance(model, str) else "N/A"
         messages = [{"role": "user", "content": _embeddings_log_input(body.get("input"))}]
         assistant_messages = [{"role": "assistant", "content": "已產生嵌入"}]
-        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
-        self.logger.log_validation_result(
-            teacher_name=teacher_name,
-            api_key=api_key or "未提供",
-            model=model_name,
-            messages=messages,
-            is_valid=is_valid,
-            client_ip=client_ip,
-        )
-        self._log_prompt(
-            auth_context,
-            messages,
-            model_name,
-            "ok" if is_valid else "rejected",
-            client_ip,
-            usage,
-            assistant_messages=assistant_messages,
-            api_endpoint=EMBEDDINGS_PATH,
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, usage, EMBEDDINGS_PATH,
+            api_key, client_ip, auth_context,
         )
 
     def _log_decision_request(
@@ -1426,30 +1429,21 @@ class ApiUseCase:
         client_ip: str | None,
         auth_context: AuthContext | None,
     ) -> None:
-        """A Decision Prompt Log holds a summary of the call, never the raw body."""
-        model = body.get("model")
-        model_name = model if isinstance(model, str) else "N/A"
+        """A Decision Prompt Log holds a summary of the call, never the raw body.
+
+        Both sides are cut with the same limit as every other Prompt Log's reply.
+        """
         request_text, _ = truncate_log_text(_decision_request_summary(body))
-        messages = [{"role": "user", "content": request_text}]
-        assistant_messages = [{"role": "assistant", "content": _decision_reply_summary(response)}]
-        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
-        self.logger.log_validation_result(
-            teacher_name=teacher_name,
-            api_key=api_key or "未提供",
-            model=model_name,
-            messages=messages,
-            is_valid=is_valid,
-            client_ip=client_ip,
-        )
-        self._log_prompt(
-            auth_context,
-            messages,
-            model_name,
-            "ok" if is_valid else "rejected",
-            client_ip,
+        reply_text, _ = truncate_log_text(_decision_reply_summary(response))
+        self._log_one_call(
+            body.get("model"),
+            [{"role": "user", "content": request_text}],
+            [{"role": "assistant", "content": reply_text}],
             _usage_from_response(response),
-            assistant_messages=assistant_messages,
-            api_endpoint=DECISIONS_PATH,
+            DECISIONS_PATH,
+            api_key,
+            client_ip,
+            auth_context,
         )
 
     def _log_tts_request(
@@ -1461,8 +1455,6 @@ class ApiUseCase:
         byte_count: int,
         api_endpoint: str = AUDIO_SPEECH_PATH,
     ) -> None:
-        model = body.get("model")
-        model_name = model if isinstance(model, str) else "N/A"
         text_input = body.get("input")
         input_text = text_input if isinstance(text_input, str) else ""
         messages = [{"role": "user", "content": input_text}] if input_text else []
@@ -1471,24 +1463,9 @@ class ApiUseCase:
             if byte_count
             else []
         )
-        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
-        self.logger.log_validation_result(
-            teacher_name=teacher_name,
-            api_key=api_key or "未提供",
-            model=model_name,
-            messages=messages,
-            is_valid=is_valid,
-            client_ip=client_ip,
-        )
-        self._log_prompt(
-            auth_context,
-            messages,
-            model_name,
-            "ok" if is_valid else "rejected",
-            client_ip,
-            None,
-            assistant_messages=assistant_messages,
-            api_endpoint=api_endpoint,
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, None, api_endpoint,
+            api_key, client_ip, auth_context,
         )
 
     def log_invalid_auth(self, api_key: str, client_ip: str | None = None) -> None:
