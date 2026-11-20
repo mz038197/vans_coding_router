@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Vans Coding Router — Chat Completions, Responses, and Decisions
-  version: "1.1.0"
+  title: Vans Coding Router — Chat Completions, Responses, Image Generation, and Decisions
+  version: "1.2.0"
   description: |
-    OpenAI-compatible subset for third-party clients, plus Decision.
+    OpenAI-compatible subset for third-party clients, plus Image Generation and Decision.
 
     Authenticate with `Authorization: Bearer <api_key>` or `X-API-Key`.
     `model` is a Model ID of the form `provider@upstream_model`
@@ -28,7 +28,18 @@ info:
     Non-streaming failures use the OpenAI error object and an HTTP error status.
     Streaming failures stay HTTP 200 and put the readable message in the stream
     (chat: assistant `delta.content`; responses: `output_text` on a completed response).
-    They are not a bare `{"error": ...}` SSE event.
+    They are not a bare `{"error": ...}` SSE event. Image Generation streams are
+    the exception: see `/v1/images`.
+
+    A body that fails the router's own shape checks is HTTP 400 in the OpenAI
+    error shape, never FastAPI's 422 (ADR-0098). On chat and Image Generation
+    the error has `type: invalid_request_error`, `code: invalid_request_body`,
+    `param` naming the first failing field below the body (for example `prompt`,
+    `messages`, or `messages[0]`; `null` when the body is not valid JSON), and
+    `message` as one short Traditional Chinese sentence. Only the first failing
+    field is reported. The body never repeats the caller's input. Responses and
+    Decision read the body by hand: a body that is not a JSON object is 400 with
+    `code: invalid_json_body` and `param: null`. Portal paths keep their own errors.
 
 servers:
   - url: https://{host}
@@ -45,6 +56,11 @@ tags:
     description: OpenAI Chat Completions.
   - name: Responses
     description: OpenAI Responses. Stateful `previous_response_id` is not supported.
+  - name: Images
+    description: |
+      Image Generation. A Classroom API Key may call this when the sitting has
+      at least one Image Generation Model checked. A Personal API Key uses its
+      holder's Router Model Template. `vcr-auto` walks the image shelf.
   - name: Decisions
     description: |
       Decision Requests. A Classroom API Key may call this when the sitting has
@@ -196,17 +212,30 @@ paths:
 
                     data: [DONE]
         "400":
-          description: Invalid Model ID.
+          description: |
+            Invalid Model ID, or a malformed body (see `MalformedRequestError`).
+            There is no 422 on this path.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OpenAIError"
-              example:
-                error:
-                  message: Invalid model id
-                  type: invalid_request_error
-                  param: model
-                  code: invalid_model_id
+                anyOf:
+                  - $ref: "#/components/schemas/MalformedRequestError"
+                  - $ref: "#/components/schemas/OpenAIError"
+              examples:
+                invalidModel:
+                  summary: Model ID is not provider@upstream_model
+                  value:
+                    error:
+                      message: Invalid model id
+                      type: invalid_request_error
+                      param: model
+                      code: invalid_model_id
+                emptyMessage:
+                  $ref: "#/components/examples/MalformedEmptyMessage"
+                emptyMessages:
+                  $ref: "#/components/examples/MalformedEmptyMessages"
+                notJson:
+                  $ref: "#/components/examples/MalformedNotJson"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
@@ -233,18 +262,6 @@ paths:
                   type: invalid_request_error
                   param: model
                   code: model_not_allowed
-        "422":
-          description: Request body failed schema validation. This status uses FastAPI `detail`, not the OpenAI error object.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ValidationError"
-              example:
-                detail:
-                  - type: value_error
-                    loc: [body, messages, 0, content]
-                    msg: Value error, 訊息內容不能為空
-                    input: ""
         "502":
           description: Upstream provider error. Upstream HTTP 401/403 are also returned as 502.
           content:
@@ -383,17 +400,22 @@ paths:
                     event: response.completed
                     data: {"type":"response.completed","sequence_number":7,"response":{"id":"resp_router_error","object":"response","status":"completed","output":[{"id":"msg_router_error","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"extra usage balance is empty, add extra usage"}]}]}}
         "400":
-          description: Stateful continuation is not supported.
+          description: Stateful continuation is not supported, or the body is not a JSON object.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenAIError"
-              example:
-                error:
-                  message: Stateful responses are not supported. Omit previous_response_id.
-                  type: invalid_request_error
-                  param: previous_response_id
-                  code: previous_response_not_found
+              examples:
+                stateful:
+                  summary: previous_response_id was sent
+                  value:
+                    error:
+                      message: Stateful responses are not supported. Omit previous_response_id.
+                      type: invalid_request_error
+                      param: previous_response_id
+                      code: previous_response_not_found
+                notJsonObject:
+                  $ref: "#/components/examples/InvalidJsonBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
@@ -426,6 +448,222 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenAIError"
+
+  /v1/images:
+    post:
+      tags: [Images]
+      operationId: createImage
+      summary: Generate images
+      description: |
+        One image generation call. The router checks `model` and `prompt`, then
+        forwards the body to the provider's `/images` endpoint with `model`
+        rewritten to the upstream model name. Fields not listed in the schema are
+        forwarded as sent.
+
+        `model` is an Image Generation Model ID (`provider@upstream_model`) or
+        `vcr-auto`. Which ids a Classroom API Key may name follows that sitting's
+        Classroom Model Choice: Picked Models names a checked Image Generation
+        Model; Automatic Models names only `vcr-auto`; when no choice is stored,
+        either is accepted. A Personal API Key may name `vcr-auto` or an Image
+        Generation Model on its holder's template. `vcr-auto` walks the image
+        shelf from the top; the reply keeps the model string the upstream attached.
+
+        `stream: false` (default) returns the upstream JSON body unchanged.
+        `stream: true` returns `text/event-stream`, passed through from the
+        upstream as it arrives.
+
+        Unlike chat and Responses, a failure after a stream has started is sent
+        as one SSE event `data: {"error": {...}}` in the OpenAI error shape with
+        `type: server_error`, still under HTTP 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageGenerationRequest"
+            examples:
+              picked:
+                summary: Name an Image Generation Model
+                value:
+                  model: openrouter@black-forest-labs/flux.2-pro
+                  prompt: a blue robot icon
+              auto:
+                summary: Walk the image shelf, streaming
+                value:
+                  model: vcr-auto
+                  prompt: a blue robot icon
+                  stream: true
+      responses:
+        "200":
+          description: Upstream image body, or the upstream SSE stream.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageGenerationResponse"
+              example:
+                created: 1710000000
+                data:
+                  - b64_json: iVBORw0KGgo=
+                usage:
+                  input_tokens: 12
+                  output_tokens: 1024
+                  total_tokens: 1036
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-sent events of the form `data: {json}\n\n`, as the upstream
+                  sent them. The finished image arrives in an event whose `type`
+                  is `image_generation.completed` (or that carries `data`).
+              examples:
+                stream:
+                  summary: Completed image
+                  value: |
+                    data: {"type":"image_generation.completed","data":[{"b64_json":"iVBORw0KGgo="}],"usage":{"total_tokens":1036}}
+
+                    data: [DONE]
+                streamError:
+                  summary: Failure after the stream started
+                  value: |
+                    data: {"error":{"message":"upstream failed","type":"server_error","param":null,"code":null}}
+        "400":
+          description: |
+            A malformed body (see `MalformedRequestError`), an invalid Model ID,
+            or a provider that has no image endpoint. There is no 422 on this path.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/MalformedRequestError"
+                  - $ref: "#/components/schemas/OpenAIError"
+              examples:
+                missingPrompt:
+                  $ref: "#/components/examples/MalformedMissingPrompt"
+                blankPrompt:
+                  $ref: "#/components/examples/MalformedBlankPrompt"
+                notJson:
+                  $ref: "#/components/examples/MalformedNotJson"
+                invalidModel:
+                  summary: Model ID is not provider@upstream_model
+                  value:
+                    error:
+                      message: Invalid model id
+                      type: invalid_request_error
+                      param: model
+                      code: invalid_model_id
+                notSupported:
+                  summary: The provider has no image endpoint
+                  value:
+                    error:
+                      message: 此 provider 不支援生圖
+                      type: invalid_request_error
+                      param: null
+                      code: image_generation_not_supported
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: Upstream entitlement refusal (for example Extra Usage exhausted). Message is the provider text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+        "403":
+          description: |
+            Image Generation is off for this key, or the Model ID is not one this
+            key may name. Checked before any upstream call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              examples:
+                off:
+                  $ref: "#/components/examples/ImageGenerationDisabled"
+                notAllowed:
+                  summary: Model ID is not an Image Generation Model this key may name
+                  value:
+                    error:
+                      message: 此課堂未開放此模型
+                      type: invalid_request_error
+                      param: model
+                      code: model_not_allowed
+        "502":
+          description: Upstream provider error. Upstream HTTP 401/403 are also returned as 502.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+        "503":
+          description: Upstream busy or service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+
+  /v1/images/models:
+    get:
+      tags: [Images]
+      operationId: listImageModels
+      summary: List image generation models
+      description: |
+        Student image list, built from the image shelf. It is not the chat list
+        and not the live provider catalog.
+
+        A Classroom API Key under Picked Models receives the sitting's Image
+        Generation Model IDs in document order. Under Automatic Models, and when
+        no choice is stored, the list names only `vcr-auto`. When the sitting
+        has no Image Generation Model checked, this read is refused with
+        `image_generation_disabled` (unlike the decision list, which succeeds).
+
+        A Personal API Key receives `vcr-auto` first, then the Image Generation
+        Model IDs on its holder's template, in document order, when that shelf
+        has at least one. An empty template shelf returns an empty list, not a refusal.
+      responses:
+        "200":
+          description: OpenAI model list of ids this key may name on an image generation call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+              examples:
+                picked:
+                  summary: Classroom API Key, Picked Models
+                  value:
+                    object: list
+                    data:
+                      - id: openrouter@black-forest-labs/flux.2-pro
+                        object: model
+                automatic:
+                  summary: Classroom API Key, Automatic Models or no choice stored
+                  value:
+                    object: list
+                    data:
+                      - id: vcr-auto
+                        object: model
+                personal:
+                  summary: Personal API Key with Image Generation Models on its template
+                  value:
+                    object: list
+                    data:
+                      - id: vcr-auto
+                        object: model
+                      - id: openrouter@black-forest-labs/flux.2-pro
+                        object: model
+                personalEmpty:
+                  summary: Personal API Key with an empty image shelf
+                  value:
+                    object: list
+                    data: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Classroom API Key whose sitting has no Image Generation Model checked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIError"
+              examples:
+                off:
+                  $ref: "#/components/examples/ImageGenerationDisabled"
 
   /v1/decisions:
     post:
@@ -509,7 +747,8 @@ paths:
                   cost: 0.00003
         "400":
           description: |
-            Invalid Model ID, or a Decision Refusal from the provider.
+            Invalid Model ID, a body that is not a JSON object, or a Decision
+            Refusal from the provider.
             A provider refusal keeps the provider message. An upstream 400, 413,
             415, or 422 has type `invalid_request_error`; other upstream errors
             have type `server_error`.
@@ -526,6 +765,8 @@ paths:
                       type: invalid_request_error
                       param: model
                       code: invalid_model_id
+                notJsonObject:
+                  $ref: "#/components/examples/InvalidJsonBody"
                 refusal:
                   summary: Provider refused the questions
                   value:
@@ -673,6 +914,64 @@ components:
                   type: invalid_request_error
                   param: null
                   code: wrong_credential_type
+
+  examples:
+    MalformedEmptyMessage:
+      summary: A user message with empty content
+      value:
+        error:
+          message: 訊息內容不能為空
+          type: invalid_request_error
+          param: messages[0]
+          code: invalid_request_body
+    MalformedEmptyMessages:
+      summary: An empty messages array
+      value:
+        error:
+          message: messages 不可為空
+          type: invalid_request_error
+          param: messages
+          code: invalid_request_body
+    MalformedMissingPrompt:
+      summary: No prompt
+      value:
+        error:
+          message: 缺少必填欄位 prompt
+          type: invalid_request_error
+          param: prompt
+          code: invalid_request_body
+    MalformedBlankPrompt:
+      summary: A prompt of only whitespace
+      value:
+        error:
+          message: prompt 不可為空
+          type: invalid_request_error
+          param: prompt
+          code: invalid_request_body
+    MalformedNotJson:
+      summary: The body is not valid JSON
+      value:
+        error:
+          message: 請求內容不是有效的 JSON
+          type: invalid_request_error
+          param: null
+          code: invalid_request_body
+    InvalidJsonBody:
+      summary: The body is not a UTF-8 JSON object
+      value:
+        error:
+          message: 請求內容必須是 UTF-8 編碼的 JSON 物件
+          type: invalid_request_error
+          param: null
+          code: invalid_json_body
+    ImageGenerationDisabled:
+      summary: No Image Generation Model is checked
+      value:
+        error:
+          message: 此課堂未開放生圖
+          type: invalid_request_error
+          param: null
+          code: image_generation_disabled
 
   schemas:
     ChatCompletionRequest:
@@ -1099,6 +1398,109 @@ components:
             code:
               type: [string, "null"]
 
+    MalformedRequestError:
+      description: |
+        A body that failed the router's shape checks on chat or Image Generation
+        (ADR-0098). HTTP 400. Only the first failing field is reported, and the
+        caller's input is never echoed. The message has no Pydantic
+        `Value error, ` prefix.
+      allOf:
+        - $ref: "#/components/schemas/OpenAIError"
+        - type: object
+          properties:
+            error:
+              type: object
+              additionalProperties: false
+              required: [message, type, param, code]
+              properties:
+                message:
+                  type: string
+                  description: One short Traditional Chinese sentence.
+                type:
+                  type: string
+                  const: invalid_request_error
+                param:
+                  type: [string, "null"]
+                  description: |
+                    Location of the failing field below the body, with array
+                    indexes in brackets (`prompt`, `messages`, `messages[0]`).
+                    `null` when the body is not valid JSON.
+                code:
+                  type: string
+                  const: invalid_request_body
+
+    ImageGenerationRequest:
+      type: object
+      description: |
+        Fields other than `model` and `prompt` are optional and forwarded as
+        sent, including fields not listed here. Whether the upstream accepts
+        them is up to the provider.
+      additionalProperties: true
+      required: [model, prompt]
+      properties:
+        model:
+          type: string
+          description: Image Generation Model ID (`provider@upstream_model`) or `vcr-auto`.
+          examples:
+            - openrouter@black-forest-labs/flux.2-pro
+            - vcr-auto
+        prompt:
+          type: string
+          minLength: 1
+          description: Must contain at least one non-whitespace character.
+        stream:
+          type: boolean
+          default: false
+        n:
+          type: integer
+        size:
+          type: string
+        resolution:
+          type: string
+        aspect_ratio:
+          type: string
+        quality:
+          type: string
+        output_format:
+          type: string
+        background:
+          type: string
+        output_compression:
+          type: integer
+        seed:
+          type: integer
+        input_references:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        provider:
+          type: object
+          additionalProperties: true
+
+    ImageGenerationResponse:
+      type: object
+      description: |
+        Upstream image body, returned as the provider sent it. A `model` string
+        here, if present, is not a Model ID.
+      additionalProperties: true
+      properties:
+        created:
+          type: integer
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              b64_json:
+                type: string
+              url:
+                type: string
+        usage:
+          type: object
+          additionalProperties: true
+
     DecisionRequest:
       type: object
       description: |
@@ -1199,24 +1601,3 @@ components:
         object:
           type: string
           const: model
-
-    ValidationError:
-      type: object
-      required: [detail]
-      properties:
-        detail:
-          type: array
-          items:
-            type: object
-            properties:
-              type:
-                type: string
-              loc:
-                type: array
-                items:
-                  oneOf:
-                    - type: string
-                    - type: integer
-              msg:
-                type: string
-              input: {}
