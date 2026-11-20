@@ -228,7 +228,7 @@ def test_classroom_key_cannot_decide_with_a_selector_only_model_id(tmp_path, cho
     assert refused.json()["error"]["code"] == "decision_disabled"
     assert SELECTOR not in listed.text
     assert upstream.selector_bodies == []
-    assert harness.repo.get_decision_model_ids(harness.session["id"]) == []
+    assert harness.repo.get_shelf_model_ids(harness.session["id"], "decisionShelf") == []
 
 
 def test_personal_key_cannot_decide_with_a_selector_only_model_id(tmp_path):

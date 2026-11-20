@@ -506,7 +506,7 @@ class ApiUseCase:
             return
         if not is_model_allowed(model_id, getter(auth_context.session_id)):
             raise ModelNotAllowedError()
-        if model_id and model_id in self._decision_model_ids(auth_context):
+        if model_id and model_id in self._shelf_model_ids(auth_context, DECISION_SHELF_KEY):
             raise ModelNotAllowedError()
 
     def validate_model_allowed(
@@ -1018,15 +1018,9 @@ class ApiUseCase:
         walker = VcrAutoWalk()
 
         async def call(model_id: str) -> dict[str, Any]:
-            return await self.gateway.decisions_create(
-                {
-                    "model": model_id,
-                    "state": body.get("state"),
-                    "questions": body.get("questions"),
-                }
-            )
+            return await self.gateway.decisions_create({**body, "model": model_id})
 
-        hit = await walker.run(self._decision_model_ids(auth_context), call)
+        hit = await walker.run(self._shelf_model_ids(auth_context, DECISION_SHELF_KEY), call)
         return hit.value
 
     async def decisions_create(
@@ -1037,28 +1031,17 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        model_id = body.get("model")
-        if self._held_personal_key(auth_context):
-            self._assert_holder_shelf(
-                self._decision_model_ids(auth_context),
-                model_id,
-                DecisionDisabledError,
-            )
-        elif self._is_personal_api_key(auth_context):
-            if self._use_vcr_auto_walk(str(model_id or ""), auth_context) and not self._decision_model_ids(
-                auth_context
-            ):
-                raise DecisionDisabledError()
-        else:
-            self._assert_classroom_decision_allowed(auth_context, model_id)
-        if self._use_vcr_auto_walk(str(model_id or ""), auth_context):
-            return await self._decisions_vcr_auto(body, auth_context)
-        payload = {
-            "model": model_id,
+        # The one place a Decision Request is cut down; every later step only replaces model.
+        decision_body = {
+            "model": body.get("model"),
             "state": body.get("state"),
             "questions": body.get("questions"),
         }
-        return await self.gateway.decisions_create(payload)
+        model_id = decision_body["model"]
+        self._assert_shelf_allowed(auth_context, DECISION_SHELF_KEY, model_id, DecisionDisabledError)
+        if self._use_vcr_auto_walk(model_id, auth_context):
+            return await self._decisions_vcr_auto(decision_body, auth_context)
+        return await self.gateway.decisions_create(decision_body)
 
     def _is_personal_api_key(self, auth_context: AuthContext | None) -> bool:
         return auth_context is not None and auth_context.session_id is None
@@ -1082,32 +1065,6 @@ class ApiUseCase:
             and auth_context.session_id is None
             and auth_context.user_id is not None
         )
-
-    def _assert_classroom_decision_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
-        decision_ids = self._decision_model_ids(auth_context)
-        if not decision_ids:
-            raise DecisionDisabledError()
-        if self._classroom_session(auth_context) and not choice_accepts_model(
-            self._classroom_model_choice(auth_context),
-            model_id,
-            decision_ids,
-        ):
-            raise ModelNotAllowedError()
-        if self._use_vcr_auto_walk(model_id, auth_context):
-            return
-        if not isinstance(model_id, str) or model_id not in decision_ids:
-            raise ModelNotAllowedError()
-
-    def _decision_model_ids(self, auth_context: AuthContext | None) -> list[str]:
-        if self._is_personal_api_key(auth_context):
-            return self._shelf_model_ids(auth_context, DECISION_SHELF_KEY)
-        if auth_context is None or auth_context.session_id is None:
-            return []
-        getter = getattr(self.api_key_repo, "get_decision_model_ids", None)
-        if not callable(getter):
-            return []
-        ids = getter(auth_context.session_id) or []
-        return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
     def _classroom_session(self, auth_context: AuthContext | None) -> bool:
         return (

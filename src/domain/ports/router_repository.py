@@ -206,7 +206,8 @@ class RouterRepositoryPort(Protocol):
     def get_decision_model(self, session_id: int) -> str:
         ...
 
-    def get_decision_model_ids(self, session_id: int) -> list[str]:
+    def get_shelf_model_ids(self, session_id: int, shelf_key: str) -> list[str]:
+        """The Model IDs on one shelf of the sitting's document; the one read for every shelf."""
         ...
 
     def get_session_model_allowlist(self, session_id: int) -> list[str] | None:
