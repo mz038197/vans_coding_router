@@ -268,18 +268,8 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        if self._held_personal_key(auth_context):
-            return self._openai_model_list(
-                self._personal_list_ids(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
-            )
-        if self._is_personal_api_key(auth_context):
-            return await self.gateway.images_models()
-        ids = self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY)
-        if not ids:
-            raise ImageGenerationDisabledError()
-        return self._openai_model_list(
-            student_list_ids(self._classroom_model_choice(auth_context), ids)
-        )
+        del api_key, client_ip
+        return self._shelf_list_or_refuse(auth_context, IMAGE_SHELF_KEY, ImageGenerationDisabledError)
 
     async def embeddings_create(
         self,
@@ -330,18 +320,7 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        if self._held_personal_key(auth_context):
-            return self._openai_model_list(
-                self._personal_list_ids(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY))
-            )
-        if self._is_personal_api_key(auth_context):
-            return await self.gateway.embeddings_models()
-        ids = self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY)
-        if not ids:
-            raise EmbeddingsDisabledError()
-        return self._openai_model_list(
-            student_list_ids(self._classroom_model_choice(auth_context), ids)
-        )
+        return self._shelf_list_or_refuse(auth_context, EMBEDDINGS_SHELF_KEY, EmbeddingsDisabledError)
 
     async def web_search(
         self,
@@ -399,6 +378,19 @@ class ApiUseCase:
             return []
         rest = [model_id for model_id in shelf_ids if model_id != VCR_AUTO_MODEL_ID]
         return [VCR_AUTO_MODEL_ID, *rest]
+
+    def _shelf_list_or_refuse(
+        self,
+        auth_context: AuthContext | None,
+        shelf_key: str,
+        empty_error: type[Exception],
+    ) -> dict[str, Any]:
+        """The shared shelf list, except that a Classroom API Key with an empty shelf is refused."""
+        if not self._is_personal_api_key(auth_context) and not self._shelf_model_ids(
+            auth_context, shelf_key
+        ):
+            raise empty_error()
+        return self._shelf_student_list(auth_context, shelf_key)
 
     def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
         ids = self._shelf_model_ids(auth_context, shelf_key)

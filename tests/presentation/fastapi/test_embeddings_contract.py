@@ -106,6 +106,14 @@ def test_embeddings_request_forwards_the_body_and_keeps_the_upstream_model(fake_
     assert openrouter.last_embeddings_body["dimensions"] == 256
 
 
+def test_embeddings_models_for_a_key_with_no_holder_follow_the_shelf_rule(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.get("/v1/embeddings/models", headers={"Authorization": "Bearer valid-key"})
+    assert response.status_code == 200
+    # No holder means no template, so the shelf is empty; the upstream list never leaks through.
+    assert response.json() == {"object": "list", "data": []}
+
+
 def test_classroom_embeddings_follow_the_shelf(tmp_path):
     client, repo, gateway = _sqlite_api_client(tmp_path)
     _teacher, _klass, _session, headers = _sitting(repo, choice=None, models=[])
