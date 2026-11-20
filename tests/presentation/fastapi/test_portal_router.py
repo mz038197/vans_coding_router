@@ -16,6 +16,7 @@ from src.infrastructure.auth.google_oauth import GoogleOAuthService, GoogleUserC
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.sqlite_router_repository import SqliteRouterRepository
+from src.presentation.fastapi.error_handlers import register_error_handlers
 from src.presentation.fastapi.routers.portal_router import create_portal_router
 
 
@@ -2558,3 +2559,20 @@ def test_portal_serves_upstream_logos_as_svg(tmp_path):
         assert response.headers["content-type"].startswith("image/svg+xml")
         assert response.text.startswith("<svg")
     assert client.get("/portal/static/provider-other.svg").status_code == 404
+
+
+def test_portal_malformed_body_keeps_fastapi_default_validation_response(tmp_path):
+    """ADR-0098 只改 OpenAI 相容路徑；Portal 仍是 FastAPI 預設的 422。"""
+    settings = _settings(tmp_path)
+    repo = SqliteRouterRepository(settings.database.path, settings)
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(create_portal_router(PortalUseCase(repo, settings), settings))
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://testserver"})
+
+    response = client.post("/auth/google", json={"name": "Teacher"})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["type"] == "missing"
+    assert detail[0]["loc"] == ["body", "email"]

@@ -1,6 +1,8 @@
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from src.domain.errors import (
@@ -91,7 +93,62 @@ def log_operational_failure(method: str, path: str, exc: BaseException) -> None:
     )
 
 
+_PYDANTIC_VALUE_ERROR_PREFIX = "Value error, "
+
+
+def _validation_param(loc: tuple) -> str | None:
+    parts = list(loc[1:]) if loc and loc[0] == "body" else list(loc)
+    param = ""
+    for part in parts:
+        if isinstance(part, int):
+            param += f"[{part}]"
+        else:
+            param += f".{part}" if param else str(part)
+    return param or None
+
+
+def _validation_message(error: dict, param: str | None) -> str:
+    # 只用錯誤類型與欄位名組句子：Pydantic 的英文訊息可能夾帶呼叫端的輸入。
+    error_type = error.get("type", "")
+    if error_type == "value_error":
+        message = str(error.get("msg", ""))
+        if message.startswith(_PYDANTIC_VALUE_ERROR_PREFIX):
+            message = message[len(_PYDANTIC_VALUE_ERROR_PREFIX):]
+        return message
+    if error_type == "json_invalid":
+        return "請求內容不是有效的 JSON"
+    if param is None:
+        return "請求內容格式不正確"
+    if error_type == "missing":
+        return f"缺少必填欄位 {param}"
+    if error_type == "too_short":
+        return f"{param} 不可為空"
+    return f"{param} 格式不正確"
+
+
+def _malformed_openai_request_response(exc: RequestValidationError) -> JSONResponse:
+    """ADR-0098：OpenAI 相容路徑的格式錯誤一律 400，只回報第一個錯誤，不回顯輸入。"""
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+    # JSON 解析失敗時 loc 帶的是位元組位置，不是欄位。
+    loc = () if first.get("type") == "json_invalid" else tuple(first.get("loc", ()))
+    param = _validation_param(loc)
+    return openai_error_response(
+        400,
+        _validation_message(first, param),
+        error_type="invalid_request_error",
+        code="invalid_request_body",
+        param=param,
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+        if is_openai_compatible_path(request.url.path):
+            return _malformed_openai_request_response(exc)
+        return await request_validation_exception_handler(request, exc)
+
     @app.exception_handler(AuthenticationError)
     async def handle_authentication_error(request: Request, exc: AuthenticationError):
         if is_openai_compatible_path(request.url.path):

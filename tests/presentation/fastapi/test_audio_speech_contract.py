@@ -160,3 +160,34 @@ def test_session_tts_follows_the_speech_shelf(tmp_path):
     assert wrong.status_code == 403
     assert wrong.json()["error"]["code"] == "model_not_allowed"
 
+
+
+def test_audio_speech_with_a_malformed_body_is_a_400_in_the_openai_shape(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/audio/speech",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "openai@gpt-4o-mini-tts", "input": "請唸出我的私人筆記", "voice": ["nova"]},
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "message": "voice 格式不正確",
+            "type": "invalid_request_error",
+            "param": "voice",
+            "code": "invalid_request_body",
+        }
+    }
+    assert "私人筆記" not in response.text
+
+
+def test_audio_speech_with_blank_input_is_a_400_naming_input(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/audio/speech",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"model": "openai@gpt-4o-mini-tts", "input": "  ", "voice": "nova"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["param"] == "input"
+    assert response.json()["error"]["message"] == "input 不可為空"
