@@ -22,7 +22,7 @@ from test_vcr_auto_walk import (
     _model,
     _sse_models,
 )
-from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT, VCR_AUTO_MODEL_ID
 
 SELECTOR = "openrouter@typesafe/jev-1.14"
 LIGHT = "openrouter@vendor/light"
@@ -634,3 +634,171 @@ def test_a_failed_selection_is_not_remembered(harness: _Harness, clock: _FakeClo
     assert response.status_code == 200
     assert len(upstream.selector_bodies) == 2
     assert upstream.chat == ["vendor/light", "vendor/strong"]
+
+
+# --- Selector Usage (ADR-0097, #155): the selector's tokens count, not as a request ---
+
+
+def _usage_records(harness: _Harness) -> list[tuple]:
+    with harness.repo._connect() as conn:
+        rows = conn.execute(
+            "SELECT model, api_endpoint, class_id, session_id, prompt_tokens, completion_tokens, total_tokens "
+            "FROM token_usage ORDER BY id"
+        ).fetchall()
+    return [tuple(row) for row in rows]
+
+
+def _student_usage(harness: _Harness) -> dict:
+    student_id = harness.auth().user_id
+    return next(r for r in harness.repo.class_usage(harness.teacher["id"], harness.klass["id"]) if r["user_id"] == student_id)
+
+
+def _selector_records(harness: _Harness) -> list[tuple]:
+    return [record for record in _usage_records(harness) if record[1] == SELECTOR_USAGE_ENDPOINT]
+
+
+def test_a_vcr_auto_chat_adds_one_selector_usage_that_counts_tokens_not_requests(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert _usage_records(harness) == [
+        (SELECTOR, SELECTOR_USAGE_ENDPOINT, harness.klass["id"], harness.session["id"], 1, 1, 2),
+        (STRONG, "/v1/chat/completions", harness.klass["id"], harness.session["id"], 3, 4, 7),
+    ]
+    usage = _student_usage(harness)
+    assert (usage["total_tokens"], usage["request_count"]) == (9, 1)
+    sitting = next(s for s in usage["sessions"] if s["session_id"] == harness.session["id"])
+    assert (sitting["total_tokens"], sitting["request_count"]) == (9, 1)
+    assert [log["model"] for log in harness.logs()] == [STRONG]
+
+
+def test_no_prompt_log_is_stored_for_the_selector_question(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    _chat(harness)
+
+    with harness.repo._connect() as conn:
+        rows = conn.execute("SELECT model, api_endpoint FROM prompt_logs").fetchall()
+    assert [tuple(row) for row in rows] == [(STRONG, "/v1/chat/completions")]
+
+
+def test_selector_usage_is_kept_when_every_text_shelf_model_id_then_fails(harness: _Harness):
+    _set_document(harness, _selector_document())
+    exhausted = _json_response(402, CREDIT)
+    _Upstream(
+        harness,
+        _json_response(200, _decision(STRONG_DECISION)),
+        chat_replies={
+            "vendor/light": exhausted,
+            "standard:cloud": exhausted,
+            "vendor/strong": exhausted,
+            "vendor/strong-too": exhausted,
+        },
+    )
+
+    response = _chat(harness)
+
+    assert response.status_code >= 400
+    assert _usage_records(harness) == [
+        (SELECTOR, SELECTOR_USAGE_ENDPOINT, harness.klass["id"], harness.session["id"], 1, 1, 2),
+    ]
+    assert (_student_usage(harness)["total_tokens"], _student_usage(harness)["request_count"]) == (2, 0)
+
+
+def test_selector_usage_is_recorded_when_the_answer_cannot_be_read(harness: _Harness):
+    _set_document(harness, _selector_document())
+    unreadable = {"id": "g", "answers": {}, "usage": {"input_tokens": 8, "output_tokens": 2}}
+    upstream = _Upstream(harness, _json_response(200, unreadable))
+
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert upstream.chat == ["vendor/light"]
+    assert _selector_records(harness) == [
+        (SELECTOR, SELECTOR_USAGE_ENDPOINT, harness.klass["id"], harness.session["id"], 8, 2, 10),
+    ]
+
+
+@pytest.mark.parametrize(
+    "selector_reply",
+    [_json_response(500, {"error": {"message": "boom"}}), _too_slow],
+    ids=["upstream-error", "timeout"],
+)
+def test_a_selector_timeout_or_upstream_error_adds_no_selector_usage(harness: _Harness, selector_reply):
+    from src.application.vcr_auto_selector import VcrAutoSelector
+
+    harness.api.vcr_auto_selector = VcrAutoSelector(harness.gateway, timeout=0.05)
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, selector_reply)
+
+    response = _chat(harness)
+
+    assert response.status_code == 200
+    assert len(upstream.selector_bodies) == 1
+    assert _selector_records(harness) == []
+    assert _student_usage(harness)["request_count"] == 1
+
+
+def test_a_remembered_selection_adds_no_selector_usage(harness: _Harness, clock: _FakeClock):
+    _set_document(harness, _selector_document())
+    upstream = _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    _chat(harness)
+    _chat(harness)
+
+    assert len(upstream.selector_bodies) == 1
+    assert len(_selector_records(harness)) == 1
+    assert _student_usage(harness)["request_count"] == 2
+
+
+def test_picked_models_add_no_selector_usage(harness: _Harness):
+    _set_document(harness, _selector_document())
+    harness.repo.update_class_session(harness.klass["id"], harness.session["id"], classroom_model_choice="picked")
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    response = TestClient(harness.app).post(
+        "/v1/chat/completions",
+        headers=harness.headers,
+        json={"model": LIGHT, "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert response.status_code == 200
+    assert _selector_records(harness) == []
+
+
+def test_a_sitting_with_no_selector_adds_no_selector_usage(harness: _Harness):
+    _set_document(harness, _selector_document(selector=[]))
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    assert _chat(harness).status_code == 200
+    assert _selector_records(harness) == []
+
+
+def test_a_vcr_auto_responses_call_adds_one_selector_usage(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+
+    response = TestClient(harness.app).post(
+        "/v1/responses",
+        headers=harness.headers,
+        json={"model": VCR_AUTO_MODEL_ID, "input": "幫我修這個 bug"},
+    )
+
+    assert response.status_code == 200
+    assert _selector_records(harness) == [
+        (SELECTOR, SELECTOR_USAGE_ENDPOINT, harness.klass["id"], harness.session["id"], 1, 1, 2),
+    ]
+
+
+def test_deleting_a_students_prompt_logs_deletes_their_selector_usage(harness: _Harness):
+    _set_document(harness, _selector_document())
+    _Upstream(harness, _json_response(200, _decision(STRONG_DECISION)))
+    _chat(harness)
+
+    harness.repo.delete_prompt_logs_for_users([harness.auth().user_id])
+
+    assert _usage_records(harness) == []

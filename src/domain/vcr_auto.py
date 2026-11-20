@@ -11,6 +11,10 @@ from src.domain.model_shelf import (
 
 VCR_AUTO_MODEL_ID = "vcr-auto"
 
+# The api_endpoint of a Selector Usage record (ADR-0097). Not a path, so it never
+# collides with a real call; it counts toward token totals but not request counts.
+SELECTOR_USAGE_ENDPOINT = "vcr-auto-selector"
+
 
 def classroom_vscode_model_list(shipped: list[Any]) -> list[dict[str, Any]]:
     """One Copilot model named vcr-auto, fixed to the shipped text model."""

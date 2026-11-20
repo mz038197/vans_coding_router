@@ -8,6 +8,7 @@ import pytest
 
 from src.domain.auto_tier import TierSelection
 from src.domain.session_model_allowlist import template_model_ids
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT
 from src.infrastructure.config import AuthSettings, DatabaseSettings, RouterSettings
 from src.infrastructure.repositories.factory import build_router_repository
 from src.infrastructure.vscode.merge_chat_language_models import load_vans_template
@@ -292,6 +293,20 @@ def test_postgres_token_usage_is_recorded_queried_and_deleted_per_user(postgres_
     assert repo.delete_prompt_logs_for_users([student_id])["deleted_token_usage"] == 3
     row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
     assert (row["total_tokens"], row["request_count"]) == (0, 0)
+
+
+def test_postgres_selector_usage_adds_tokens_but_not_requests_per_student_and_per_class_session(postgres_repo):
+    repo = postgres_repo
+    teacher, student_id, klass, context = _usage_world(repo)
+    repo.record_token_usage(context, "selector", SELECTOR_USAGE_ENDPOINT, 5, 1, 6)
+    repo.record_token_usage(context, "m", "/v1/chat/completions", 1, 2, 3)
+
+    row = next(r for r in repo.class_usage(teacher["id"], klass["id"]) if r["user_id"] == student_id)
+    assert (row["prompt_tokens"], row["completion_tokens"], row["total_tokens"], row["request_count"]) == (6, 3, 9, 1)
+    sitting = next(s for s in row["sessions"] if s["session_id"] == context.session_id)
+    assert (sitting["total_tokens"], sitting["request_count"]) == (9, 1)
+
+    assert repo.delete_prompt_logs_for_users([student_id])["deleted_token_usage"] == 2
 
 
 def _postgres_last_used_at(repo, api_key_id: int) -> str | None:
