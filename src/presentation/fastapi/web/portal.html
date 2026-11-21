@@ -2487,12 +2487,12 @@
       });
     }
 
-    // This sitting's rows from the course usage payload: students with requests, most tokens first.
+    // This sitting's rows from the course usage payload: students with requests or tokens (Selector Usage has tokens only), most tokens first.
     function courseCardUsageRows(items, sessionId) {
       return (items || [])
         .map((item) => {
           const entry = (item.sessions || []).find((s) => s.session_id === sessionId);
-          return entry && entry.request_count
+          return entry && (entry.request_count || entry.total_tokens)
             ? { user_id: item.user_id, name: item.name, email: item.email, total_tokens: entry.total_tokens || 0, request_count: entry.request_count || 0 }
             : null;
         })
