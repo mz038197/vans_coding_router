@@ -165,21 +165,21 @@ class RoutingGateway:
                 yield chunk
 
     async def images_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        gateway, payload = self._resolve_images_body(body)
+        gateway, payload = self._resolve_model_only_body(body)
         return await gateway.images_create(payload)
 
     async def images_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        gateway, payload = self._resolve_images_body(body)
+        gateway, payload = self._resolve_model_only_body(body)
         async with aclosing(gateway.images_create_stream(payload)) as stream:
             async for chunk in stream:
                 yield chunk
 
     async def decisions_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        gateway, payload = self._resolve_decision_body(body)
+        gateway, payload = self._resolve_model_only_body(body)
         return await gateway.decisions_create(payload)
 
     async def embeddings_create(self, body: dict[str, Any]) -> dict[str, Any]:
-        gateway, payload = self._resolve_images_body(body)
+        gateway, payload = self._resolve_model_only_body(body)
         return await gateway.embeddings_create(payload)
 
     async def embeddings_models(self) -> dict[str, Any]:
@@ -209,13 +209,13 @@ class RoutingGateway:
         return result
 
     async def audio_speech_create_stream(self, body: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        gateway, payload = self._resolve_audio_speech_body(body)
+        gateway, payload = self._resolve_model_only_body(body)
         async with aclosing(gateway.audio_speech_create_stream(payload)) as stream:
             async for chunk in stream:
                 yield chunk
 
     def prepare_audio_speech_body(self, body: dict[str, Any]) -> None:
-        self._resolve_audio_speech_body(body)
+        self._resolve_model_only_body(body)
 
     async def audio_transcriptions_create(
         self,
@@ -295,22 +295,8 @@ class RoutingGateway:
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
         return self.gateways[provider_name], payload
 
-    def _resolve_decision_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
-        provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        payload = {
-            "model": self._normalize_upstream_model(provider_name, upstream_model),
-            "state": body.get("state"),
-            "questions": body.get("questions"),
-        }
-        return self.gateways[provider_name], payload
-
-    def _resolve_images_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
-        provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
-        payload = dict(body)
-        payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)
-        return self.gateways[provider_name], payload
-
-    def _resolve_audio_speech_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
+    def _resolve_model_only_body(self, body: dict[str, Any]) -> tuple[LLMGatewayPort, dict[str, Any]]:
+        """The provider gateway and a copy of body whose only change is the upstream model."""
         provider_name, upstream_model = parse_model_id(str(body.get("model", "")), self._known_providers())
         payload = dict(body)
         payload["model"] = self._normalize_upstream_model(provider_name, upstream_model)

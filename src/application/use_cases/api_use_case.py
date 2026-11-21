@@ -8,6 +8,7 @@ from src.infrastructure.logging.message_preview import (
     AUDIO_SPEECH_PATH,
     AUDIO_TRANSCRIPTIONS_PATH,
     CHAT_COMPLETIONS_PATH,
+    DECISIONS_PATH,
     EMBEDDINGS_PATH,
     IMAGE_ONLY_LABEL,
     IMAGES_PATH,
@@ -21,7 +22,7 @@ from src.infrastructure.logging.message_preview import (
 )
 
 from src.application.vcr_auto_selection_memory import VcrAutoSelectionMemory
-from src.application.vcr_auto_selector import VcrAutoSelector
+from src.application.vcr_auto_selector import SelectorAnswer, VcrAutoSelector
 from src.application.vcr_auto_walk import VcrAutoWalk, stamp_reply_model
 from src.domain.auto_tier import (
     AutoTier,
@@ -43,7 +44,7 @@ from src.domain.model_shelf import (
     shelf_model_ids,
 )
 from src.domain.classroom_model_choice import AUTOMATIC_MODELS, choice_accepts_model, student_list_ids
-from src.domain.vcr_auto import VCR_AUTO_MODEL_ID
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT, VCR_AUTO_MODEL_ID
 from src.domain.entities.auth import AuthContext
 from src.domain.entities.chat import ChatCompletionRequest, ChatMessage
 from src.domain.session_model_allowlist import allowlist_from_document, is_model_allowed
@@ -267,18 +268,8 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        if self._held_personal_key(auth_context):
-            return self._openai_model_list(
-                self._personal_list_ids(self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY))
-            )
-        if self._is_personal_api_key(auth_context):
-            return await self.gateway.images_models()
-        ids = self._shelf_model_ids(auth_context, IMAGE_SHELF_KEY)
-        if not ids:
-            raise ImageGenerationDisabledError()
-        return self._openai_model_list(
-            student_list_ids(self._classroom_model_choice(auth_context), ids)
-        )
+        del api_key, client_ip
+        return self._shelf_list_or_refuse(auth_context, IMAGE_SHELF_KEY, ImageGenerationDisabledError)
 
     async def embeddings_create(
         self,
@@ -329,18 +320,7 @@ class ApiUseCase:
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         del api_key, client_ip
-        if self._held_personal_key(auth_context):
-            return self._openai_model_list(
-                self._personal_list_ids(self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY))
-            )
-        if self._is_personal_api_key(auth_context):
-            return await self.gateway.embeddings_models()
-        ids = self._shelf_model_ids(auth_context, EMBEDDINGS_SHELF_KEY)
-        if not ids:
-            raise EmbeddingsDisabledError()
-        return self._openai_model_list(
-            student_list_ids(self._classroom_model_choice(auth_context), ids)
-        )
+        return self._shelf_list_or_refuse(auth_context, EMBEDDINGS_SHELF_KEY, EmbeddingsDisabledError)
 
     async def web_search(
         self,
@@ -399,8 +379,22 @@ class ApiUseCase:
         rest = [model_id for model_id in shelf_ids if model_id != VCR_AUTO_MODEL_ID]
         return [VCR_AUTO_MODEL_ID, *rest]
 
-    def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
+    def _shelf_list_or_refuse(
+        self,
+        auth_context: AuthContext | None,
+        shelf_key: str,
+        empty_error: type[Exception],
+    ) -> dict[str, Any]:
+        """The shared shelf list, except that a Classroom API Key with an empty shelf is refused."""
         ids = self._shelf_model_ids(auth_context, shelf_key)
+        if not ids and not self._is_personal_api_key(auth_context):
+            raise empty_error()
+        return self._student_list_from_shelf(auth_context, ids)
+
+    def _shelf_student_list(self, auth_context: AuthContext | None, shelf_key: str) -> dict[str, Any]:
+        return self._student_list_from_shelf(auth_context, self._shelf_model_ids(auth_context, shelf_key))
+
+    def _student_list_from_shelf(self, auth_context: AuthContext | None, ids: list[str]) -> dict[str, Any]:
         if self._held_personal_key(auth_context):
             return self._openai_model_list(self._personal_list_ids(ids))
         if self._is_personal_api_key(auth_context):
@@ -506,7 +500,7 @@ class ApiUseCase:
             return
         if not is_model_allowed(model_id, getter(auth_context.session_id)):
             raise ModelNotAllowedError()
-        if model_id and model_id in self._decision_model_ids(auth_context):
+        if model_id and model_id in self._shelf_model_ids(auth_context, DECISION_SHELF_KEY):
             raise ModelNotAllowedError()
 
     def validate_model_allowed(
@@ -711,10 +705,30 @@ class ApiUseCase:
             remembered = self.vcr_auto_selection_memory.recall(memory_key, last_user_text, all_tiers)
             if remembered is not None:
                 return remembered
-        selection = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        answer = await self.vcr_auto_selector.select(selector_shelf_ids(document), tiers, last_user_text)
+        self._record_selector_usage(auth_context, answer)
+        selection = answer.selection
         if selection is not None and memory_key is not None:
             self.vcr_auto_selection_memory.remember(memory_key, last_user_text, all_tiers, selection)
         return selection
+
+    def _record_selector_usage(self, auth_context: AuthContext | None, answer: SelectorAnswer) -> None:
+        """One Selector Usage per selector reply that reports tokens (ADR-0097).
+
+        An empty usage block, or one whose total is zero, reports no tokens and adds nothing.
+
+        Written at selection time, so a walk with no output does not lose it. Never a
+        Prompt Log. A record that cannot be stored must not fail the call it serves.
+        """
+        if answer.model_id is None or answer.usage is None:
+            return
+        usage = _usage_from_raw_usage(answer.usage)
+        if usage["total_tokens"] <= 0:
+            return
+        try:
+            self._record_token_usage(auth_context, answer.model_id, usage, SELECTOR_USAGE_ENDPOINT)
+        except Exception:
+            _logger.exception("Selector Usage write failed for %s", answer.model_id)
 
     def _selection_document(
         self, auth_context: AuthContext | None
@@ -997,20 +1011,14 @@ class ApiUseCase:
         self,
         body: dict[str, Any],
         auth_context: AuthContext | None,
-    ) -> dict[str, Any]:
+    ) -> tuple[str, dict[str, Any]]:
         walker = VcrAutoWalk()
 
         async def call(model_id: str) -> dict[str, Any]:
-            return await self.gateway.decisions_create(
-                {
-                    "model": model_id,
-                    "state": body.get("state"),
-                    "questions": body.get("questions"),
-                }
-            )
+            return await self.gateway.decisions_create({**body, "model": model_id})
 
-        hit = await walker.run(self._decision_model_ids(auth_context), call)
-        return hit.value
+        hit = await walker.run(self._shelf_model_ids(auth_context, DECISION_SHELF_KEY), call)
+        return hit.model_id, hit.value
 
     async def decisions_create(
         self,
@@ -1019,29 +1027,22 @@ class ApiUseCase:
         client_ip: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
-        del api_key, client_ip
-        model_id = body.get("model")
-        if self._held_personal_key(auth_context):
-            self._assert_holder_shelf(
-                self._decision_model_ids(auth_context),
-                model_id,
-                DecisionDisabledError,
-            )
-        elif self._is_personal_api_key(auth_context):
-            if self._use_vcr_auto_walk(str(model_id or ""), auth_context) and not self._decision_model_ids(
-                auth_context
-            ):
-                raise DecisionDisabledError()
-        else:
-            self._assert_classroom_decision_allowed(auth_context, model_id)
-        if self._use_vcr_auto_walk(str(model_id or ""), auth_context):
-            return await self._decisions_vcr_auto(body, auth_context)
-        payload = {
-            "model": model_id,
+        # The one place a Decision Request is cut down; every later step only replaces model.
+        decision_body = {
+            "model": body.get("model"),
             "state": body.get("state"),
             "questions": body.get("questions"),
         }
-        return await self.gateway.decisions_create(payload)
+        model_id = decision_body["model"]
+        self._assert_shelf_allowed(auth_context, DECISION_SHELF_KEY, model_id, DecisionDisabledError)
+        if self._use_vcr_auto_walk(model_id, auth_context):
+            model_id, response = await self._decisions_vcr_auto(decision_body, auth_context)
+        else:
+            response = await self.gateway.decisions_create(decision_body)
+        self._log_decision_request(
+            {**decision_body, "model": model_id}, response, api_key, client_ip, auth_context
+        )
+        return response
 
     def _is_personal_api_key(self, auth_context: AuthContext | None) -> bool:
         return auth_context is not None and auth_context.session_id is None
@@ -1065,32 +1066,6 @@ class ApiUseCase:
             and auth_context.session_id is None
             and auth_context.user_id is not None
         )
-
-    def _assert_classroom_decision_allowed(self, auth_context: AuthContext | None, model_id: Any) -> None:
-        decision_ids = self._decision_model_ids(auth_context)
-        if not decision_ids:
-            raise DecisionDisabledError()
-        if self._classroom_session(auth_context) and not choice_accepts_model(
-            self._classroom_model_choice(auth_context),
-            model_id,
-            decision_ids,
-        ):
-            raise ModelNotAllowedError()
-        if self._use_vcr_auto_walk(model_id, auth_context):
-            return
-        if not isinstance(model_id, str) or model_id not in decision_ids:
-            raise ModelNotAllowedError()
-
-    def _decision_model_ids(self, auth_context: AuthContext | None) -> list[str]:
-        if self._is_personal_api_key(auth_context):
-            return self._shelf_model_ids(auth_context, DECISION_SHELF_KEY)
-        if auth_context is None or auth_context.session_id is None:
-            return []
-        getter = getattr(self.api_key_repo, "get_decision_model_ids", None)
-        if not callable(getter):
-            return []
-        ids = getter(auth_context.session_id) or []
-        return [model_id for model_id in ids if isinstance(model_id, str) and model_id]
 
     def _classroom_session(self, auth_context: AuthContext | None) -> bool:
         return (
@@ -1374,27 +1349,19 @@ class ApiUseCase:
             **_token_counts(usage),
         )
 
-    def _log_images_request(
+    def _log_one_call(
         self,
-        body: dict[str, Any],
+        model: Any,
+        messages: list[dict[str, Any]],
+        assistant_messages: list[dict[str, Any]],
+        usage: dict[str, int] | None,
+        api_endpoint: str,
         api_key: str | None,
         client_ip: str | None,
         auth_context: AuthContext | None,
-        usage: dict[str, int] | None,
-        response: dict[str, Any] | None,
-        api_endpoint: str = IMAGES_PATH,
     ) -> None:
-        model = body.get("model")
+        """One non-chat call's validation line and Prompt Log, from its already-summarised sides."""
         model_name = model if isinstance(model, str) else "N/A"
-        prompt = body.get("prompt")
-        prompt_text = prompt if isinstance(prompt, str) else ""
-        messages = [{"role": "user", "content": prompt_text}] if prompt_text else []
-        image_count = _image_count_from_response(response)
-        assistant_messages = (
-            [{"role": "assistant", "content": f"[image: {image_count} generated]"}]
-            if image_count
-            else []
-        )
         is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
         self.logger.log_validation_result(
             teacher_name=teacher_name,
@@ -1415,6 +1382,30 @@ class ApiUseCase:
             api_endpoint=api_endpoint,
         )
 
+    def _log_images_request(
+        self,
+        body: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+        usage: dict[str, int] | None,
+        response: dict[str, Any] | None,
+        api_endpoint: str = IMAGES_PATH,
+    ) -> None:
+        prompt = body.get("prompt")
+        prompt_text = prompt if isinstance(prompt, str) else ""
+        messages = [{"role": "user", "content": prompt_text}] if prompt_text else []
+        image_count = _image_count_from_response(response)
+        assistant_messages = (
+            [{"role": "assistant", "content": f"[image: {image_count} generated]"}]
+            if image_count
+            else []
+        )
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, usage, api_endpoint,
+            api_key, client_ip, auth_context,
+        )
+
     def _log_embeddings_request(
         self,
         body: dict[str, Any],
@@ -1423,28 +1414,36 @@ class ApiUseCase:
         auth_context: AuthContext | None,
         usage: dict[str, int] | None,
     ) -> None:
-        model = body.get("model")
-        model_name = model if isinstance(model, str) else "N/A"
         messages = [{"role": "user", "content": _embeddings_log_input(body.get("input"))}]
         assistant_messages = [{"role": "assistant", "content": "已產生嵌入"}]
-        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
-        self.logger.log_validation_result(
-            teacher_name=teacher_name,
-            api_key=api_key or "未提供",
-            model=model_name,
-            messages=messages,
-            is_valid=is_valid,
-            client_ip=client_ip,
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, usage, EMBEDDINGS_PATH,
+            api_key, client_ip, auth_context,
         )
-        self._log_prompt(
-            auth_context,
-            messages,
-            model_name,
-            "ok" if is_valid else "rejected",
+
+    def _log_decision_request(
+        self,
+        body: dict[str, Any],
+        response: dict[str, Any],
+        api_key: str | None,
+        client_ip: str | None,
+        auth_context: AuthContext | None,
+    ) -> None:
+        """A Decision Prompt Log holds a summary of the call, never the raw body.
+
+        Both sides are cut with the same limit as every other Prompt Log's reply.
+        """
+        request_text, _ = truncate_log_text(_decision_request_summary(body))
+        reply_text, _ = truncate_log_text(_decision_reply_summary(response))
+        self._log_one_call(
+            body.get("model"),
+            [{"role": "user", "content": request_text}],
+            [{"role": "assistant", "content": reply_text}],
+            _usage_from_response(response),
+            DECISIONS_PATH,
+            api_key,
             client_ip,
-            usage,
-            assistant_messages=assistant_messages,
-            api_endpoint=EMBEDDINGS_PATH,
+            auth_context,
         )
 
     def _log_tts_request(
@@ -1456,8 +1455,6 @@ class ApiUseCase:
         byte_count: int,
         api_endpoint: str = AUDIO_SPEECH_PATH,
     ) -> None:
-        model = body.get("model")
-        model_name = model if isinstance(model, str) else "N/A"
         text_input = body.get("input")
         input_text = text_input if isinstance(text_input, str) else ""
         messages = [{"role": "user", "content": input_text}] if input_text else []
@@ -1466,24 +1463,9 @@ class ApiUseCase:
             if byte_count
             else []
         )
-        is_valid, teacher_name, auth_context = self._auth_for_log(api_key, auth_context)
-        self.logger.log_validation_result(
-            teacher_name=teacher_name,
-            api_key=api_key or "未提供",
-            model=model_name,
-            messages=messages,
-            is_valid=is_valid,
-            client_ip=client_ip,
-        )
-        self._log_prompt(
-            auth_context,
-            messages,
-            model_name,
-            "ok" if is_valid else "rejected",
-            client_ip,
-            None,
-            assistant_messages=assistant_messages,
-            api_endpoint=api_endpoint,
+        self._log_one_call(
+            body.get("model"), messages, assistant_messages, None, api_endpoint,
+            api_key, client_ip, auth_context,
         )
 
     def log_invalid_auth(self, api_key: str, client_ip: str | None = None) -> None:
@@ -1579,6 +1561,61 @@ def _embeddings_log_input(raw: Any) -> str:
     if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
         return "\n".join(raw)
     return "［非文字嵌入輸入］"
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _decision_state_part_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if isinstance(part, dict):
+        part_type = part.get("type")
+        if part_type == "text" and isinstance(part.get("text"), str):
+            return part["text"]
+        if isinstance(part_type, str) and "image" in part_type:
+            return IMAGE_ONLY_LABEL
+    return _compact_json(part)
+
+
+def _decision_state_text(state: Any) -> str:
+    """Text is kept, each image part becomes a stand-in, any other shape is compact JSON."""
+    if isinstance(state, str):
+        return state
+    if isinstance(state, list):
+        return "\n".join(_decision_state_part_text(part) for part in state)
+    if state is None:
+        return ""
+    return _compact_json(state)
+
+
+def _decision_request_summary(body: dict[str, Any]) -> str:
+    lines = [_decision_state_text(body.get("state"))]
+    questions = body.get("questions")
+    if isinstance(questions, dict):
+        for name, question in questions.items():
+            instructions = question.get("instructions") if isinstance(question, dict) else question
+            text = instructions if isinstance(instructions, str) else _compact_json(instructions)
+            lines.append(f"{name}：{text}")
+    elif questions is not None:
+        lines.append(_compact_json(questions))
+    return "\n".join(line for line in lines if line)
+
+
+def _decision_answer_value(answer: Any) -> str:
+    if isinstance(answer, dict) and isinstance(answer.get("type"), str) and answer["type"] in answer:
+        value = answer[answer["type"]]
+    else:
+        value = answer
+    return value if isinstance(value, str) else _compact_json(value)
+
+
+def _decision_reply_summary(response: dict[str, Any]) -> str:
+    answers = response.get("answers")
+    if not isinstance(answers, dict):
+        return ""
+    return "\n".join(f"{name}：{_decision_answer_value(answer)}" for name, answer in answers.items())
 
 
 def _usage_from_response(response: dict[str, Any]) -> dict[str, int]:

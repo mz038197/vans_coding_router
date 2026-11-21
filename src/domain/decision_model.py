@@ -24,26 +24,6 @@ def is_decision_shelf_model(model: Any) -> bool:
     )
 
 
-def decision_model_ids(document: list[Any] | None) -> list[str]:
-    ids: list[str] = []
-    seen: set[str] = set()
-    for provider in document or []:
-        if not isinstance(provider, dict):
-            continue
-        models = provider.get("models")
-        if not isinstance(models, list):
-            continue
-        for model in models:
-            if not is_decision_shelf_model(model):
-                continue
-            model_id = model["id"]
-            if model_id in seen:
-                continue
-            seen.add(model_id)
-            ids.append(model_id)
-    return ids
-
-
 def omit_decision_models_from_document(document: list[Any] | None) -> list[Any] | None:
     if document is None:
         return None

@@ -96,14 +96,15 @@ def test_images_create_stream_contract(fake_repo, fake_gateway, fake_logger):
     assert fake_gateway.last_images_body["stream"] is True
 
 
-def test_images_models_contract(fake_repo, fake_gateway, fake_logger):
+def test_images_models_for_a_key_with_no_holder_follow_the_shelf_rule(fake_repo, fake_gateway, fake_logger):
     client = build_test_client(fake_repo, fake_gateway, fake_logger)
     response = client.get(
         "/v1/images/models",
         headers={"Authorization": "Bearer valid-key"},
     )
     assert response.status_code == 200
-    assert response.json()["data"][0]["id"] == "flux.2-pro"
+    # No holder means no template, so the shelf is empty; the upstream list never leaks through.
+    assert response.json() == {"object": "list", "data": []}
 
 
 def _check_image_shelf(repo, klass, session, model_id: str) -> None:
@@ -229,3 +230,25 @@ async def test_ollama_provider_forwards_images(monkeypatch):
         "json": {"model": "x/z-image-turbo", "prompt": "test"},
     }
     assert result["data"] == []
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({"model": "openrouter@black-forest-labs/flux.2-pro"}, "缺少必填欄位 prompt"),
+        ({"model": "openrouter@black-forest-labs/flux.2-pro", "prompt": "   "}, "prompt 不可為空"),
+    ],
+)
+def test_images_create_without_a_prompt_is_a_400_naming_prompt(fake_repo, fake_gateway, fake_logger, body, message):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post("/v1/images", headers={"Authorization": "Bearer valid-key"}, json=body)
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "param": "prompt",
+            "code": "invalid_request_body",
+        }
+    }
+    assert fake_gateway.last_images_body is None

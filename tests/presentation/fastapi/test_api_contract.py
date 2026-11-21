@@ -4,6 +4,22 @@ from api_test_utils import build_test_client
 from fakes import FakeApiKeyRepository
 
 
+def _assert_malformed_body_refusal(response, *, param, message=None):
+    """ADR-0098：OpenAI 相容路徑上的格式錯誤是 400，OpenAI 錯誤格式，不回顯輸入。"""
+    assert response.status_code == 400
+    payload = response.json()
+    assert set(payload) == {"error"}
+    error = payload["error"]
+    assert error["type"] == "invalid_request_error"
+    assert error["code"] == "invalid_request_body"
+    assert error["param"] == param
+    if message is not None:
+        assert error["message"] == message
+    assert "Value error, " not in error["message"]
+    assert "input" not in error
+    assert "detail" not in payload
+
+
 def test_health_endpoint_contract(fake_repo, fake_gateway, fake_logger):
     client = build_test_client(fake_repo, fake_gateway, fake_logger)
     response = client.get("/health")
@@ -178,10 +194,7 @@ def test_chat_completion_rejects_empty_content(fake_repo, fake_gateway, fake_log
         headers={"Authorization": "Bearer valid-key"},
         json={"model": "fake-model", "messages": [{"role": "user", "content": ""}]},
     )
-    # Pydantic 驗證失敗應返回 422 Unprocessable Entity
-    assert response.status_code == 422
-    payload = response.json()
-    assert "detail" in payload
+    _assert_malformed_body_refusal(response, param="messages[0]", message="訊息內容不能為空")
 
 
 def test_chat_completion_rejects_null_content(fake_repo, fake_gateway, fake_logger):
@@ -192,10 +205,7 @@ def test_chat_completion_rejects_null_content(fake_repo, fake_gateway, fake_logg
         headers={"Authorization": "Bearer valid-key"},
         json={"model": "fake-model", "messages": [{"role": "user", "content": None}]},
     )
-    # Pydantic 驗證失敗應返回 422 Unprocessable Entity
-    assert response.status_code == 422
-    payload = response.json()
-    assert "detail" in payload
+    _assert_malformed_body_refusal(response, param="messages[0]", message="訊息內容不能為空")
 
 
 def test_chat_completion_with_openai_text_format(fake_repo, fake_gateway, fake_logger):
@@ -432,7 +442,7 @@ def test_chat_completion_rejects_an_empty_messages_array(fake_repo, fake_gateway
         headers={"Authorization": "Bearer valid-key"},
         json={"model": "fake-model", "messages": []},
     )
-    assert response.status_code == 422
+    _assert_malformed_body_refusal(response, param="messages", message="messages 不可為空")
 
 
 def test_chat_completion_accepts_a_user_message_that_has_only_older_images(fake_repo, fake_gateway, fake_logger):
@@ -465,7 +475,7 @@ def test_chat_completion_rejects_a_user_message_with_no_text_and_an_empty_images
         headers={"Authorization": "Bearer valid-key"},
         json={"model": "fake-model", "messages": [{"role": "user", "content": "", "images": []}]},
     )
-    assert response.status_code == 422
+    _assert_malformed_body_refusal(response, param="messages[0]", message="訊息內容不能為空")
 
 
 def test_chat_completion_rejects_a_system_message_that_has_only_older_images(fake_repo, fake_gateway, fake_logger):
@@ -475,4 +485,49 @@ def test_chat_completion_rejects_a_system_message_that_has_only_older_images(fak
         headers={"Authorization": "Bearer valid-key"},
         json={"model": "fake-model", "messages": [{"role": "system", "content": "", "images": ["/9j/4AAQSkZJRg=="]}]},
     )
-    assert response.status_code == 422
+    _assert_malformed_body_refusal(response, param="messages[0]", message="訊息內容不能為空")
+    assert "/9j/4AAQSkZJRg==" not in response.text
+
+
+def test_chat_completion_malformed_body_never_echoes_the_conversation(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={
+            "model": "fake-model",
+            "messages": [
+                {"role": "user", "content": "我的秘密作業答案是 42"},
+                {"role": "assistant", "content": ""},
+            ],
+        },
+    )
+    _assert_malformed_body_refusal(response, param="messages[1]")
+    assert "秘密作業" not in response.text
+    assert "42" not in response.text
+
+
+def test_chat_completion_with_a_missing_model_names_the_field(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key"},
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    _assert_malformed_body_refusal(response, param="model", message="缺少必填欄位 model")
+    assert "hello" not in response.text
+
+
+def test_chat_completion_with_a_body_that_is_not_json_is_a_400(fake_repo, fake_gateway, fake_logger):
+    client = build_test_client(fake_repo, fake_gateway, fake_logger)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer valid-key", "Content-Type": "application/json"},
+        content=b'{"model": "fake-model", "messages": [secret',
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["type"] == "invalid_request_error"
+    assert error["param"] is None
+    assert error["message"] == "請求內容不是有效的 JSON"
+    assert "secret" not in response.text

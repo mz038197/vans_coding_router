@@ -1,7 +1,13 @@
 import logging
+import types
+import typing
+from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from src.domain.errors import (
     AdminBusinessError,
@@ -9,6 +15,7 @@ from src.domain.errors import (
     ApiKeyNotStartedError,
     AppError,
     AuthenticationError,
+    DecisionDisabledError,
     DecisionNotSupportedError,
     EmbeddingsDisabledError,
     EmbeddingsNotSupportedError,
@@ -90,7 +97,105 @@ def log_operational_failure(method: str, path: str, exc: BaseException) -> None:
     )
 
 
+_PYDANTIC_VALUE_ERROR_PREFIX = "Value error, "
+
+
+def _union_members(annotation: Any) -> tuple[Any, ...]:
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is types.UnionType:
+        return typing.get_args(annotation)
+    return (annotation,)
+
+
+def _list_item_type(annotation: Any) -> Any:
+    for member in _union_members(annotation):
+        if typing.get_origin(member) in (list, tuple, set, frozenset):
+            args = typing.get_args(member)
+            return args[0] if args else Any
+    return None
+
+
+def _model_field_type(annotation: Any, name: str) -> Any:
+    for member in _union_members(annotation):
+        if isinstance(member, type) and issubclass(member, BaseModel):
+            for field_name, field in member.model_fields.items():
+                if name in (field_name, field.alias):
+                    return field.annotation
+    return None
+
+
+def _validation_param(loc: tuple, body_type: Any) -> str | None:
+    """The failing field below the body, named only by the schema (ADR-0098).
+
+    The walk follows the body schema: a field name or a list index is kept; anything
+    the schema does not name, such as a caller's dict key, ends the param there.
+    """
+    if not loc or loc[0] != "body":
+        return ".".join(str(part) for part in loc) or None
+    param = ""
+    current = body_type
+    for part in loc[1:]:
+        if isinstance(part, int):
+            current = _list_item_type(current)
+            if current is None:
+                break
+            param += f"[{part}]"
+        else:
+            current = _model_field_type(current, str(part))
+            if current is None:
+                break
+            param += f".{part}" if param else str(part)
+    return param or None
+
+
+def _body_type(request: Request) -> Any:
+    body_field = getattr(request.scope.get("route"), "body_field", None)
+    field_info = getattr(body_field, "field_info", None)
+    return getattr(field_info, "annotation", None)
+
+
+def _validation_message(error: dict, param: str | None) -> str:
+    # 只用錯誤類型與欄位名組句子：Pydantic 的英文訊息可能夾帶呼叫端的輸入。
+    error_type = error.get("type", "")
+    if error_type == "value_error":
+        message = str(error.get("msg", ""))
+        if message.startswith(_PYDANTIC_VALUE_ERROR_PREFIX):
+            message = message[len(_PYDANTIC_VALUE_ERROR_PREFIX):]
+        return message
+    if error_type == "json_invalid":
+        return "請求內容不是有效的 JSON"
+    if param is None:
+        return "請求內容格式不正確"
+    if error_type == "missing":
+        return f"缺少必填欄位 {param}"
+    if error_type == "too_short":
+        return f"{param} 不可為空"
+    return f"{param} 格式不正確"
+
+
+def _malformed_openai_request_response(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """ADR-0098：OpenAI 相容路徑的格式錯誤一律 400，只回報第一個錯誤，不回顯輸入。"""
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+    # JSON 解析失敗時 loc 帶的是位元組位置，不是欄位。
+    loc = () if first.get("type") == "json_invalid" else tuple(first.get("loc", ()))
+    param = _validation_param(loc, _body_type(request))
+    return openai_error_response(
+        400,
+        _validation_message(first, param),
+        error_type="invalid_request_error",
+        code="invalid_request_body",
+        param=param,
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+        if is_openai_compatible_path(request.url.path):
+            return _malformed_openai_request_response(request, exc)
+        return await request_validation_exception_handler(request, exc)
+
     @app.exception_handler(AuthenticationError)
     async def handle_authentication_error(request: Request, exc: AuthenticationError):
         if is_openai_compatible_path(request.url.path):
@@ -240,6 +345,17 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(EmbeddingsDisabledError)
     async def handle_embeddings_disabled(request: Request, exc: EmbeddingsDisabledError):
+        if is_openai_compatible_path(request.url.path):
+            return openai_error_response(
+                exc.status_code,
+                exc.message,
+                error_type="invalid_request_error",
+                code=exc.code,
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(DecisionDisabledError)
+    async def handle_decision_disabled(request: Request, exc: DecisionDisabledError):
         if is_openai_compatible_path(request.url.path):
             return openai_error_response(
                 exc.status_code,

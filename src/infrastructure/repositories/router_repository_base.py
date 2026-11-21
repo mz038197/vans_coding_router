@@ -13,7 +13,6 @@ from src.domain.entities.agent_action_audit import AgentActionAudit
 from src.domain.entities.auth import AuthContext, PortalSessionContext
 from src.domain.decision_model import (
     DECISION_MODEL_UNCHANGED,
-    decision_model_ids,
     normalize_decision_model,
 )
 from src.domain.auto_tier import TierSelection, without_auto_tiers
@@ -24,6 +23,7 @@ from src.domain.classroom_model_choice import (
     PICKED_MODELS,
     normalize_classroom_model_choice,
 )
+from src.domain.vcr_auto import SELECTOR_USAGE_ENDPOINT
 from src.domain.session_model_allowlist import (
     MODEL_ALLOWLIST_UNCHANGED,
     SESSION_CHAT_LANGUAGE_MODELS_UNCHANGED,
@@ -37,6 +37,11 @@ from src.infrastructure.repositories.router_repository_helpers import dt, parse_
 
 _ARCHIVE_BATCH_SIZE = 20
 _DEFAULT_SESSION_LENGTH = timedelta(hours=2)
+# A Selector Usage record counts toward token totals but is not a request (ADR-0097).
+# Its one placeholder takes SELECTOR_USAGE_ENDPOINT.
+_REQUEST_COUNT_COLUMN = (
+    "COUNT(CASE WHEN COALESCE(t.api_endpoint, '') <> ? THEN t.id END) AS request_count"
+)
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -1404,21 +1409,6 @@ class RouterRepositoryBase(ABC):
             value = row["decision_model"] if "decision_model" in row.keys() else ""
             return value if isinstance(value, str) else ""
 
-    def get_decision_model_ids(self, session_id: int) -> list[str]:
-        with self._connect() as conn:
-            row = conn.execute(
-                self._sql(
-                    "SELECT session_chat_language_models_json FROM class_sessions WHERE id = ?"
-                ),
-                (session_id,),
-            ).fetchone()
-            if not row:
-                return []
-            document = parse_session_chat_language_models_json(
-                row["session_chat_language_models_json"]
-            )
-            return decision_model_ids(document)
-
     def get_session_chat_language_models(self, session_id: int) -> list[Any] | None:
         """The stored Session Chat Language Models document, as saved (router-only fields kept)."""
         with self._connect() as conn:
@@ -1786,12 +1776,12 @@ class RouterRepositoryBase(ABC):
         with self._connect() as conn:
             rows = conn.execute(
                 self._sql(
-                    """
+                    f"""
                     SELECT u.id AS user_id, u.name, u.email,
                            COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                            COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                            COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                           COUNT(t.id) AS request_count
+                           {_REQUEST_COUNT_COLUMN}
                     FROM class_members m
                     JOIN users u ON u.id = m.user_id
                     JOIN classes c ON c.id = m.class_id
@@ -1801,19 +1791,19 @@ class RouterRepositoryBase(ABC):
                     ORDER BY total_tokens DESC, u.name
                     """
                 ),
-                (class_id, teacher_id),
+                (SELECTOR_USAGE_ENDPOINT, class_id, teacher_id),
             ).fetchall()
             result = []
             for row in rows:
                 item = _usage_ints(dict(row))
                 sessions = conn.execute(
                     self._sql(
-                        """
+                        f"""
                         SELECT s.id AS session_id, s.invite_code,
                                COALESCE(SUM(t.prompt_tokens), 0) AS prompt_tokens,
                                COALESCE(SUM(t.completion_tokens), 0) AS completion_tokens,
                                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                               COUNT(t.id) AS request_count
+                               {_REQUEST_COUNT_COLUMN}
                         FROM class_sessions s
                         LEFT JOIN token_usage t ON t.session_id = s.id AND t.user_id = ?
                         WHERE s.class_id = ?
@@ -1821,7 +1811,7 @@ class RouterRepositoryBase(ABC):
                         ORDER BY s.created_at DESC
                         """
                     ),
-                    (item["user_id"], class_id),
+                    (SELECTOR_USAGE_ENDPOINT, item["user_id"], class_id),
                 ).fetchall()
                 item["sessions"] = [_usage_ints(dict(session)) for session in sessions]
                 result.append(item)
