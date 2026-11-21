@@ -266,3 +266,38 @@ test("a model on a shelf, such as the image shelf, still shows its teacher-given
   const html = renderCourseCardLogs([logRow("openrouter@black-forest-labs/flux.2-pro")], "", session);
   assert.match(html, />Flux Pro</);
 });
+
+function usageRows(items, sessionId) {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(extractNamedFunction(portalHtml, "courseCardUsageRows"), context);
+  return Array.from(context.courseCardUsageRows(items, sessionId), (row) => ({
+    user_id: row.user_id,
+    total_tokens: row.total_tokens,
+    request_count: row.request_count,
+  }));
+}
+
+test("a student whose only spend in a sitting is Selector Usage still has a usage row", () => {
+  const items = [
+    { user_id: 1, sessions: [{ session_id: 13, total_tokens: 500, request_count: 2 }] },
+    { user_id: 2, sessions: [{ session_id: 13, total_tokens: 40, request_count: 0 }] },
+  ];
+  assert.deepEqual(usageRows(items, 13), [
+    { user_id: 1, total_tokens: 500, request_count: 2 },
+    { user_id: 2, total_tokens: 40, request_count: 0 },
+  ]);
+});
+
+test("a request that reported no tokens still has a usage row", () => {
+  const items = [{ user_id: 1, sessions: [{ session_id: 13, total_tokens: 0, request_count: 1 }] }];
+  assert.deepEqual(usageRows(items, 13), [{ user_id: 1, total_tokens: 0, request_count: 1 }]);
+});
+
+test("a student with neither tokens nor requests in that sitting has no usage row", () => {
+  const items = [
+    { user_id: 1, sessions: [{ session_id: 13, total_tokens: 0, request_count: 0 }] },
+    { user_id: 2, sessions: [{ session_id: 12, total_tokens: 90, request_count: 1 }] },
+  ];
+  assert.deepEqual(usageRows(items, 13), []);
+});
