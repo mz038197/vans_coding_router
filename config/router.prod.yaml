@@ -101,3 +101,10 @@ oauth:
         - "https://club.vanscoding.com/auth/callback"
         - "https://club-booking-board.vercel.app/auth/callback"
       scopes: [openid, teacher]
+    # 路考網站：學生走 classroom，老師走 openid teacher（road-test ADR 0003）。
+    road-test:
+      name: "路考網站"
+      redirect_uris:
+        - "https://lukao.vanscoding.com/auth/callback"
+      scopes: [classroom, openid, teacher]
+      client_secret_sha256: "e20277b6be2464e06a654e006265825aad88106f0689293b2b5d72cec3d91928"
