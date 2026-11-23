@@ -246,6 +246,9 @@ def is_loopback_url(url: str) -> bool:
         return False
 
 
+MIN_SESSION_SECRET_LENGTH = 32
+
+
 def validate_portal_auth_settings(settings: RouterSettings) -> None:
     if is_loopback_url(settings.public_url):
         return
@@ -253,6 +256,12 @@ def validate_portal_auth_settings(settings: RouterSettings) -> None:
         raise ValueError("Development login is only allowed on a loopback public URL")
     if not (settings.auth.google_client_id and settings.auth.google_client_secret):
         raise ValueError("Google OAuth configuration is required for public deployment")
+    # 這把密語會算出課堂金鑰、簽授權碼；程式預設值和範例值都短於這個長度
+    if len(settings.auth.session_secret.strip()) < MIN_SESSION_SECRET_LENGTH:
+        raise ValueError(
+            f"SESSION_SECRET must be a random value of at least {MIN_SESSION_SECRET_LENGTH} characters "
+            "for public deployment"
+        )
 
 
 def _parse_prompt_log_settings(raw: dict[str, Any] | None) -> PromptLogSettings:

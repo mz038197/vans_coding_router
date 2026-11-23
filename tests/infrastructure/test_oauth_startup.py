@@ -64,6 +64,7 @@ CLIENTS = [
 def _clean_environment(monkeypatch):
     for name in ("VCR_SERVICE_TOKENS", "FLY_APP_NAME", "DATABASE_URL", "PUBLIC_URL", "VCR_OAUTH_SIGNING_KEY"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "x" * 32)
 
 
 def test_clients_load_from_router_yaml(tmp_path):
