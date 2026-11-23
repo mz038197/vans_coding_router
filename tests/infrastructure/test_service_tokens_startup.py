@@ -75,6 +75,7 @@ def test_local_development_starts_without_service_tokens(tmp_path):
 
 def test_production_refuses_to_start_without_service_tokens(tmp_path, monkeypatch):
     monkeypatch.setenv("FLY_APP_NAME", "vans-coding-router")
+    monkeypatch.setenv("SESSION_SECRET", "x" * 32)
 
     with pytest.raises(ValueError, match="VCR_SERVICE_TOKENS"):
         build_container(request_timeout=1.0, config_path=_config(tmp_path))

@@ -65,6 +65,14 @@ def test_public_deployment_refuses_a_weak_session_secret(tmp_path, monkeypatch, 
         build_container(request_timeout=1.0, config_path=config)
 
 
+def test_fly_deployment_with_a_loopback_url_refuses_a_weak_session_secret(tmp_path, monkeypatch):
+    config = _config(tmp_path, monkeypatch, "http://127.0.0.1:8080", None)
+    monkeypatch.setenv("FLY_APP_NAME", "vans-coding-router")
+
+    with pytest.raises(ValueError, match="SESSION_SECRET"):
+        build_container(request_timeout=1.0, config_path=config)
+
+
 def test_public_deployment_starts_with_a_32_character_session_secret(tmp_path, monkeypatch):
     config = _config(tmp_path, monkeypatch, "https://router.example", "x" * 32)
 
