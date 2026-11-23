@@ -87,7 +87,7 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert clients["club-booking-admin"].scopes == ("openid", "teacher")
     assert clients["club-booking-admin"].redirect_uris == ("http://localhost:3000/auth/callback",)
     prod = load_router_settings("config/router.prod.yaml").oauth.clients
-    assert set(prod) == {"agent-builder", "club-booking-admin"}
+    assert set(prod) == {"agent-builder", "club-booking-admin", "road-test"}
     assert prod["club-booking-admin"].redirect_uris == (
         "https://club.vanscoding.com/auth/callback",
         "https://club-booking-board.vercel.app/auth/callback",
