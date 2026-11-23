@@ -64,6 +64,7 @@ CLIENTS = [
 def _clean_environment(monkeypatch):
     for name in ("VCR_SERVICE_TOKENS", "FLY_APP_NAME", "DATABASE_URL", "PUBLIC_URL", "VCR_OAUTH_SIGNING_KEY"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "x" * 32)
 
 
 def test_clients_load_from_router_yaml(tmp_path):
@@ -87,7 +88,7 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert clients["club-booking-admin"].scopes == ("openid", "teacher")
     assert clients["club-booking-admin"].redirect_uris == ("http://localhost:3000/auth/callback",)
     prod = load_router_settings("config/router.prod.yaml").oauth.clients
-    assert set(prod) == {"agent-builder", "club-booking-admin"}
+    assert set(prod) == {"agent-builder", "club-booking-admin", "road-test"}
     assert prod["club-booking-admin"].redirect_uris == (
         "https://club.vanscoding.com/auth/callback",
         "https://club-booking-board.vercel.app/auth/callback",
