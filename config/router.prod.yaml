@@ -109,3 +109,10 @@ oauth:
         - "https://lukao.vanscoding.com/auth/callback"
       scopes: [classroom, openid, teacher]
       client_secret_sha256: "e20277b6be2464e06a654e006265825aad88106f0689293b2b5d72cec3d91928"
+    # 題庫系統：只有老師登入，走 openid teacher；學生不登入（vans_quizzes_system ADR 0007）。
+    quizzes:
+      name: "智慧題庫"
+      redirect_uris:
+        - "https://quizzes.vanscoding.com/auth/callback"
+      scopes: [openid, teacher]
+      client_secret_sha256: "8970b5501eec62a1c8c99a996448f59c8bf9ae042ab74000e2694771d4be8bad"

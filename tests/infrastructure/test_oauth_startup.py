@@ -80,7 +80,7 @@ def test_clients_load_from_router_yaml(tmp_path):
     assert not booking.has_secret
 
 
-def test_example_config_registers_agent_builder_and_club_booking():
+def test_example_and_prod_configs_register_their_oauth_clients():
     clients = load_router_settings("config/router.example.yaml").oauth.clients
 
     assert clients["agent-builder"].scopes == ("classroom",)
@@ -88,7 +88,16 @@ def test_example_config_registers_agent_builder_and_club_booking():
     assert clients["club-booking-admin"].scopes == ("openid", "teacher")
     assert clients["club-booking-admin"].redirect_uris == ("http://localhost:3000/auth/callback",)
     prod = load_router_settings("config/router.prod.yaml").oauth.clients
-    assert set(prod) == {"agent-builder", "club-booking-admin", "road-test"}
+    assert set(prod) == {"agent-builder", "club-booking-admin", "road-test", "quizzes"}
+    # vans_quizzes_system: teacher sign-in only (its ADR 0007), so no classroom scope.
+    assert prod["quizzes"].redirect_uris == ("https://quizzes.vanscoding.com/auth/callback",)
+    assert prod["quizzes"].scopes == ("openid", "teacher")
+    assert len(prod["quizzes"].client_secret_sha256) == 64
+    assert clients["quizzes"].scopes == ("openid", "teacher")
+    assert clients["quizzes"].redirect_uris == (
+        "http://localhost:5000/auth/callback",
+        "http://127.0.0.1:5000/auth/callback",
+    )
     assert prod["club-booking-admin"].redirect_uris == (
         "https://club.vanscoding.com/auth/callback",
         "https://club-booking-board.vercel.app/auth/callback",
